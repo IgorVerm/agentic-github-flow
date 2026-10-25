@@ -104,6 +104,15 @@ Nothing is sent anywhere except the git and plugin fetches: no telemetry.
 3. A repository's own `AGENTS.md` wins where it is stricter or says it deviates.
 4. An overlay wins over the core rules where it says it deviates.
 
+## Using it at work
+
+Before you use this on an employer's or a client's code, check that organisation's AI rules:
+which tools and plans are allowed, which data may go into a prompt or leave the machine, and
+who owns work made with an agent. The rules point agents to that policy; this repository never
+holds it. Put the pointer in the organisation's overlay, starting from
+`templates/company-overlay/AGENTS.md`. Without an overlay, an agent asks you where the policy is
+before it works on the organisation's code or data.
+
 ## Company and personal overlays
 
 An overlay is a git repository (or a folder) with an `AGENTS.md` at its root. Its text loads

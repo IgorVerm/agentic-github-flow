@@ -1,0 +1,27 @@
+{
+  "name": "agentic-github-flow-web-deploy",
+  "version": "0.1.0",
+  "description": "Pre-deploy hardening check for a website on Vercel with Supabase and optional Google sign-in.",
+  "author": {
+    "name": "MAI-Tech",
+    "url": "https://mai-tech.be"
+  },
+  "homepage": "https://mai-tech.be",
+  "repository": "https://github.com/IgorVerm/agentic-github-flow",
+  "license": "Apache-2.0",
+  "keywords": [
+    "security",
+    "vercel",
+    "supabase",
+    "deploy"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "agentic-github-flow: Web deploy check",
+    "shortDescription": "Pre-deploy hardening check for a website on Vercel with Supabase and optional Google sign-in.",
+    "longDescription": "Reads the repository (migrations, configuration, headers, auth flow, dependencies) and gives the user a dashboard checklist and a ready or not-ready verdict. Deploys nothing and touches no live project.",
+    "developerName": "MAI-Tech",
+    "category": "Coding",
+    "websiteURL": "https://mai-tech.be"
+  }
+}

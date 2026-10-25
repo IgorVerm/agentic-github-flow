@@ -15,13 +15,16 @@ What it scans:
   outside a git repository every file under <repo> except build and dependency folders.
   Ignored files such as `.env` are left alone: they are where real secrets are meant to live;
 - `--staged`: the lines a commit would add (`git diff --cached`), for a pre-commit hook;
-- `--history`: every line ever added on any branch (`git log -p --all`), where a removed secret
-  still lives until it is revoked.
+- `--history`: every line ever added on any branch (`git log -p --all`, merges against their
+  first parent), where a removed secret still lives until it is revoked. Diffs are read as text
+  whatever `.gitattributes` says, so `* -diff` or a textconv driver hides nothing.
 
 What it looks for:
-- token formats of the services in use: Supabase secret keys (`sb_secret_`) and JWTs whose role
+- token formats of common services: Supabase secret keys (`sb_secret_`) and JWTs whose role
   is `service_role` (a JWT with role `anon` is the public key and is skipped), Stripe, Resend,
-  OpenAI, Anthropic, GitHub, Google, AWS and Slack tokens, private-key blocks;
+  OpenAI, Anthropic, GitHub, GitLab, npm, Hugging Face, SendGrid, Google, AWS and Slack tokens,
+  private-key blocks, and a password in a database or queue URL (local development defaults
+  such as `postgres:postgres@localhost` are skipped);
 - an assignment of a variable named like a secret (ending in KEY, SECRET, TOKEN, PASSWORD,
   PASSWD or CREDENTIALS) to a literal value that is not a placeholder. Names with a public
   prefix (`NEXT_PUBLIC_`, `VITE_`, `PUBLIC_`) are left to the token patterns above;
@@ -61,7 +64,18 @@ TOKEN_PATTERNS = [
     ('aws-access-key-id', re.compile(r'\b(?:AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16}\b')),
     ('slack-token', re.compile(r'\bxox[baprs]-[0-9A-Za-z-]{10,}')),
     ('private-key-block', re.compile(r'-----BEGIN (?:[A-Z]+ )?PRIVATE KEY(?: BLOCK)?-----')),
+    ('gitlab-token', re.compile(r'\bglpat-[A-Za-z0-9_-]{20,}')),
+    ('npm-token', re.compile(r'\bnpm_[A-Za-z0-9]{36}\b')),
+    ('huggingface-token', re.compile(r'\bhf_[A-Za-z0-9]{30,}')),
+    ('sendgrid-api-key', re.compile(r'\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}')),
 ]
+# a password inside a connection URL; local development defaults are not secrets
+DB_URL = re.compile(r'\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|rediss|amqps?)'
+                    r'://([^\s:/@]+):([^\s@/]+)@([^\s/:?]+)')
+LOCAL_HOSTS = {'localhost', '127.0.0.1', '0.0.0.0', 'db', 'postgres', 'mysql', 'redis', 'host',
+               'database', 'example.com'}
+DEFAULT_PASSWORDS = {'postgres', 'password', 'pass', 'secret', 'root', 'example', 'test',
+                     'admin', 'mysql', 'redis', 'guest'}
 JWT = re.compile(r'\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}')
 ASSIGNMENT = re.compile(
     r'(?<![A-Za-z0-9_])(?:export\s+)?([A-Z][A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIALS))'
@@ -150,6 +164,12 @@ def findings_in_line(line):
     for name, rx in TOKEN_PATTERNS:
         if any(not is_placeholder(m.group(0)) for m in rx.finditer(line)):
             found.append(name)
+    for m in DB_URL.finditer(line):
+        user, password, host = m.groups()
+        if not (is_placeholder(password) or password.lower() in DEFAULT_PASSWORDS or
+                password == user or host.lower() in LOCAL_HOSTS or
+                host.lower().endswith(('.example', '.test', '.invalid', '.local'))):
+            found.append('connection-url-password')
     for m in JWT.finditer(line):
         role = jwt_role(m.group(0))
         if role == 'service_role':
@@ -171,10 +191,23 @@ def findings_in_line(line):
 
 
 def git(repo, *args, check=True):
-    r = subprocess.run(['git', '-C', repo, *args], capture_output=True, text=True, errors='replace')
+    r = subprocess.run(['git', '-C', repo, *args], capture_output=True, text=True,
+                       encoding='utf-8', errors='replace')
     if check and r.returncode != 0:
-        raise RuntimeError('git %s: %s' % (args[0], r.stderr.strip()))
+        raise RuntimeError('git %s: %s' % (' '.join(a for a in args if not a.startswith('-'))[:40],
+                                           r.stderr.strip()))
     return r.stdout
+
+
+def diff_path(header):
+    """The path of a `+++ b/<path>` header; git still C-quotes names with tabs or quotes."""
+    if header.startswith('"') and header.endswith('"'):
+        try:
+            header = header[1:-1].encode('latin-1', 'backslashreplace').decode('unicode_escape') \
+                .encode('latin-1').decode('utf-8', 'replace')
+        except (UnicodeError, ValueError):
+            header = header[1:-1]
+    return header[2:] if header.startswith('b/') else header
 
 
 def is_git_repo(repo):
@@ -235,8 +268,7 @@ def scan_diff(text, kind, excludes):
             continue
         elif raw.startswith('+++ ') and after_minus:
             after_minus = False
-            path = raw[4:].strip()
-            path = path[2:] if path.startswith('b/') else path
+            path = diff_path(raw[4:].strip())
             if path != '/dev/null' and not excluded(path, excludes):
                 pat = secret_file_name(path)
                 if pat:
@@ -256,12 +288,20 @@ def scan_diff(text, kind, excludes):
     return results
 
 
+# Every diff as text, whatever .gitattributes says (`* -diff` would hide a file's lines, a
+# textconv driver would show a converted text), merges against their first parent (so a secret
+# added while resolving a conflict is seen), and paths unquoted (so `clé.pem` matches).
+DIFF_OPTIONS = ['--no-color', '-U0', '--no-ext-diff', '--text', '--no-textconv']
+
+
 def scan_staged(repo, excludes):
-    return scan_diff(git(repo, 'diff', '--cached', '--no-color', '-U0', '--no-ext-diff'), 'staged', excludes)
+    return scan_diff(git(repo, '-c', 'core.quotePath=false', 'diff', '--cached', *DIFF_OPTIONS),
+                     'staged', excludes)
 
 
 def scan_history(repo, excludes):
-    text = git(repo, 'log', '--all', '--no-color', '-p', '-U0', '--no-ext-diff', '--format=@@commit %H')
+    text = git(repo, '-c', 'core.quotePath=false', 'log', '--all', '-p', *DIFF_OPTIONS,
+               '--diff-merges=first-parent', '--format=@@commit %H')
     return scan_diff(text, 'history', excludes)
 
 

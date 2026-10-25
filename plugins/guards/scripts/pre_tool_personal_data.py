@@ -40,8 +40,9 @@ Not distinguished: the user's own machines (an ssh to one counts as leaving), an
 or addresses of other people (too many false matches among ids, dates and numbers).
 
 The user's identifiers are read at run time, never from a committed file: `git config --global`
-user.name and user.email, the gh login (`gh config get user -h github.com`), the local account
-name, and one identifier per line in
+user.name and user.email, the gh login (the `user` of `github.com` in gh's `hosts.yml`, read as
+a file so that no `gh` process starts on every call), the local account name, and one identifier
+per line in
 `${XDG_CONFIG_HOME:-~/.config}/agentic-github-flow/personal-data` (outside every repository, so it
 cannot be committed; lines may start with `email:`, `phone:` or `name:`). The first name alone is
 not matched: "<first name>'s ruling" in an issue comment is routine. Paths under the home folder
@@ -132,6 +133,42 @@ def _run(args):
         return ''
 
 
+def gh_config_dir():
+    """gh's configuration folder, in gh's own order of precedence."""
+    if os.environ.get('GH_CONFIG_DIR'):
+        return os.environ['GH_CONFIG_DIR']
+    if os.environ.get('XDG_CONFIG_HOME'):
+        return os.path.join(os.environ['XDG_CONFIG_HOME'], 'gh')
+    if os.name == 'nt' and os.environ.get('AppData'):
+        return os.path.join(os.environ['AppData'], 'GitHub CLI')
+    return os.path.join(os.path.expanduser('~'), '.config', 'gh')
+
+
+def gh_login():
+    """The `user` key of the `github.com:` block in gh's hosts.yml; '' when there is none."""
+    try:
+        with open(os.path.join(gh_config_dir(), 'hosts.yml'), encoding='utf-8') as f:
+            lines = f.read().splitlines()
+    except (OSError, UnicodeDecodeError):
+        return ''
+    in_block, indent = False, None
+    for line in lines:
+        if not line.strip() or line.lstrip().startswith('#'):
+            continue
+        depth = len(line) - len(line.lstrip())
+        if depth == 0:
+            in_block = re.match(r'''["']?github\.com["']?\s*:\s*$''', line) is not None
+            indent = None
+            continue
+        if not in_block:
+            continue
+        indent = depth if indent is None else indent
+        m = re.match(r'user\s*:\s*(.*?)\s*$', line.strip())
+        if depth == indent and m:
+            return m.group(1).strip('"\'')
+    return ''
+
+
 def identifiers():
     """[(label, pattern, is_login)] for the user's identifiers, read now; empty when none are set."""
     found = []
@@ -143,7 +180,7 @@ def identifiers():
             found += _email_patterns(value, "the user's e-mail address (git user.email)")
         elif key == 'user.name' and value:
             found += _name_patterns(value, "the user's name (git user.name)")
-    login = _run(['gh', 'config', 'get', 'user', '-h', 'github.com']).strip()
+    login = gh_login()
     if len(login) >= 3:
         found.append(("the user's GitHub login (gh)", re.compile(_boundary(re.escape(login)), re.I),
                       True))

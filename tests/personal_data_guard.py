@@ -7,19 +7,20 @@ identifier appears here. ASK lists calls that send that identity, or someone's e
 off the machine; each would be a leak if the hook let it pass. PASS lists routine calls the hook
 must not prompt on (the user's identity on GitHub, a first name as the decision-maker, home
 paths, local tools). The end checks the matcher in the plugin's hooks/hooks.json, a missing
-configuration and the hook contract. Cases with the GitHub login need `gh` to read the fixture's
-login; without gh they are left out and the output says so.
+configuration and the hook contract. The hook reads the GitHub login from gh's hosts.yml as a
+file, so the login cases need no gh; GH_HOSTS checks that reading. The output ends with timings
+(Python start, git config, the hosts.yml read, the first and later hook calls), so a slow CI run
+shows where the time goes.
 
 The Codex entry point (`--codex`) must deny every ASK case and pass every PASS case, in every
 Codex permission mode (Codex shows the hook no sign of whether the user will be prompted), with
 the output Codex accepts; CODEX_DENY adds the tool names Codex uses (measured 2026-10-25).
 """
-import json, os, re, shutil, subprocess, sys, tempfile, time
+import importlib.util, json, os, re, statistics, subprocess, sys, tempfile, time
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 GUARDS = os.path.join(ROOT, 'plugins', 'guards')
 HOOK = os.path.join(GUARDS, 'scripts', 'pre_tool_personal_data.py')
-HAVE_GH = shutil.which('gh') is not None
 NAME, EMAIL, LOGIN = 'Fixture Persona', 'fixture.persona@fixture-persona.eu', 'FixtureLogin'
 PHONE_LINE, PHONE_SENT = 'phone: +32 470 12 34 56', '0470/12.34.56'
 
@@ -98,7 +99,7 @@ ASK = [
     bash('printf %%s "%s" | gh api repos/a/b/issues/1/comments -F body=@-' % NAME),
     bash('echo "%s" | ssh box "cat >> /srv/contacts"' % EMAIL),
     bash("gh issue comment 1 --body-file - <<'EOF'\nContact: %s\nEOF" % EMAIL),
-] + ([bash('curl -A "probe (%s)" https://crates.io/api/v1/crates/x' % LOGIN)] if HAVE_GH else []) + [
+    bash('curl -A "probe (%s)" https://crates.io/api/v1/crates/x' % LOGIN),
     bash('curl -d "to=jane.doe@realmail.io" https://api.mailer.io/send'),
     bash('python3 -c "import urllib.request; urllib.request.urlopen(\'https://x.io/?u=%s\')"'
          % EMAIL),
@@ -155,10 +156,57 @@ CODEX_DENY = [
 ]
 
 failures = []
+
+
+def timed(args, env):
+    started = time.time()
+    subprocess.run(args, capture_output=True, env=env)
+    return time.time() - started
+
+
+# gh's hosts.yml as the hook reads it: the user of the github.com block, at its own level only
+spec = importlib.util.spec_from_file_location('pd_hook', HOOK)
+pd_hook = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(pd_hook)
+GH_HOSTS = [
+    ('github.com:\n    user: %s\n    git_protocol: https\n' % LOGIN, LOGIN),
+    ('ghe.example.com:\n    user: other\ngithub.com:\n    users:\n        user: nested\n'
+     '    user: "%s"\n' % LOGIN, LOGIN),
+    ("'github.com':\n  # a comment\n  user: '%s'\n" % LOGIN, LOGIN),
+    ('ghe.example.com:\n    user: other\n', ''),
+    ('', ''),
+]
+saved = os.environ.get('GH_CONFIG_DIR')
+os.environ['GH_CONFIG_DIR'] = hosts_dir = os.path.join(tmp, 'gh-hosts-cases')
+os.makedirs(hosts_dir)
+for text, want in GH_HOSTS:
+    with open(os.path.join(hosts_dir, 'hosts.yml'), 'w', encoding='utf-8') as f:
+        f.write(text)
+    if pd_hook.gh_login() != want:
+        failures.append('hosts.yml: expected %r from %r, got %r' % (want, text, pd_hook.gh_login()))
+os.remove(os.path.join(hosts_dir, 'hosts.yml'))
+if pd_hook.gh_login() != '':
+    failures.append('hosts.yml: a missing file must give no login')
+os.environ['GH_CONFIG_DIR'] = os.path.join(HOME, 'gh')
+started = time.time()
+pd_hook.gh_login()
+hosts_read = time.time() - started
+if saved is None:
+    os.environ.pop('GH_CONFIG_DIR')
+else:
+    os.environ['GH_CONFIG_DIR'] = saved
+
+timings = {
+    'python start': timed([sys.executable, '-c', 'pass'], env_for(HOME)),
+    'git config': timed(['git', 'config', '--global', '--get-regexp', r'^user\.'], env_for(HOME)),
+    'hosts.yml read': hosts_read,
+}
+calls = []
 for event in ASK:
     started = time.time()
     r = run(event)
-    if time.time() - started > 3:
+    calls.append(time.time() - started)
+    if calls[-1] > 3:
         failures.append('SLOW (%.0f s; the hook timeout is 10 s): %s %s' % (
             time.time() - started, event['tool_name'], json.dumps(event['tool_input'])[:80]))
     out = json.loads(r.stdout) if r.stdout.strip() else {}
@@ -235,8 +283,11 @@ for bad in ('not json', '[]', '{"tool_name": "Bash", "tool_input": "x"}'):
         if r.returncode != 0 or r.stdout.strip():
             failures.append('hook contract: unreadable input must pass: %r %s' % (bad, args))
 
+timings['first hook call'] = calls[0]
+timings['later calls, median'] = statistics.median(calls[1:])
+timings['later calls, max'] = max(calls[1:])
+timing = 'timing (s): ' + ', '.join('%s %.2f' % kv for kv in timings.items())
 if failures:
-    print('\n'.join(failures)); sys.exit(1)
+    print('\n'.join(failures + [timing])); sys.exit(1)
 print('OK: %d asked, %d passed; Codex: %d denied, %d passed; missing configuration and hook '
-      'contract hold%s' % (len(ASK), len(PASS), len(ASK) + len(CODEX_DENY), len(PASS),
-                           '' if HAVE_GH else ' (gh not installed: login cases left out)'))
+      'contract hold; %s' % (len(ASK), len(PASS), len(ASK) + len(CODEX_DENY), len(PASS), timing))

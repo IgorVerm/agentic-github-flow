@@ -4,9 +4,9 @@
 # why the rules and the guards forbid that flag.
 # One exception: deleting a refs/heads/* branch that is not the remote's default branch and whose
 # remote tip is already in that default branch as last fetched (refs/remotes/<remote>/HEAD, else
-# <remote>/main), or is the head commit of a merged pull request (`gh pr list --head <branch>
-# --state merged`, when gh is installed): a merged task branch, as the cleanup-merged skill
-# deletes it.
+# <remote>/main), or is the head commit of a pull request merged into that default branch
+# (`gh pr list --head <branch> --base <default> --state merged`, when gh is installed): a merged
+# task branch, as the cleanup-merged skill deletes it.
 # Install per repository (worktrees share it): cp pre-push "$(git rev-parse --git-path hooks)/pre-push"
 # and chmod +x it; an existing pre-push hook is chained by hand, never overwritten. On Windows,
 # Git for Windows runs it with its own sh.
@@ -26,8 +26,8 @@ while read lref lsha rref rsha; do
     fi
     branch=${rref#refs/heads/}
     if command -v gh >/dev/null 2>&1 &&
-       gh pr list --head "$branch" --state merged --json headRefOid --jq '.[].headRefOid' \
-         2>/dev/null | grep -qx "$rsha"; then
+       gh pr list --head "$branch" --base "${default#"refs/remotes/$remote/"}" --state merged \
+         --json headRefOid --jq '.[].headRefOid' 2>/dev/null | grep -qx "$rsha"; then
       continue
     fi
     echo "pre-push: refusing to DELETE $rref: its tip is not in $default and is not the head" >&2

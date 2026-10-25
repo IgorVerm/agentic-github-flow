@@ -40,6 +40,7 @@ HEREDOC = re.compile(r'<<(-?)\s*["\']?([A-Za-z_][A-Za-z0-9_]*)["\']?')
 EXEC_HINT = re.compile(r'subprocess|system|popen|exec|spawn|check_output|check_call|`|%x')
 MAX_INPUT = 32_000  # characters; a longer command that may run git is blocked, not parsed
 MAX_DEPTH = 8
+GIT_WORD = re.compile(r'(?<![\w.-])(?:git|gh)(?![\w-])|\bGIT_\w+', re.I)
 ANSI_C = re.compile(r"\$'((?:[^'\\]|\\.)*)'", re.S)
 ANSI_ESCAPES = {'a': '\a', 'b': '\b', 'e': '\x1b', 'E': '\x1b', 'f': '\f', 'n': '\n',
                 'r': '\r', 't': '\t', 'v': '\v', '\\': '\\', "'": "'", '"': '"', '?': '?'}
@@ -228,9 +229,11 @@ def brace_expansion(text):
 
 
 def may_run_git(text):
-    """True when git, gh or a GIT_ variable can appear once quotes, escapes and braces are
-    resolved; everything else is no business of this guard."""
-    return "$'" in text or bool(re.search(r'git|gh', re.sub(r'[\'"\\{},$]', '', text), re.I))
+    """True when git or gh can appear as a command word, or a GIT_ variable is set, once quotes,
+    escapes and braces are resolved; everything else is no business of this guard. Only whole
+    words count, so `src/{high,low}`, `night.txt{,.bak}` and `.github/{a,b}` are not git."""
+    return "$'" in text or any(GIT_WORD.search(re.sub(r'[\'"\\{},$]', gap, text))
+                               for gap in ('', ' '))  # g''it, and -S'git …'
 
 
 def judge_git(args):

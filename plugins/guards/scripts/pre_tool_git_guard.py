@@ -11,8 +11,12 @@ It parses the command into simple commands, unwraps shell `-c` strings, `eval`, 
 substitutions and wrappers such as `timeout`, and judges every `git` invocation by its subcommand
 and flags, wherever they stand. It is a guardrail, not a boundary: git started from a script
 file or built from variables is not seen, and `git checkout <path>` cannot be told from
-`git checkout <branch>`. An input it cannot read passes. A command the user asks for by name
-the user runs in their own terminal.
+`git checkout <branch>`. An input it cannot parse passes, except where the parse would hide git:
+it blocks, rather than guesses, a command that may run git and is longer than MAX_INPUT
+characters, holds an unquoted brace expansion (`git push origin {-f,main}`), an ANSI-C string it
+cannot decode (`$'…'` strings are decoded first), or is nested deeper than MAX_DEPTH (eval in
+eval in …). Hook input that is JSON but not an object is blocked too. A command the user asks for
+by name the user runs in their own terminal.
 
 pre_tool_personal_data.py reuses its shell parsing: run tests/personal_data_guard.py too.
 
@@ -34,6 +38,11 @@ BLIND_PATHS = {'.', './', '*', ':/', ':/.', ':(top)', '..', '../'}
 ASSIGN = re.compile(r'[A-Za-z_][A-Za-z0-9_]*=.*', re.S)
 HEREDOC = re.compile(r'<<(-?)\s*["\']?([A-Za-z_][A-Za-z0-9_]*)["\']?')
 EXEC_HINT = re.compile(r'subprocess|system|popen|exec|spawn|check_output|check_call|`|%x')
+MAX_INPUT = 32_000  # characters; a longer command that may run git is blocked, not parsed
+MAX_DEPTH = 8
+ANSI_C = re.compile(r"\$'((?:[^'\\]|\\.)*)'", re.S)
+ANSI_ESCAPES = {'a': '\a', 'b': '\b', 'e': '\x1b', 'E': '\x1b', 'f': '\f', 'n': '\n',
+                'r': '\r', 't': '\t', 'v': '\v', '\\': '\\', "'": "'", '"': '"', '?': '?'}
 
 
 def split_commands(text):
@@ -144,6 +153,86 @@ def has_long(args, *names):
     return False
 
 
+def decode_ansi_c(body):
+    """The text of a bash $'…' string, or None when an escape is not one bash defines."""
+    out, i = [], 0
+    while i < len(body):
+        c = body[i]
+        if c != '\\':
+            out.append(c)
+            i += 1
+            continue
+        nxt = body[i + 1:i + 2]
+        if nxt in ANSI_ESCAPES:
+            out.append(ANSI_ESCAPES[nxt])
+            i += 2
+            continue
+        m = (re.match(r'[0-7]{1,3}', body[i + 1:]) or
+             re.match(r'x([0-9A-Fa-f]{1,2})', body[i + 1:]) or
+             re.match(r'u([0-9A-Fa-f]{1,4})', body[i + 1:]) or
+             re.match(r'U([0-9A-Fa-f]{1,8})', body[i + 1:]))
+        if m:
+            digits = m.group(1) if m.groups() else m.group(0)
+            try:
+                out.append(chr(int(digits, 8 if not m.groups() else 16)))
+            except (ValueError, OverflowError):
+                return None
+            i += 1 + m.end()
+            continue
+        if nxt == 'c' and i + 2 < len(body):
+            out.append(chr(ord(body[i + 2]) & 0x1f))
+            i += 3
+            continue
+        return None
+    return ''.join(out)
+
+
+def unquote_ansi_c(text):
+    """(text with every $'…' replaced by its decoded, single-quoted value, ok)."""
+    ok = True
+
+    def plain(m):
+        nonlocal ok
+        value = decode_ansi_c(m.group(1))
+        if value is None:
+            ok = False
+            return m.group(0)
+        return shlex.quote(value)
+    return ANSI_C.sub(plain, text), ok
+
+
+def brace_expansion(text):
+    """True when text holds an unquoted brace expansion: {a,b} or {1..3}, not ${x} or @{1}."""
+    quote, i, n = None, 0, len(text)
+    while i < n:
+        c = text[i]
+        if quote:
+            if c == quote:
+                quote = None
+            elif c == '\\' and quote == '"':
+                i += 1
+        elif c == '\\':
+            i += 1
+        elif c in '"\'':
+            quote = c
+        elif c == '{' and (i == 0 or text[i - 1] != '$'):
+            depth, j = 1, i + 1
+            while j < n and depth and text[j] not in ' \t\n;|&':
+                depth += (text[j] == '{') - (text[j] == '}')
+                j += 1
+            inner = text[i + 1:j - 1] if depth == 0 else ''
+            if ',' in inner or '..' in inner:
+                return True
+        i += 1
+    return False
+
+
+def may_run_git(text):
+    """True when git, gh or a GIT_ variable can appear once quotes, escapes and braces are
+    resolved; everything else is no business of this guard."""
+    return "$'" in text or bool(re.search(r'git|gh', re.sub(r'[\'"\\{},$]', '', text), re.I))
+
+
 def judge_git(args):
     """args: tokens after `git`. Return a reason string or None."""
     i, config = 0, []
@@ -176,7 +265,8 @@ def judge_git(args):
         if has_short(flags, 'f') or has_long(flags, '--force', '--force-with-lease',
                                              '--force-if-includes', '--mirror', '--prune'):
             return 'force-pushes or prunes the remote'
-        if any(a.startswith('+') for a in words):
+        after = rest[rest.index('--') + 1:] if '--' in rest else []
+        if any(a.startswith('+') for a in words + after):
             return 'force-pushes a ref (+ref)'
     elif sub == 'pull':
         if has_short(flags, 'r') or (has_long(flags, '--rebase')
@@ -263,8 +353,10 @@ def judge_command(tokens, depth):
         if tokens[0].startswith('GIT_CONFIG'):
             return 'changes git configuration through the environment'
         tokens = tokens[1:]
-    if not tokens or depth > 8:
+    if not tokens:
         return None
+    if depth > MAX_DEPTH:
+        return 'is nested too deeply to check'
     name = base(tokens[0])
     if name == 'git':
         return judge_git(tokens[1:])
@@ -291,6 +383,15 @@ def judge_command(tokens, depth):
     elif name in WRAPPERS:
         runs = SHELLS | INTERPRETERS | WRAPPERS | {'git', 'eval', 'ssh'}
         for j, tok in enumerate(tokens[1:], 1):
+            if name == 'env' and (tok in ('-S', '--split-string') or
+                                  tok.startswith(('-S', '--split-string='))):
+                if tok in ('-S', '--split-string'):  # env -S 'git …' splits its argument
+                    split, after = ' '.join(tokens[j + 1:j + 2]), tokens[j + 2:]
+                elif tok.startswith('--split-string='):
+                    split, after = tok.split('=', 1)[1], tokens[j + 1:]
+                else:
+                    split, after = tok[2:], tokens[j + 1:]
+                return judge(' '.join([split] + [shlex.quote(t) for t in after]), depth + 1)
             if ASSIGN.fullmatch(tok) and tok.startswith('GIT_CONFIG'):
                 return 'changes git configuration through the environment'
             if base(tok) in runs:
@@ -299,8 +400,13 @@ def judge_command(tokens, depth):
 
 
 def judge(text, depth=0):
-    if depth > 8:
-        return None
+    if depth > MAX_DEPTH:
+        return 'is nested too deeply to check'
+    text, decoded = unquote_ansi_c(text)
+    if not decoded and may_run_git(text):
+        return "holds a $'…' string the guard cannot decode"
+    if brace_expansion(text) and may_run_git(text):
+        return 'uses brace expansion, which the guard cannot read safely'
     text, bodies = strip_heredocs(text.replace('\\\n', ' '))
     for line, body in bodies:
         readers = {base(w) for w in re.findall(r'[\w./-]+', line)}
@@ -328,15 +434,30 @@ def judge(text, depth=0):
     return None
 
 
-RAW = [
-    (r'git\b[^\n;|&]*\bpush\b[^\n;|&]*(--force|\s-f\b|--mirror)', 'force-pushes'),
-    (r'git\b[^\n;|&]*\breset\b[^\n;|&]*--hard', 'discards work (reset --hard)'),
-    (r'git\b[^\n;|&]*\bclean\b', 'deletes untracked files (clean)'),
-    (r'git\b[^\n;|&]*--no-verify', 'bypasses a hook (--no-verify)'),
-    (r'git\b[^\n;|&]*\b(rebase|filter-branch|filter-repo)\b', 'rewrites history'),
-    (r'git\b[^\n;|&]*\bbranch\b[^\n;|&]*\s-D\b', 'force-deletes a branch'),
-    (r'git\b[^\n;|&]*\bcheckout\b[^\n;|&]*\s--\s', 'discards uncommitted work (checkout)'),
+RAW = [  # each a sequence of patterns that must follow each other within one simple command
+    ((r'git\b', r'\bpush\b', r'--force|\s-f\b|--mirror'), 'force-pushes'),
+    ((r'git\b', r'\breset\b', r'--hard'), 'discards work (reset --hard)'),
+    ((r'git\b', r'\bclean\b'), 'deletes untracked files (clean)'),
+    ((r'git\b', r'--no-verify'), 'bypasses a hook (--no-verify)'),
+    ((r'git\b', r'\b(rebase|filter-branch|filter-repo)\b'), 'rewrites history'),
+    ((r'git\b', r'\bbranch\b', r'\s-D\b'), 'force-deletes a branch'),
+    ((r'git\b', r'\bcheckout\b', r'\s--\s'), 'discards uncommitted work (checkout)'),
 ]
+RAW = [(tuple(re.compile(p) for p in parts), reason) for parts, reason in RAW]
+SEGMENT = re.compile(r'[^\n;|&]+')
+
+
+def in_order(segment, patterns):
+    """True when the patterns match one after another in segment. Each search starts where the
+    previous match ended, so the time stays linear in the length of the text (one combined
+    pattern with `[^…]*` between the parts backtracked for 20 s on 9 KB of input)."""
+    pos = 0
+    for pattern in patterns:
+        found = pattern.search(segment, pos)
+        if not found:
+            return False
+        pos = found.end()
+    return True
 
 
 def judge_raw(code, needs_exec=False):
@@ -345,10 +466,22 @@ def judge_raw(code, needs_exec=False):
     merely prints or compares such a string passes."""
     if needs_exec and not EXEC_HINT.search(code):
         return None
-    for pattern, reason in RAW:
-        if re.search(pattern, code):
-            return reason
+    for segment in SEGMENT.findall(code):
+        if 'git' not in segment:
+            continue
+        for patterns, reason in RAW:
+            if in_order(segment, patterns):
+                return reason
     return None
+
+
+def check(command):
+    """The reason to block a command, or None."""
+    if not may_run_git(command):
+        return None
+    if len(command) > MAX_INPUT:
+        return 'is longer than %d characters, too long to check' % MAX_INPUT
+    return judge(command)
 
 
 def main():
@@ -359,14 +492,17 @@ def main():
             event = json.load(sys.stdin)
         except ValueError:
             return 0
+        if not isinstance(event, dict):
+            sys.stderr.write('Blocked by the git guard: the hook input is not a JSON object.\n')
+            return 2
         tool_input = event.get('tool_input') or {}
         command = tool_input.get('command') if isinstance(tool_input, dict) else None
         if isinstance(command, list):
             command = ' '.join(shlex.quote(str(c)) for c in command)
-        if not isinstance(command, str) or 'git' not in command:
+        if not isinstance(command, str):
             return 0
     try:
-        reason = judge(command)
+        reason = check(command)
     except Exception:
         # Deliberate: a guard that fails on an input it cannot read must not stop all shell
         # work. The client rules and the written rules still apply to that command.

@@ -22,8 +22,9 @@ Outbound calls (everything else is local and passes):
   scanned with its arguments, the here-document it reads, the files it hands over
   (`--body-file`, `-F`, `--input`, `@file`, `-T`, `< file`) and the whole line when a pipe
   feeds what it sends (`echo … | curl -d @-`, `… | ssh`); URL-encoding is decoded first. A `git`
-  command is checked only for other people's addresses: the user's identity on commits and
-  pushes is outside the rule.
+  push, fetch, pull, clone or ls-remote to a remote configured in the repository, a local path or
+  GitHub is checked only for other people's addresses: the user's identity on commits and pushes
+  is outside the rule. To any other host it is judged in full.
 - WebFetch (the URL; the prompt stays with the model), WebSearch (the query).
 - Artifact publish (the page and its files), ArtifactData, ArtifactComments.
 - Every MCP tool except the desktop app's own local controls (LOCAL_MCP); `run_in_terminal` is
@@ -427,6 +428,53 @@ def only_github(programs, text):
     return bool(hosts) and all(is_github(h) for h in hosts)
 
 
+GIT_EXEMPT = {'push', 'fetch', 'pull', 'clone', 'ls-remote'}
+SCP_LIKE = re.compile(r'^(?:[^@/\s]+@)?([^:/\s]+):(?!//)')
+
+
+def remotes(where):
+    try:
+        r = subprocess.run(['git', '-C', where or '.', 'remote'], capture_output=True, text=True,
+                           timeout=4, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    return set(r.stdout.split()) if r.returncode == 0 else set()
+
+
+def git_to_known_remote(text, cwd):
+    """True when this git command talks only to a remote configured in the repository, a local
+    path or GitHub: then the user's configured identity on it is outside the rule. Any other
+    host, and git commands that mail or publish (send-email, request-pull, archive --remote),
+    are judged like every other outbound command."""
+    try:
+        tokens = shlex.split(text)
+    except ValueError:
+        return False
+    at = next((i for i, t in enumerate(tokens) if gg.base(t) == 'git'), None)
+    if at is None:
+        return False
+    args, where, i = tokens[at + 1:], cwd, 0
+    while i < len(args) and args[i].startswith('-'):
+        if args[i] == '-C' and i + 1 < len(args):
+            where = os.path.join(where or '.', os.path.expanduser(args[i + 1]))
+        i += 2 if args[i] in gg.GIT_VALUE_OPTS else 1
+    if i >= len(args) or args[i] not in GIT_EXEMPT:
+        return False
+    sub = args[i]
+    words = [a for a in args[i + 1:] if not a.startswith('-')]
+    if not words:
+        return sub != 'clone'  # the configured default remote
+    target = words[0]
+    if '://' in target:
+        return is_github((urlsplit(target).hostname or '').lower()) or target.startswith('file://')
+    scp = SCP_LIKE.match(target)
+    if scp and not os.path.exists(os.path.join(where or '.', target)):
+        return is_github(scp.group(1).lower())
+    if target.startswith(('/', '.', '~')) or os.path.isdir(os.path.join(where or '.', target)):
+        return True  # a local path: nothing leaves the machine
+    return sub != 'clone' and target in remotes(where)
+
+
 def mask(address):
     local, _, domain = address.partition('@')
     return '%s…@….%s' % (local[:1], domain.rsplit('.', 1)[-1])
@@ -442,6 +490,7 @@ def judge(event):
     what, segs = found
     hits = []
     texts = []
+    exempt = []
     ids = identifiers()
     for programs, text in segs:
         if not text:
@@ -449,7 +498,8 @@ def judge(event):
         text = home_routine(text)
         decoded = unquote(text) if '%' in text else text  # a URL sends `%40` for `@`
         texts.append(decoded)
-        if programs and programs <= {'git'}:
+        if programs and programs <= {'git'} and git_to_known_remote(text, cwd):
+            exempt.append(decoded)
             continue  # the configured identity on commits and pushes is outside the rule
         github = only_github(programs, text)
         for label, pattern, is_login in ids:
@@ -460,7 +510,7 @@ def judge(event):
     if not hits:
         for t in texts:
             for address in emails(t):
-                if any(p.fullmatch(address) for p in own):
+                if t in exempt and any(p.fullmatch(address) for p in own):
                     continue  # the user's own address in a git command: the configured identity
                 local, _, domain = address.partition('@')
                 if NOT_PERSONAL.search(local) or NOT_PERSONAL.search(domain) or \

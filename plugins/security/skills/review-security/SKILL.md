@@ -27,9 +27,10 @@ force-push).
 3. **Dependencies.** `python3 <plugin>/scripts/audit_dependencies.py <repo>` checks every
    lockfile (npm, pnpm, Cargo, poetry, uv, composer, pinned requirements) against the OSV
    database, with `npm audit` as a cross-check where npm is present. It sends package names and
-   versions to osv.dev (and with `--upgrades` to the npm and PyPI registries and
-   endoflife.date): ask the user before the first run in a repository, and skip it where the
-   company overlay forbids it. Default threshold `high`; `--level moderate` before a deploy.
+   versions to osv.dev, to the public npm registry (`npm audit`, always registry.npmjs.org;
+   `--no-npm` leaves it out) and, with `--upgrades`, to the npm and PyPI registries and
+   endoflife.date: ask the user before the first run in a repository, naming those
+   destinations, and skip it where the company overlay forbids it. Default threshold `high`; `--level moderate` before a deploy.
    `--upgrades` adds the latest release of each direct dependency and the support status of
    frameworks and runtimes: a cycle past its end of support is a finding, a major behind is
    advice. A transitive finding is fixed through the direct dependency that pulls it in; a

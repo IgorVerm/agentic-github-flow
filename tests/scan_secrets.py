@@ -56,6 +56,11 @@ PLANTED = {  # pattern name -> a line that must match it
     'secret-named-assignment:DATABASE_PASSWORD': 'DATABASE_PASSWORD=' + 'p4ssw0rd' + 'Z9' + 'q7m2x1',
     'secret-named-assignment:STRIPE_SECRET_KEY': 'STRIPE_SECRET_KEY: "' + 'live9' + 'K2m8Q4z7W1x3' + '"',
     'secret-named-assignment:CLOUDFLARE_API_TOKEN': 'export CLOUDFLARE_API_TOKEN=' + 'cf' + 'T0k3n' + 'Qw9Er8Ty7Ui6Op5As4Df3Gh2Jk1Lz0Vc',
+    'gitlab-token': 'token = "' + 'glpat-' + 'Ab3dEf6hIj9kLm2nOp5q' + '"',
+    'npm-token': '//registry.npmjs.org/:_authToken=' + 'npm_' + 'a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8',
+    'huggingface-token': 'HF = "' + 'hf_' + 'aBcDeFgHiJkLmNoPqRsTuVwXyZ012345' + '"',
+    'sendgrid-api-key': 'key: ' + 'SG.' + 'a' * 22 + '.' + 'b' * 43,
+    'connection-url-password': 'url = "' + 'postgres' + '://app_user:' + 'Xk9' + 'pQ2mW7zR4' + '@' + 'db.prod.io:5432/app"',
 }
 CLEAN = [  # lines that must not match anything
     'NEXT_PUBLIC_SUPABASE_ANON_KEY=' + jwt('anon'),
@@ -73,11 +78,16 @@ CLEAN = [  # lines that must not match anything
     'The sk_live_ prefix marks a live key (documentation).',
     'const SAFE_TOKEN = /^[A-Za-z0-9_-]{1,127}$/',
     'GPG_KEY=A035C8C19219BA821ECEA86B64E628F8D684696D',
+    'DATABASE_URL=postgres://postgres:postgres@localhost:5432/app',
+    'DATABASE_URL=postgresql://app:${DB_PASSWORD}' + '@' + 'db.prod.io/app',
+    'REDIS_URL=redis://default:changeme' + '@' + 'cache.prod.io:6379',
+    'see https://user@example.com/path for the docs',
 ]
 
 
 def run(*args):
-    r = subprocess.run([sys.executable, TOOL, *args], capture_output=True, text=True, env=GIT_ENV)
+    r = subprocess.run([sys.executable, TOOL, *args], capture_output=True, text=True,
+                       encoding='utf-8', env=dict(GIT_ENV, PYTHONIOENCODING='utf-8'))
     return r.returncode, r.stdout, r.stderr
 
 
@@ -190,6 +200,38 @@ class RepoTests(unittest.TestCase):
         code, out, _ = run(self.repo, '--staged')
         self.assertEqual(code, 1)
         self.assertIn('staged\tslack-token\tnotes.md:2', out)
+
+    def test_history_sees_through_gitattributes_merges_and_non_ascii_paths(self):
+        # `* -diff` makes git print "Binary files differ" unless the scan asks for text
+        write(self.repo, '.gitattributes', '* -diff\n')
+        write(self.repo, 'deploy.sh', PLANTED['github-token'] + '\n')
+        write(self.repo, 'certs/cl\u00e9.pem', 'x\n')
+        git(self.repo, 'add', '--', '.gitattributes', 'deploy.sh', 'certs/cl\u00e9.pem')
+        git(self.repo, 'commit', '-q', '-m', 'hidden')
+        git(self.repo, 'rm', '-q', '--', 'deploy.sh', 'certs/cl\u00e9.pem', '.gitattributes')
+        git(self.repo, 'commit', '-q', '-m', 'removed')
+        # a secret written while resolving a merge conflict lives only in the merge commit
+        write(self.repo, 'conf.txt', 'base\n')
+        git(self.repo, 'add', '--', 'conf.txt')
+        git(self.repo, 'commit', '-q', '-m', 'base')
+        git(self.repo, 'checkout', '-q', '-b', 'side')
+        write(self.repo, 'conf.txt', 'side\n')
+        git(self.repo, 'commit', '-q', '-am', 'side')
+        git(self.repo, 'checkout', '-q', 'main')
+        write(self.repo, 'conf.txt', 'main\n')
+        git(self.repo, 'commit', '-q', '-am', 'main')
+        subprocess.run(['git', '-C', self.repo, 'merge', '-q', 'side'], capture_output=True,
+                       env=GIT_ENV)
+        write(self.repo, 'conf.txt', PLANTED['stripe-live-secret'] + '\n')
+        git(self.repo, 'add', '--', 'conf.txt')
+        git(self.repo, 'commit', '-q', '--no-edit')
+        write(self.repo, 'conf.txt', 'clean\n')
+        git(self.repo, 'commit', '-q', '-am', 'clean')
+        code, out, _ = run(self.repo, '--history')
+        self.assertEqual(code, 1, out)
+        self.assertIn('history\tgithub-token\tdeploy.sh:1', out)
+        self.assertIn('history\tsecret-file-name:*.pem\tcerts/cl\u00e9.pem', out)
+        self.assertIn('history\tstripe-live-secret\tconf.txt:1', out)
 
     def test_binary_and_large_files_are_skipped(self):
         with open(os.path.join(self.repo, 'blob.bin'), 'wb') as f:

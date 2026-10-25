@@ -6,7 +6,7 @@ BLOCK lists commands the core rules' §Git forbids, in the spellings the Codex p
 messages that merely mention a forbidden command, which must pass. The hook contract (JSON on
 stdin, exit 2 to block) is exercised for one case of each kind.
 """
-import json, os, subprocess, sys
+import json, os, subprocess, sys, time
 
 HOOK = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'plugins', 'guards', 'scripts',
                     'pre_tool_git_guard.py')
@@ -62,6 +62,12 @@ BLOCK = [
     'git config --unset core.hooksPath', 'git -c alias.x=reset x', 'git -c pull.rebase=true pull',
     'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null git commit -m x',
     'env GIT_CONFIG_GLOBAL=/tmp/c git commit -m x', 'export GIT_CONFIG_NOSYSTEM=1',
+    # spellings the parse would otherwise hide: they fail closed
+    'git push origin {-f,main}', 'git reset {--hard,HEAD}', "$'git' reset --hard",
+    "$'\\x67it' reset --hard", "$'\\147it' push --force", "git reset $'\\q' --hard",
+    "env -S 'git reset --hard'", "env --split-string='git push --force'",
+    "env -S'git clean -fd'", 'git push origin -- +main', "g''it reset --hard",
+    'eval ' * 10 + 'git status',
 ]
 
 ALLOW = [
@@ -99,6 +105,9 @@ ALLOW = [
     'git branch -m old new', 'git tag -l "v*" --format=x', 'git commit --amend --author=x -m y',
     'timeout 60 git fetch origin', 'ssh box "cd repo && git pull --ff-only"', 'find . -name git',
     'echo "$(git status --short)"', 'export GIT_PAGER=cat', 'GIT_EDITOR=true git merge --continue',
+    'git show HEAD@{1}', 'git reflog show main@{2}', 'echo ${HOME}', 'eval eval git status',
+    "git commit -m $'line1\\nline2' -- a.md", "git log --format='{%h,%s}'",
+    'find . -name "*.py" -exec wc -l {} +', "printf $'a\\tb\\n'",
 ]
 
 
@@ -136,6 +145,18 @@ if run('git commit -m "an unclosed quote').returncode != 0:
     failures.append('an input the guard cannot parse must not block')
 if subprocess.run([sys.executable, HOOK], input='not json', capture_output=True, text=True).returncode != 0:
     failures.append('hook contract: unreadable input must not block')
+if subprocess.run([sys.executable, HOOK], input='[]', capture_output=True, text=True).returncode != 2:
+    failures.append('hook contract: JSON that is not an object must block')
+long_git = 'git status ' + 'x' * 40000
+if run(long_git).returncode != 2:
+    failures.append('a command over MAX_INPUT that may run git must block')
+if run('echo ' + 'x' * 40000).returncode != 0:
+    failures.append('a long command without git must pass')
+started = time.time()
+slow = run('git push x ' + 'a ' * 4300 + "# it's\ngit reset --hard")  # shlex cannot parse it
+if slow.returncode != 2 or time.time() - started > 3:
+    failures.append('the unparsable 9 KB case must block within 3 s (took %.1f s)'
+                    % (time.time() - started))
 
 if failures:
     print('\n'.join(failures)); sys.exit(1)

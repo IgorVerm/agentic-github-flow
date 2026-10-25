@@ -13,7 +13,8 @@ the worktree is KEPT and the reasons, files and processes are printed:
   merged    its branch tip (or detached HEAD) is in the default branch: origin's after a fetch
             (refs/remotes/origin/HEAD, else origin/main), or local main in a repo without origin;
             or the tip is exactly the head commit of a merged pull request
-            (`gh pr list --head <branch> --state merged`), which covers squash and rebase merges.
+            into the default branch (`gh pr list --head <branch> --state merged`, its
+            `baseRefName` the default branch), which covers squash and rebase merges.
             GitHub keeps a merged pull request's commits, so they are not lost with the branch
   clean     `git status --porcelain` is empty, and no index entry hides local edits
             (assume-unchanged or skip-worktree in `git ls-files -v`)
@@ -73,8 +74,10 @@ bare repository's HEAD, objects/ and refs/) or a directory git could not empty, 
 Limit: a process that starts writing ignored files between these checks and the removal is not
 seen; the checks run immediately before `git worktree remove`.
 
---approved waives only the merged check, for work the user decided to abandon; every other
-check still holds and the branch is never deleted in that mode.
+--approved waives only the merged check, for one worktree the user decided to abandon; every
+other check still holds and the branch is never deleted in that mode. It refuses more than one
+path. It does not rely on options newer git added (`--path-format=absolute`,
+`--show-ref-format`): git before 2.31 and 2.45 echoes them instead of applying them.
 Removal: `git worktree remove <path>` (never --force), then the local branch is deleted with
 `git update-ref -d refs/heads/<branch> <proven tip>`, which refuses if the branch moved since the
 check; a branch still checked out in another worktree is kept. The remote branch and the issue
@@ -111,6 +114,22 @@ FILE_PATTERN = re.compile(r'^(?:[^*?\[\]/]*/)*(?:[^*?\[\]/]+|\*\.[^*?\[\]/.]+)$'
 
 def git(cwd, *args):
     return subprocess.run(['git', '-C', cwd, *args], text=True, capture_output=True)
+
+
+def git_path(cwd, name):
+    """The absolute path of `git rev-parse --git-path <name>` in cwd. Without
+    `--path-format=absolute`, which git before 2.31 echoes instead of applying."""
+    found = git(cwd, 'rev-parse', '--git-path', name).stdout.strip()
+    return os.path.normpath(found if os.path.isabs(found) else os.path.join(cwd, found))
+
+
+def ref_format(cwd):
+    """'files' or 'reftable'; None when git answers something else. Git before 2.45 echoes the
+    unknown option `--show-ref-format` and exits 0; those versions know only `files`."""
+    answer = git(cwd, 'rev-parse', '--show-ref-format').stdout.strip()
+    if answer == '--show-ref-format':
+        return 'files'
+    return answer if answer in ('files', 'reftable') else None
 
 
 def declared_patterns(text):
@@ -377,14 +396,16 @@ def gh_command():
     return [found] if found else None
 
 
-def merged_pull_request(primary, branch, tip):
-    """(number, problem): a merged pull request whose head commit is exactly `tip`."""
+def merged_pull_request(primary, branch, tip, base=None):
+    """(number, problem): a pull request merged into `base` whose head commit is exactly `tip`.
+    A pull request merged into another branch (a stacked one) proves nothing about `base`."""
     gh = gh_command()
     if not gh:
         return None, 'gh is not installed, so a squash or rebase merge cannot be proven'
     try:
         result = subprocess.run(gh + ['pr', 'list', '--head', branch, '--state', 'merged',
-                                      '--json', 'number,headRefOid', '--limit', '50'],
+                                      '--json', 'number,headRefOid,baseRefName',
+                                      '--limit', '50'],
                                 cwd=primary, capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.SubprocessError) as error:
         return None, f'gh failed: {error}'
@@ -395,7 +416,8 @@ def merged_pull_request(primary, branch, tip):
     except ValueError:
         return None, 'gh pr list gave no JSON'
     for pull in pulls:
-        if isinstance(pull, dict) and pull.get('headRefOid') == tip:
+        if isinstance(pull, dict) and pull.get('headRefOid') == tip and (
+                base is None or pull.get('baseRefName') == base):
             return pull.get('number'), None
     return None, None
 
@@ -426,7 +448,7 @@ def stranded_commits(primary, tree, branch_goes, merged_head=None):
     superseded, not lost.
     """
     path, branch = tree['path'], tree['branch']
-    if git(path, 'rev-parse', '--show-ref-format').stdout.strip() != 'files':
+    if ref_format(path) != 'files':
         return 'cannot read reflogs (ref format is not `files`)'
     refs = git(path, 'for-each-ref', '--format=%(refname)', 'refs/worktree', 'refs/bisect',
                'refs/rewritten').stdout.split()
@@ -434,14 +456,13 @@ def stranded_commits(primary, tree, branch_goes, merged_head=None):
         return 'has per-worktree refs: ' + ', '.join(refs[:5])
     for marker in ('MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'REBASE_HEAD', 'BISECT_LOG',
                    'rebase-merge', 'rebase-apply'):
-        if os.path.lexists(git(path, 'rev-parse', '--path-format=absolute', '--git-path',
-                               marker).stdout.strip()):
+        if os.path.lexists(git_path(path, marker)):
             return f'a git operation is in progress ({marker})'
     logs = [(path, 'logs/HEAD')] + ([(primary, f'logs/refs/heads/{branch}')]
                                     if branch and branch_goes else [])
     ids, amended = set(), set()
     for cwd, name in logs:
-        log = git(cwd, 'rev-parse', '--path-format=absolute', '--git-path', name).stdout.strip()
+        log = git_path(cwd, name)
         try:
             with open(log, encoding='utf-8', errors='replace') as handle:
                 lines = handle.read().splitlines()
@@ -560,7 +581,9 @@ def check(primary, tree, ref, patterns, approved):
     if branch and (branch in ('main', 'master') or ref.endswith('/' + branch)):
         reasons.append(f'it has the default branch {branch} checked out')
     elif not approved and git(primary, 'merge-base', '--is-ancestor', tip, ref).returncode:
-        number, problem = merged_pull_request(primary, branch, sha) if branch else (None, None)
+        base = re.sub(r'^refs/(remotes/[^/]+|heads)/', '', ref)
+        number, problem = (merged_pull_request(primary, branch, sha, base) if branch
+                           else (None, None))
         if number is not None:
             merged_head = sha
             proofs.append(f'branch: its tip is the head of merged pull request #{number}')
@@ -621,6 +644,9 @@ def main(argv=None):
         return 2
     if args.sweep == bool(args.worktrees):
         print('name the worktrees, or use --sweep (not both)', file=sys.stderr)
+        return 2
+    if args.approved is not None and len(args.worktrees) != 1:
+        print('--approved names exactly one worktree: the words approve that one', file=sys.stderr)
         return 2
     if args.sweep and args.approved is not None:
         print('--approved names one worktree; it does not combine with --sweep',

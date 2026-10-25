@@ -23,8 +23,8 @@ Its owner: <role or team>. In short, for agents:
 | Secret | credentials, keys, tokens | no | no |
 
 Approved clients and services: <Claude Code / Codex under which plans; other services>.
-The dependency audit of the security plugin sends package names and versions to osv.dev and the
-npm and PyPI registries: <allowed / not allowed>.
+The dependency audit of the security plugin sends package names and versions to osv.dev, the
+public npm registry (`npm audit`) and the PyPI registry: <allowed / not allowed>.
 
 ## GitHub organisation
 

@@ -349,6 +349,21 @@ class RunTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn('cannot parse package-lock.json', err)
 
+    def test_malformed_answer_is_a_failed_audit(self):
+        write(self.repo, 'package-lock.json', PACKAGE_LOCK_V3)
+        broken = write(self.dir, 'broken.json', dict(ANSWERS, vulns={}))  # ids without records
+        r = subprocess.run([sys.executable, TOOL, self.repo, '--offline', broken],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn('unexpected answer', r.stderr)
+
+    def test_npm_audit_uses_the_public_registry(self):
+        result = subprocess.CompletedProcess([], 0, '{"vulnerabilities": {}}', '')
+        with unittest.mock.patch.object(audit.shutil, 'which', return_value='/usr/bin/npm'), \
+                unittest.mock.patch.object(audit.subprocess, 'run', return_value=result) as run:
+            audit.npm_audit('.')
+        self.assertIn('--registry=https://registry.npmjs.org/', run.call_args.args[0])
+
     def test_this_repository_has_no_lockfile(self):
         code, out, _ = self.run_tool(repo=ROOT)
         self.assertEqual(code, 0)

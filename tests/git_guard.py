@@ -153,13 +153,15 @@ if subprocess.run([sys.executable, HOOK], input='not json', capture_output=True,
     failures.append('hook contract: unreadable input must not block')
 if subprocess.run([sys.executable, HOOK], input='[]', capture_output=True, text=True).returncode != 2:
     failures.append('hook contract: JSON that is not an object must block')
+# Long inputs go through stdin, as the clients send them: Windows refuses a command line over
+# 32,767 characters, so `--check <command>` cannot carry them there.
 long_git = 'git status ' + 'x' * 40000
-if run(long_git).returncode != 2:
+if run_hook(long_git).returncode != 2:
     failures.append('a command over MAX_INPUT that may run git must block')
-if run('echo ' + 'x' * 40000).returncode != 0:
+if run_hook('echo ' + 'x' * 40000).returncode != 0:
     failures.append('a long command without git must pass')
 started = time.time()
-slow = run('git push x ' + 'a ' * 4300 + "# it's\ngit reset --hard")  # shlex cannot parse it
+slow = run_hook('git push x ' + 'a ' * 4300 + "# it's\ngit reset --hard")  # shlex cannot parse it
 if slow.returncode != 2 or time.time() - started > 3:
     failures.append('the unparsable 9 KB case must block within 3 s (took %.1f s)'
                     % (time.time() - started))

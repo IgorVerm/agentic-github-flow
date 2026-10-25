@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install the clients the tests check against
+        run: npm install --global @anthropic-ai/claude-code@2.1.292 @openai/codex@0.164.0
+      - name: Run every offline test
+        env:
+          PYTHONUTF8: '1'
+        run: python tests/run_all.py --require-all

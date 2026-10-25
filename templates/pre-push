@@ -1,0 +1,45 @@
+#!/bin/sh
+# agentic-github-flow pre-push hook. Refuses remote ref deletions, non-fast-forward (force)
+# updates and moving an existing tag, from any agent or spelling. `--no-verify` skips it, which is
+# why the rules and the guards forbid that flag.
+# One exception: deleting a refs/heads/* branch that is not the remote's default branch and whose
+# remote tip is already in that default branch as last fetched (refs/remotes/<remote>/HEAD, else
+# <remote>/main), or is the head commit of a merged pull request (`gh pr list --head <branch>
+# --state merged`, when gh is installed): a merged task branch, as the cleanup-merged skill
+# deletes it.
+# Install per repository (worktrees share it): cp pre-push "$(git rev-parse --git-path hooks)/pre-push"
+# and chmod +x it; an existing pre-push hook is chained by hand, never overwritten. On Windows,
+# Git for Windows runs it with its own sh.
+remote="$1"
+default=$(git symbolic-ref -q "refs/remotes/$remote/HEAD" 2>/dev/null) ||
+  default="refs/remotes/$remote/main"
+while read lref lsha rref rsha; do
+  case "$lsha" in *[!0]*) ;; *)
+    case "$rref" in
+      refs/heads/main|refs/heads/master|"refs/heads/${default#"refs/remotes/$remote/"}")
+        echo "pre-push: refusing to DELETE the default branch $rref" >&2; exit 1 ;;
+      refs/heads/*) ;;
+      *) echo "pre-push: refusing to DELETE $rref (ask the user)" >&2; exit 1 ;;
+    esac
+    if git merge-base --is-ancestor "$rsha" "$default" 2>/dev/null; then
+      continue
+    fi
+    branch=${rref#refs/heads/}
+    if command -v gh >/dev/null 2>&1 &&
+       gh pr list --head "$branch" --state merged --json headRefOid --jq '.[].headRefOid' \
+         2>/dev/null | grep -qx "$rsha"; then
+      continue
+    fi
+    echo "pre-push: refusing to DELETE $rref: its tip is not in $default and is not the head" >&2
+    echo "  of a merged pull request (fetch first; unmerged work: ask the user)" >&2
+    exit 1 ;;
+  esac
+  case "$rsha" in *[!0]*)
+    case "$rref" in refs/tags/*) echo "pre-push: refusing to MOVE tag $rref" >&2; exit 1 ;; esac
+    if ! git merge-base --is-ancestor "$rsha" "$lsha" 2>/dev/null; then
+      echo "pre-push: refusing NON-FAST-FORWARD update of $rref (force push). Ask the user." >&2
+      exit 1
+    fi ;;
+  esac
+done
+exit 0

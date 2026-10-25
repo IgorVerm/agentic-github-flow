@@ -7,7 +7,7 @@ Run it from the primary checkout of a repository. It fetches origin (unless --no
 creates `../<repo>-worktrees/<task>` on a new branch (default `agent/<task>`) from <base>
 (default: origin's default branch as fetched, else local main or master). It refuses a task that
 is not a plain name, an existing path or branch, a linked worktree as the starting point, and a
-checkout inside a cloud-synced folder (iCloud Drive, OneDrive, Dropbox), where sync clients
+checkout inside a cloud-synced folder (iCloud Drive, OneDrive, Dropbox, Google Drive), where sync clients
 corrupt git's files.
 """
 from __future__ import annotations
@@ -17,7 +17,8 @@ import re
 import subprocess
 import sys
 
-SYNCED = ('/Library/Mobile Documents/', '/OneDrive', '/Dropbox/', '\\OneDrive', '\\Dropbox\\')
+SYNCED = ('/Library/Mobile Documents/', '/Library/CloudStorage/', '/OneDrive', '/Dropbox/',
+          '/Google Drive/', '\\OneDrive', '\\Dropbox\\', '\\Google Drive\\')
 
 
 def git(*args, cwd=None):
@@ -73,8 +74,9 @@ def main(argv: list[str]) -> int:
         print('new_worktree: not inside a git checkout', file=sys.stderr)
         return 1
     primary = os.path.normpath(top.stdout.strip())
-    common = git('rev-parse', '--path-format=absolute', '--git-common-dir').stdout.strip()
-    if os.path.normcase(os.path.dirname(os.path.normpath(common))) != os.path.normcase(primary):
+    common = git('rev-parse', '--git-common-dir').stdout.strip()  # relative to the cwd
+    common = os.path.realpath(common if os.path.isabs(common) else os.path.join(os.getcwd(), common))
+    if os.path.normcase(os.path.dirname(common)) != os.path.normcase(os.path.realpath(primary)):
         print('new_worktree: run it from the primary checkout, not from a linked worktree',
               file=sys.stderr)
         return 1

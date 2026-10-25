@@ -20,17 +20,19 @@ What it does, per client (Claude Code, Codex):
 - Guards (--guards): the guards plugin (Claude hooks), the ask and deny lists merged into
   ~/.claude/settings.json (a backup is kept), the Codex execpolicy rules linked into
   ~/.codex/rules/ and the git guard added to ~/.codex/hooks.json.
-- Overlays (--overlay): a folder with an AGENTS.md, or a git URL cloned into overlays/ here;
-  their text follows the core rules in both blocks.
+- Overlays (--overlay): a folder with an AGENTS.md, or a git URL cloned into overlays/ here
+  (a second URL with the same name gets a suffix); their text follows the core rules in both
+  blocks.
 A client whose command and folder are both missing is skipped, and the installer says so.
 Everything it adds is recorded in .state/install.json in the clone, so --update repeats it and
---uninstall removes exactly that. Nothing is sent anywhere except the git and plugin fetches.
+--uninstall removes exactly that; a file that became a symlink since is skipped, with a note. Nothing is sent anywhere except the git and plugin fetches.
 Exit: 0 done; 1 a step failed (the rest ran); 2 usage; 3 refused before any change.
 """
 from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -324,10 +326,19 @@ def merge_permissions(state):
         len(wanted['ask']) + len(wanted['deny']), path, added_now))
 
 
+def linked(path, what):
+    """True (and says so) when path is a symlink, which the installer never writes through."""
+    if os.path.islink(path):
+        say('skip', '%s is a symlink (to %s); %s left as they are: remove them by hand'
+            % (path, os.readlink(path), what))
+        return True
+    return False
+
+
 def unmerge_permissions(state):
     record = state.get('settings')
     path = os.path.join(claude_dir(), 'settings.json')
-    if not record:
+    if not record or linked(path, 'the merged ask and deny rules'):
         return
     data = load_json(path) or {}
     permissions = data.get('permissions', {})
@@ -393,12 +404,18 @@ def codex_guards(state):
 
 def remove_codex_guards(state):
     target = state.get('codex_rules')
+    source = os.path.join(CLONE, 'plugins', 'guards', 'policy', 'git-safety.rules')
     if target and os.path.lexists(target):
-        os.remove(target)
-        say('ok', 'codex: removed %s' % target)
+        ours = (os.path.islink(target) and os.path.realpath(target) == os.path.realpath(source)) \
+            or (not os.path.islink(target) and read_text(target) == read_text(source))
+        if ours:
+            os.remove(target)
+            say('ok', 'codex: removed %s' % target)
+        else:
+            say('skip', 'codex: %s changed since the install; left as it is' % target)
     hook = state.get('codex_hook')
     path = os.path.join(codex_dir(), 'hooks.json')
-    if not hook:
+    if not hook or linked(path, 'the git guard entry'):
         return
     data = load_json(path) or {}
     entries = data.get('hooks', {}).get('PreToolUse', [])
@@ -429,6 +446,9 @@ def resolve_overlays(sources, updating, failures):
             name = re.sub(r'[^A-Za-z0-9._-]', '-', source.rstrip('/').rsplit('/', 1)[-1])
             name = name[:-4] if name.endswith('.git') else name
             dest = os.path.join(CLONE, 'overlays', name or 'overlay')
+            if os.path.isdir(dest) and run(['git', '-C', dest, 'remote', 'get-url', 'origin'])[1] \
+                    != source:  # another overlay with the same name: keep both apart
+                dest += '-' + hashlib.sha1(source.encode('utf-8')).hexdigest()[:8]
             if not os.path.isdir(dest):
                 ok, out = run(['git', 'clone', '--quiet', source, dest])
                 if not ok:

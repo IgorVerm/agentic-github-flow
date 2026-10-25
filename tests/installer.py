@@ -329,6 +329,51 @@ class InstallerTests(unittest.TestCase):
         self.assertIsNone(self.read('.codex', 'hooks.json'))
         self.assertFalse(os.path.lexists(rules))
 
+    @unittest.skipIf(WINDOWS, 'creating a symlink needs extra rights on Windows')
+    def test_uninstall_does_not_write_through_symlinked_settings(self):
+        os.makedirs(self.path('.codex'))
+        code, out = self.install('--guards')
+        self.assertEqual(code, 0, out)
+        moved = {}
+        for folder, name in (('.claude', 'settings.json'), ('.codex', 'hooks.json')):
+            target = self.path('dotfiles', name)
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            shutil.move(self.path(folder, name), target)
+            os.symlink(target, self.path(folder, name))
+            moved[target] = self.read('dotfiles', name)
+        code, out = self.install('--uninstall')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out.count('is a symlink'), 2, out)
+        for target, before in moved.items():
+            with open(target, 'rb') as f:
+                after = f.read()
+            if REAL:  # the real Claude CLI edits its own keys through the link; ours stay
+                self.assertEqual(json.loads(after).get('permissions'),
+                                 json.loads(before).get('permissions'), target)
+            else:
+                self.assertEqual(after, before, target)
+        self.assertTrue(os.path.islink(self.path('.claude', 'settings.json')))
+
+    @unittest.skipIf(REAL, 'a stand-in case: two overlay repositories with the same name')
+    def test_overlays_with_the_same_name_stay_apart(self):
+        urls = []
+        for team in ('team-a', 'team-b'):
+            repo = os.path.join(self.home, team, 'overlay')
+            os.makedirs(repo)
+            with open(os.path.join(repo, 'AGENTS.md'), 'w') as f:
+                f.write('# %s\n\nMARKER-%s\n' % (team, team))
+            env = dict(os.environ, **self.git_env)
+            subprocess.run(['git', '-C', repo, 'init', '-q', '-b', 'main'], check=True, env=env)
+            subprocess.run(['git', '-C', repo, 'add', '--', 'AGENTS.md'], check=True, env=env)
+            subprocess.run(['git', '-C', repo, 'commit', '-q', '-m', 'x'], check=True, env=env)
+            posix = repo.replace('\\', '/')
+            urls.append('file://' + (posix if posix.startswith('/') else '/' + posix))
+        code, out = self.install('--overlay', urls[0], '--overlay', urls[1])
+        self.assertEqual(code, 0, out)
+        codex_md = self.read('.codex', 'AGENTS.md').decode()
+        self.assertIn('MARKER-team-a', codex_md)
+        self.assertIn('MARKER-team-b', codex_md)
+
     def test_overlay_in_both_blocks(self):
         overlay = self.path('company-overlay')
         self.write(b'# Example Company rules\n\nOVERLAY-MARKER: data classes apply.\n',

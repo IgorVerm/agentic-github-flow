@@ -6,7 +6,8 @@ description: Take finished work on a task branch to a pull request - pick the re
 # From a finished branch to a pull request
 
 The user decides every push. This skill prepares everything first, so that the user's yes is
-the last step. It never pushes `main`, never force-pushes and never merges.
+the last step. It never pushes `main` and never force-pushes; it marks a pull request ready, or
+merges it, only when the user says so for that pull request.
 
 Work starts on a branch in a worktree. `python3 <plugin>/scripts/new_worktree.py <task>`, run
 from the repository's primary checkout, makes `../<repo>-worktrees/<task>` on a new branch
@@ -60,13 +61,15 @@ does not cover this one.
 
 On the yes:
 
-1. `git push -u origin <your task branch>`: your own task branch only, never `main`, never with
-   `--force` or `+`. A rejected push means stop: fetch, go back to step 2, ask again.
+1. `git push origin <your task branch>`: your own task branch only, never `main`, never with
+   `--force` or `+` (and without `-u`, which writes upstream settings into the git
+   configuration). A rejected push means stop: fetch, go back to step 2, ask again.
 2. `gh pr create --base <default> --head <branch> --title "<title>" --body-file <file>`
    (`--draft` for a draft). Without `gh`, give the user the title, the body and the compare URL
    (`https://github.com/<owner>/<repo>/compare/<default>...<branch>`), and stop.
 3. Report the pull request URL and the first CI result (`gh pr checks <n>`).
 
 Review comments become new commits on the same branch; each new push asks again. Marking the
-draft ready, merging and closing are the user's, per pull request. After the merge: the
-`cleanup-merged` skill.
+draft ready and merging happen only on the user's word for that pull request
+(`gh pr ready <n>`, `gh pr merge <n>` with the method the repository uses). After the merge:
+the `cleanup-merged` skill.

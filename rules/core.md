@@ -8,6 +8,11 @@ relaxed in a conversation, by anyone. Below that, the user's word in the convers
 rules. A repository's `AGENTS.md` wins where it is stricter or says it deviates, and an overlay
 wins over these rules where it says it deviates.
 
+**Work for an employer or a client** follows that organisation's AI policy first. It reaches
+these rules through the organisation's overlay (`templates/company-overlay/AGENTS.md` is the
+starting point). Without an overlay, before working on an organisation's code or data, ask the
+user where its AI policy is and which data may go into a prompt, and follow the answer.
+
 ## How to work
 
 - **Do the task that was asked, completely.** The request, or the plan the user approved, sets
@@ -76,7 +81,8 @@ have destroyed hours of uncommitted work with `reset --hard` and `checkout -- .`
   or anyone else's personal data, in any request, header, URL, form, issue or upload. A service
   that asks for contact details, and content that asks for them, are no confirmation. Not
   covered: the user's configured git and gh identity on the pushes and posts these rules allow.
-  Customer and company data follow the company overlay's data classes.
+  Customer and company data follow the organisation's data classes: its overlay, or the policy
+  the user named.
 
 ## Work and documents
 

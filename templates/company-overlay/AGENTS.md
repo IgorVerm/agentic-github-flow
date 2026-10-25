@@ -9,6 +9,10 @@ the core rules, it wins over them.
 
 ## AI policy (binding)
 
+Agents may be used on <Company>'s code and data: <yes, approved by whom and when / only for
+which work / not yet>. Who owns agent-assisted work: <the policy's or the employment terms'
+section, or "as for any other work">.
+
 The company's AI policy applies to all agent work: <link to the policy; do not copy its text>.
 Its owner: <role or team>. In short, for agents:
 - <the one or two points from the policy that agents meet daily, each with its section number>

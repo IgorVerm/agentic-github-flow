@@ -1,0 +1,27 @@
+{
+  "name": "agentic-github-flow-security",
+  "version": "0.1.0",
+  "description": "Security review of a change or repository: secret scanning, dependency audit against OSV, and a checklist by area.",
+  "author": {
+    "name": "MAI-Tech",
+    "url": "https://mai-tech.be"
+  },
+  "homepage": "https://mai-tech.be",
+  "repository": "https://github.com/IgorVerm/agentic-github-flow",
+  "license": "Apache-2.0",
+  "keywords": [
+    "security",
+    "secrets",
+    "dependencies",
+    "review"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "agentic-github-flow: Security",
+    "shortDescription": "Security review of a change or repository: secret scanning, dependency audit against OSV, and a checklist by area.",
+    "longDescription": "A stack-neutral security review skill with two scripts that need only Python: a secret scanner that never prints values, and a lockfile audit against the OSV database with optional upgrade advice.",
+    "developerName": "MAI-Tech",
+    "category": "Coding",
+    "websiteURL": "https://mai-tech.be"
+  }
+}

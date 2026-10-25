@@ -4,7 +4,8 @@ Checked on 2026-10-25.
 
 ## State
 
-- Version 0.1.0 of all four plugins: core, security, web-deploy, guards. Not published yet.
+- Four plugins: core, security, web-deploy, guards; each version lives in its manifests
+  (`plugins/<name>/.claude-plugin/plugin.json`). Not published yet.
 - Maintainers: the author named in `NOTICE`.
 - Lanes skills (requirements, open-issue, lane-handover, archive-finished-chats) are planned for
   a second release, after a pilot.

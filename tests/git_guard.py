@@ -68,6 +68,9 @@ BLOCK = [
     "env -S 'git reset --hard'", "env --split-string='git push --force'",
     "env -S'git clean -fd'", 'git push origin -- +main', "g''it reset --hard",
     'eval ' * 10 + 'git status',
+    # brace expansion is still blocked when git is the command, in any spelling
+    '/usr/bin/git push origin {-f,main}', 'env A=b git reset {--hard,HEAD}',
+    'cd repo && git push {origin,upstream} +main', 'GIT reset {--hard,HEAD}',
 ]
 
 ALLOW = [
@@ -108,6 +111,9 @@ ALLOW = [
     'git show HEAD@{1}', 'git reflog show main@{2}', 'echo ${HOME}', 'eval eval git status',
     "git commit -m $'line1\\nline2' -- a.md", "git log --format='{%h,%s}'",
     'find . -name "*.py" -exec wc -l {} +', "printf $'a\\tb\\n'",
+    # brace expansion without git as a command word: words that merely contain git or gh
+    'mkdir -p src/{high,low}', 'cp night.txt{,.bak}', 'mkdir -p .github/{workflows,ISSUE_TEMPLATE}',
+    'touch {highlight,digit}.md', 'mv my-git-notes.{txt,md}', 'ls ~/.gitconfig.d/{a,b}',
 ]
 
 

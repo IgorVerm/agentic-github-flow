@@ -25,7 +25,7 @@ vendors' documentation and not yet exercised in a live project); the list for th
    the repository already proves is not re-proven here.
 2. **Secrets and dependencies** as `review-security` steps 2 and 3: `scan_secrets.py` with
    `--history`, and `audit_dependencies.py --level moderate --upgrades` (ask before its first
-   network call in the repository). A secret found stops the check and goes to the user first.
+   network call in the repository, naming osv.dev, the npm registry, PyPI and endoflife.date). A secret found stops the check and goes to the user first.
 3. **Supabase**: [supabase.md](supabase.md). Row-level security on every exposed table with a
    policy per operation, grants, security definer functions, views, storage buckets, where each
    key is used, and `config.toml` as the reviewable home of the auth settings.

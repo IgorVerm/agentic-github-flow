@@ -18,8 +18,10 @@ What it reads: every lockfile under <repo> outside build and dependency folders:
 against the vendor's supported-versions list by hand. Each package goes to OSV as name, ecosystem and version:
 that is all that leaves the machine (POST https://api.osv.dev/v1/querybatch, then GET
 /v1/vulns/<id> for each advisory found). Where a `package-lock.json` has npm beside it, `npm
-audit --json` runs too (it sends the same kind of data to the npm registry) and the two answers
-are compared, so a difference between the sources is visible instead of silently trusted.
+audit --json` runs too, always against the public registry (`--registry=https://registry.npmjs.org/`,
+so a `.npmrc` in the audited repository cannot redirect it; it sends the same kind of data) and
+the two answers are compared, so a difference between the sources is visible instead of
+silently trusted. `--no-npm` leaves it out.
 
 Output, one line per advisory and package:
   <level>  <id>  <ecosystem>:<name>@<version>  direct|transitive[,dev]  fixed: <versions>  <lockfile>  <summary>
@@ -60,6 +62,7 @@ import urllib.error
 import urllib.request
 
 OSV = 'https://api.osv.dev/v1'
+NPM_REGISTRY = 'https://registry.npmjs.org/'
 EOL = 'https://endoflife.date/api'
 EOL_ALIASES = {'next': 'nextjs', 'node': 'nodejs', '@angular/core': 'angular', 'vue': 'vue', 'nuxt': 'nuxt'}
 UPGRADE_RANK = {'eol': 'high', 'major-behind': 'low', 'behind': 'info', 'current': 'info', 'unknown': 'info'}
@@ -543,8 +546,9 @@ def npm_audit(directory):
     if not shutil.which('npm'):
         return None, 'npm not on PATH'
     try:
-        r = subprocess.run(['npm', 'audit', '--json', '--no-fund'], cwd=directory, capture_output=True,
-                           text=True, timeout=180)
+        # the public registry, whatever a .npmrc in the audited repository names
+        r = subprocess.run(['npm', 'audit', '--json', '--no-fund', '--registry=' + NPM_REGISTRY],
+                           cwd=directory, capture_output=True, text=True, timeout=180)
         data = json.loads(r.stdout or '{}')
     except (subprocess.TimeoutExpired, ValueError, OSError) as exc:
         return None, 'npm audit failed: %s' % type(exc).__name__
@@ -623,6 +627,11 @@ def main(argv):
             advice = upgrades(packages, runtimes(repo), client, datetime.date.today().isoformat())
     except RuntimeError as exc:
         print('audit_dependencies: %s' % exc, file=sys.stderr)
+        return 2
+    except (KeyError, TypeError, AttributeError, IndexError) as exc:
+        # an answer in an unexpected shape is a failed audit (2), not a finding (1)
+        print('audit_dependencies: unexpected answer from the vulnerability data (%s: %s)'
+              % (type(exc).__name__, exc), file=sys.stderr)
         return 2
     finally:
         client.close()

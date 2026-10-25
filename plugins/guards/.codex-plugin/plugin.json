@@ -1,0 +1,26 @@
+{
+  "name": "agentic-github-flow-guards",
+  "version": "0.1.0",
+  "description": "Claude Code hooks that refuse destructive git commands and ask before personal data leaves the machine.",
+  "author": {
+    "name": "MAI-Tech",
+    "url": "https://mai-tech.be"
+  },
+  "homepage": "https://mai-tech.be",
+  "repository": "https://github.com/IgorVerm/agentic-github-flow",
+  "license": "Apache-2.0",
+  "keywords": [
+    "git",
+    "safety",
+    "hooks",
+    "privacy"
+  ],
+  "interface": {
+    "displayName": "agentic-github-flow: Guards",
+    "shortDescription": "Claude Code hooks that refuse destructive git commands and ask before personal data leaves the machine.",
+    "longDescription": "A git guard that blocks force-push, hard reset, history rewrites and discarded work in any spelling, and a personal-data check on outbound tool calls. The installer adds the matching deny list and the Codex rules.",
+    "developerName": "MAI-Tech",
+    "category": "Coding",
+    "websiteURL": "https://mai-tech.be"
+  }
+}

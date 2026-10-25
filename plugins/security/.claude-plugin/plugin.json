@@ -1,0 +1,18 @@
+{
+  "name": "agentic-github-flow-security",
+  "version": "0.1.0",
+  "description": "Security review of a change or repository: secret scanning, dependency audit against OSV, and a checklist by area.",
+  "author": {
+    "name": "MAI-Tech",
+    "url": "https://mai-tech.be"
+  },
+  "homepage": "https://mai-tech.be",
+  "repository": "https://github.com/IgorVerm/agentic-github-flow",
+  "license": "Apache-2.0",
+  "keywords": [
+    "security",
+    "secrets",
+    "dependencies",
+    "review"
+  ]
+}

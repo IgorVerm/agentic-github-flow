@@ -1,0 +1,95 @@
+{
+  "name": "agentic-github-flow",
+  "description": "Rules and skills for a pull-request workflow with Claude Code and Codex.",
+  "owner": {
+    "name": "MAI-Tech",
+    "url": "https://mai-tech.be"
+  },
+  "metadata": {
+    "description": "Rules and skills for a pull-request workflow with Claude Code and Codex.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "agentic-github-flow-core",
+      "source": "./plugins/core",
+      "description": "Core skills for a pull-request workflow with Claude Code and Codex: spec-first, repo-docs, ship-change and cleanup-merged.",
+      "version": "0.1.0",
+      "author": {
+        "name": "MAI-Tech",
+        "url": "https://mai-tech.be"
+      },
+      "homepage": "https://mai-tech.be",
+      "repository": "https://github.com/IgorVerm/agentic-github-flow",
+      "license": "Apache-2.0",
+      "keywords": [
+        "workflow",
+        "git",
+        "pull-request",
+        "worktree",
+        "agents"
+      ],
+      "category": "development"
+    },
+    {
+      "name": "agentic-github-flow-security",
+      "source": "./plugins/security",
+      "description": "Security review of a change or repository: secret scanning, dependency audit against OSV, and a checklist by area.",
+      "version": "0.1.0",
+      "author": {
+        "name": "MAI-Tech",
+        "url": "https://mai-tech.be"
+      },
+      "homepage": "https://mai-tech.be",
+      "repository": "https://github.com/IgorVerm/agentic-github-flow",
+      "license": "Apache-2.0",
+      "keywords": [
+        "security",
+        "secrets",
+        "dependencies",
+        "review"
+      ],
+      "category": "development"
+    },
+    {
+      "name": "agentic-github-flow-web-deploy",
+      "source": "./plugins/web-deploy",
+      "description": "Pre-deploy hardening check for a website on Vercel with Supabase and optional Google sign-in.",
+      "version": "0.1.0",
+      "author": {
+        "name": "MAI-Tech",
+        "url": "https://mai-tech.be"
+      },
+      "homepage": "https://mai-tech.be",
+      "repository": "https://github.com/IgorVerm/agentic-github-flow",
+      "license": "Apache-2.0",
+      "keywords": [
+        "security",
+        "vercel",
+        "supabase",
+        "deploy"
+      ],
+      "category": "development"
+    },
+    {
+      "name": "agentic-github-flow-guards",
+      "source": "./plugins/guards",
+      "description": "Claude Code hooks that refuse destructive git commands and ask before personal data leaves the machine.",
+      "version": "0.1.0",
+      "author": {
+        "name": "MAI-Tech",
+        "url": "https://mai-tech.be"
+      },
+      "homepage": "https://mai-tech.be",
+      "repository": "https://github.com/IgorVerm/agentic-github-flow",
+      "license": "Apache-2.0",
+      "keywords": [
+        "git",
+        "safety",
+        "hooks",
+        "privacy"
+      ],
+      "category": "development"
+    }
+  ]
+}

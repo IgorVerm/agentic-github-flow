@@ -1,0 +1,50 @@
+{
+  "spec-first": {
+    "should": [
+      "I want a multiplayer mode for the game. Where do we start?"
+    ],
+    "should_not": [
+      "Rename the variable tmp to buffer in io.py."
+    ]
+  },
+  "repo-docs": {
+    "should": [
+      "Set up the agent documents for this new repository."
+    ],
+    "should_not": [
+      "Fix the failing test in tests/test_io.py."
+    ]
+  },
+  "ship-change": {
+    "should": [
+      "The fix for issue 12 is committed on my task branch and the tests pass. Get it into a pull request."
+    ],
+    "should_not": [
+      "Run the unit tests for the parser module and tell me which fail."
+    ]
+  },
+  "cleanup-merged": {
+    "should": [
+      "Pull request 41 was merged on GitHub. Clean up its worktree and branch."
+    ],
+    "should_not": [
+      "Close issue 50 as a duplicate of issue 49; no code or branch was created."
+    ]
+  },
+  "review-security": {
+    "should": [
+      "Before we merge the new admin role checks and the access policy changes, review them for security holes."
+    ],
+    "should_not": [
+      "Review this refactor of the date formatting helpers for readability."
+    ]
+  },
+  "check-web-deploy": {
+    "should": [
+      "The site is on Vercel with Supabase login. Is it safe to go live on the real domain?"
+    ],
+    "should_not": [
+      "Deploy the current branch to Vercel production now."
+    ]
+  }
+}

@@ -46,5 +46,21 @@
     "should_not": [
       "Deploy the current branch to Vercel production now."
     ]
+  },
+  "open-issue": {
+    "should": [
+      "While fixing the parser I noticed the CSV export drops the last row. Open an issue for it so someone can pick it up later."
+    ],
+    "should_not": [
+      "List the open issues labelled bug and summarise them for me."
+    ]
+  },
+  "requirements": {
+    "should": [
+      "Issue 30 is labelled needs-spec. Interview me about it and split it into ready issues the agents can pick up."
+    ],
+    "should_not": [
+      "The CSV export drops the last row. Open an issue for that defect."
+    ]
   }
 }

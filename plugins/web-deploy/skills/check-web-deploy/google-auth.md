@@ -8,6 +8,11 @@ Web Server Applications, OpenID Connect, app configuration and verification, OAu
 practices and Cross-Account Protection pages, the OWASP OAuth cheat sheet
 (read 2026-10-25).
 
+A site that verifies Google's ID token itself, without Supabase, gets the token checks of
+`review-security/checklist.md` §2; the console lines below apply to it all the same. Service
+accounts for calls to Google APIs: `review-security/checklist.md` §4 and
+[dashboard.md](dashboard.md).
+
 ## The flow, in one paragraph
 
 The browser calls `supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo } })`;

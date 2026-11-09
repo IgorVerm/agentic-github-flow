@@ -1,11 +1,12 @@
 # The dashboard list for the user
 
-Read with [SKILL.md](SKILL.md). This is the template for step 7: copy the lines that apply to
-the project, fill in the project's names, drop the rest, translate it into the user's language, and
-post it as one signed comment on the owning issue after the findings. Each line says where to
-look and what the correct state is; the user ticks it or writes what they see. An agent never opens
-these dashboards itself. The sources behind each line are the same
-as in [supabase.md](supabase.md), [vercel.md](vercel.md) and [google-auth.md](google-auth.md).
+Read with [SKILL.md](SKILL.md). This is the template for step 8: copy the lines that apply to
+the project, fill in the project's names, drop the rest, translate it into the user's language,
+and post it as one signed comment on the owning issue after the findings. Each line says where
+to look and what the correct state is; the user ticks it or writes what they see. An agent never
+opens these dashboards itself. The sources behind each line are the same as in
+[supabase.md](supabase.md), [vercel.md](vercel.md), [mail.md](mail.md), [privacy.md](privacy.md)
+and [google-auth.md](google-auth.md).
 
 ## Supabase (Dashboard → project)
 
@@ -18,6 +19,13 @@ as in [supabase.md](supabase.md), [vercel.md](vercel.md) and [google-auth.md](go
       Cloud client, the secret is set; *Skip nonce check* off.
 - [ ] **Authentication → Rate Limits and Attack Protection**: default rate limits on; CAPTCHA
       enabled for sign-up, sign-in and password reset on a public site.
+- [ ] **Authentication → Sessions**: refresh token reuse detection on, its interval at the
+      default 10 s; JWT expiry at the default 3600 s unless the issue says otherwise (never
+      below 300 s).
+- [ ] **Authentication → Emails → SMTP Settings** (when the site sends auth mail): custom SMTP
+      on, the sender on the project's own domain ([mail.md](mail.md)).
+- [ ] **Realtime → Settings** (when Realtime is used): public channel access off unless the
+      issue names a public channel.
 - [ ] **Advisors → Security Advisor**: zero errors (0002, 0010, 0013, 0015, 0019, 0023); each
       warning (0003, 0006, 0011, 0014, 0016, 0024, 0025, 0028, 0029) either fixed or named on the
       issue with its reason. Paste the counts, not the table.
@@ -47,6 +55,27 @@ as in [supabase.md](supabase.md), [vercel.md](vercel.md) and [google-auth.md](go
       of [vercel.md](vercel.md) §Headers (the user runs it, or an agent runs it against the public
       production URL only: a read of a public page carries no personal data).
 
+## Mail (when the site sends mail)
+
+- [ ] **Resend → Domains** (or the provider in use): the sending domain is verified; the DNS
+      results of [mail.md](mail.md) are pasted as pass or fail per record.
+- [ ] **Resend → API Keys**: the application's key has the narrowest permission that sends,
+      with the domain restriction set to the sending domain; unused keys deleted.
+- [ ] **Quota**: the plan's sending limit is known and a usage alert is set where the provider
+      offers one (a mail endpoint without a limit spends it).
+
+## Privacy (EU)
+
+- [ ] **Supabase → Project Settings**: the project's region is in the EU (Frankfurt, Ireland,
+      Paris, Stockholm; London and Zurich are not EU), and the privacy notice says so.
+- [ ] **Processors**: Supabase, Vercel, the mail provider and any analytics or embed provider
+      are named in the privacy notice and in the record of processing; their DPAs are part of
+      their terms (no signature needed) and cover transfers with the EU standard clauses.
+- [ ] **Record of processing** (GDPR Art. 30) exists: the under-250-employees exemption does not
+      apply to processing that is not occasional, such as user accounts.
+- [ ] **Breach**: it is written down who notifies the supervisory authority within 72 hours of
+      learning of a personal-data breach (Art. 33), and where the contact details are.
+
 ## Google Cloud Console (when Google sign-in is used)
 
 - [ ] **APIs & Services → Credentials → the OAuth client**: type Web application; Authorized
@@ -61,7 +90,19 @@ as in [supabase.md](supabase.md), [vercel.md](vercel.md) and [google-auth.md](go
 - [ ] **Credentials**: unused OAuth clients deleted; the client secret rotated if it ever left
       the two places it belongs (Supabase's provider setting and the local ignored `.env`).
 
+## Google Cloud service accounts (when the code calls Google APIs)
+
+- [ ] **IAM & Admin → Service Accounts**: one per application; unused ones disabled; no
+      user-managed key on an account whose code runs on Vercel (Workload Identity Federation)
+      or on Google Cloud (the attached account).
+- [ ] **IAM & Admin → IAM**: no service account holds Owner or Editor; no project-wide Service
+      Account User or Service Account Token Creator grant.
+- [ ] **IAM & Admin → Organization Policies**: *Disable service account key creation* and
+      *Disable service account key upload* enforced (the default for organisations created
+      since 3 May 2024); *Service Account Key Exposure Response* set to `DISABLE_KEY`.
+
 ## Verdict line
 
 `Verdict: ready` when every applicable box above is confirmed and no Critical or High finding is
-open; otherwise `Verdict: not ready — <what blocks>`. The user deploys.
+open without a current acceptance ([SKILL.md](SKILL.md) step 9); otherwise
+`Verdict: not ready — <what blocks>`. The user deploys.

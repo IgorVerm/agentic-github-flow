@@ -15,7 +15,7 @@ has one home; everything else links to it.
 | GitHub issues | What is not done? | Every piece of concrete work, with its status. | The only queue. |
 | `ROADMAP.md` | Where is this going? | Direction, phases, dependencies, links to milestones. | No task list, no finished items. |
 | `DESIGN_DECISIONS.md` | What did the decision-makers decide, and why? | One entry per ruling: the decision in their words, why, what was rejected, what it binds. Newest first. | Re-opening one needs the person who decided. |
-| `archive_implementations.md` | What landed? | One line per merge: date, item, issue, pull request, merge commit. | Not required reading. |
+| `archive_implementations.md` | What landed? | One line per merge: date, item, issue, pull request, merge commit (local-main mode: the landed commit). | Not required reading. |
 | `docs/design/<system>.md` | How does this system work, and why this way? | The design of record per system: mechanism and rationale in the present tense. | Read when working on that system. |
 | `docs/archive/` | What used to be true? | Superseded documents, each naming its replacement. | Never on a reading route. |
 

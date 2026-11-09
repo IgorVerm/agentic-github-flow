@@ -4,7 +4,7 @@ Use the same lifecycle ([method.md](method.md) §4) and the common steps of
 [issue-handover](SKILL.md): leave nothing half-held, make the branch ready to push and record
 it, pick the next ready unclaimed issue with its overlap check, start the next chat, claim its
 issue and hand over the brief, ask the user for the push, and archive only once the work is on
-GitHub. Every chain hands itself over; there is no standing coordinator chat. This file replaces
+GitHub (in local-main mode: land the work, tell the user, and archive once it has landed). Every chain hands itself over; there is no standing coordinator chat. This file replaces
 only the Claude-specific calls of that procedure: the background start with
 `start_issue_chat.py`, the desktop app's session tools and the archive guard hook. Queue,
 labels, questions, pushes, context limits and worktrees keep their owners there; nothing here
@@ -31,7 +31,8 @@ repeats them.
 - **Status:** report in this chat; the issue's claim and state comments keep their duties. Do
   not send routine status to other chats.
 - **Archive:** after the push, the pull request comment and the worktree check
-  (`chat_archivable.py` says `ok`), use `set_thread_archived`, only within the settings
+  (`chat_archivable.py` says `ok`), or in local-main mode after the landing comment and that
+  check, use `set_thread_archived`, only within the settings
   section's grant or the user's request. Archiving a Codex chat and removing a worktree are
   separate: never use `archive_worktree` or a deletion for repository cleanup; that is the
   `cleanup-merged` skill after the merge.

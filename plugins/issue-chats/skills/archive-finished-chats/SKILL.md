@@ -1,6 +1,6 @@
 ---
 name: archive-finished-chats
-description: Archive the finished issue chats of a repository - chats whose worktrees are clean and whose commits are on GitHub - and file this chat under the repository's sidebar section. Use at the start of every issue chat, when the user asks to tidy or archive old chats, or when the sidebar fills with finished chats.
+description: Archive the finished issue chats of a repository - chats whose worktrees are clean and whose commits are on GitHub, or landed on local main in local-main mode - and file this chat under the repository's sidebar section. Use at the start of every issue chat, when the user asks to tidy or archive old chats, or when the sidebar fills with finished chats.
 compatibility: Claude Code desktop app only (its session and sidebar tools). Elsewhere it lists the chats that look finished and the user archives them.
 ---
 
@@ -20,8 +20,8 @@ The worktree check is `python3 <plugin>/scripts/chat_archivable.py <worktree>`, 
 the folder two levels above this skill's folder
 ([chat_archivable.py](../../scripts/chat_archivable.py)): `ok` when the worktree is gone, or
 clean with its HEAD in origin's default branch or in the branch's own `origin/<branch>` after a
-fetch; otherwise `keep:` and the reason. A chat whose branch still waits for the user's push
-fails it, and stays.
+fetch, or in local-main mode clean with its HEAD on the local landing branch; otherwise `keep:`
+and the reason. A chat whose branch still waits for the user's push fails it, and stays.
 
 0. **Stand on your own.** If another session started this chat (`get_session "self"` shows a
    `parentSessionId` and `detached` false, as after a card), call `detach_session "self"`: a
@@ -51,7 +51,7 @@ fails it, and stays.
    whose worktree another unarchived chat is working in (a branch in flight it took over):
    archiving would remove that chat's working folder.
 4. **Archive** with `archive_session` and `reason`: `finished issue chat #<issue>; worktree
-   clean, on GitHub`. The plugin's guard hook repeats step 3 and may deny the call; it does not
+   clean, on GitHub` (or `landed on local main`). The plugin's guard hook repeats step 3 and may deny the call; it does not
    check step 2 or the descendants: those stay yours.
 5. **File this chat** under the sidebar section: `list_sections`, `create_section` only if it is
    missing, then `move_sessions` with `"self"` and its `section_id`. One section per

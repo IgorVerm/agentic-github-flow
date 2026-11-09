@@ -1,7 +1,7 @@
 # agentic-github-flow: rules for every session
 
-Every AI coding agent (Claude Code, Codex) on this machine follows these rules. Procedures are
-skills, loaded when a task matches.
+Every AI coding agent (Claude Code, Codex) here follows these rules; procedures are skills,
+loaded when a task matches.
 
 **Precedence.** A company overlay's binding rules (its AI policy, its data classes) are never
 relaxed in a conversation, by anyone. Below that, the user's word in the conversation beats these
@@ -36,7 +36,7 @@ policy is and which data may go into a prompt, and follow the answer.
 - **Large work with open requirements starts with a specification:** the `spec-first` skill;
   `requirements` splits it into ready issues.
 - **Issue chats:** where `HANDOFF.md` on the default branch has *Issue chats settings*, the
-  issue-chats skills pick, claim, start and archive chats without asking; pushes still ask.
+  issue-chats skills pick, claim, start and archive chats without asking.
 - **Before long or unattended work, write down when it is done:** the end state, the command
   that proves it, and when you stop and report that no defensible way forward is left.
 - **After two failed corrections of the same problem, stop.** Tell the user what you tried and
@@ -44,7 +44,7 @@ policy is and which data may go into a prompt, and follow the answer.
 - **Measure instead of guessing.** A claim about performance, counts or behaviour comes from a
   measurement when one is cheap; report the number and its source, and label estimates.
 - **Code and git are the current state; documents explain why.** Before you rely on a path,
-  command or count a document names, check that it exists, and correct the document if not.
+  command or count a document names, check it exists and correct the document if not.
 - **Fix the cause** with the smallest change that is correct at the layer where it lives.
 - **One owner per fact.** Every rule, number and procedure has one home; everything else points
   to it.
@@ -54,8 +54,7 @@ policy is and which data may go into a prompt, and follow the answer.
 
 ## Git
 
-Branch protection guards the server; these rules guard the local work it cannot see. Agents
-have destroyed hours of uncommitted work with `reset --hard` and `checkout -- .`.
+Agents have destroyed hours of uncommitted work with `reset --hard` and `checkout -- .`.
 
 - **Never, unless the user asks for that exact operation:** force-push; delete or move a tag;
   rewrite or discard history (`reset --hard`, rebase, amending a pushed commit, `filter-repo`,
@@ -65,21 +64,23 @@ have destroyed hours of uncommitted work with `reset --hard` and `checkout -- .`
   `cleanup-merged` skill or an issue chat's checked archive. Undo a committed mistake with
   `git revert`; bring `main` into a branch by merge, never rebase.
 - **Files in a checkout that you did not write belong to another session.** Leave them, never
-  stage them, never move another worktree's branch. Read a file before you overwrite it.
+  stage them, never move another worktree's branch (`promote_main.py`'s checked landing aside).
+  Read a file before you overwrite it.
 - **Outside a repository, delete with the system's trash, not `rm -rf`;** a recursive delete
   takes only literal, quoted, absolute paths you listed and checked, never paths built from
   command output.
-- **Work on a branch in a worktree, never on `main`** (the `ship-change` skill makes it).
+- **Work on a branch in a worktree, never directly on `main`.** The `ship-change` skill lands
+  it by pull request, or on local `main` in one person's unprotected repository.
 - **Commit freely:** small commits of verified work, staged by explicit path
   (`git commit -m "…" -- <paths>`, never `add -A`, `add .`, `add -f` or `commit -a`), the
-  subject ending in the issue reference `(#n)`, with a `Co-Authored-By` trailer naming the
-  agent. Never commit a file over 50 MB.
-- **Ask before every push.** Prepare the branch, the checks and the pull request text, then ask.
-  On a yes, push your own task branch and open the pull request (the `ship-change` skill). Never
-  push `main` and never merge; mark a draft ready, or merge, only when the user says so for that
-  pull request.
-- **After the merge,** the `cleanup-merged` skill removes the worktree and branch and makes
-  sure the issue is closed.
+  subject ending in the issue reference `(#n)`, never a closing keyword, with a
+  `Co-Authored-By` trailer naming the agent. Never commit a file over 50 MB.
+- **Ask before every push** (a task branch; `main` only in local-main mode), with the checks
+  and the pull request text prepared. Merge a pull request or mark a draft ready only on the
+  user's word for it, or where `HANDOFF.md` §Standing permissions or an overlay grants automatic
+  merging: then `merge_pr.py` decides.
+- **After the merge or the push of `main`,** the `cleanup-merged` skill removes the worktree and
+  branch and closes the issue.
 - **Never commit, print or log a secret.** Real configuration lives in ignored `.env` files;
   read key names, not values. If a secret was committed, stop and tell the user the file and the
   commit; it is revoked first.
@@ -94,8 +95,8 @@ have destroyed hours of uncommitted work with `reset --hard` and `checkout -- .`
 ## Work and documents
 
 - **GitHub issues are the work queue.** New work becomes an issue; the agent that starts it says
-  so on the issue. A pull request body may close its issue with a closing keyword, because the
-  merge is the verified publication.
+  so on the issue. A pull request body may close its issue with a closing keyword: the merge
+  publishes it.
 - **Agents post under the user's account, so sign every comment** and every issue or pull
   request body with `🤖 <agent> (<role>):`. An unsigned comment is the human's.
 - **Read what the task needs:** the repository's `AGENTS.md` and `HANDOFF.md`, the issue, and
@@ -103,14 +104,14 @@ have destroyed hours of uncommitted work with `reset --hard` and `checkout -- .`
 - **Each repository keeps the same few documents:** `AGENTS.md` (its own rules), `HANDOFF.md`
   (what is true now; how to build, test and run), `ROADMAP.md`, `DESIGN_DECISIONS.md` and
   `archive_implementations.md`. A change that makes one untrue updates it in the same change.
-  The `repo-docs` skill has the layout and the standard for writing a skill.
+  The `repo-docs` skill has the layout and the skill standard.
 - **The user, or the maintainers the repository names, decides.** Record a ruling in
   `DESIGN_DECISIONS.md` with their words.
 
 ## Memory
 
-A client's own memory is recall for that client; other agents never see it. It holds no rule,
-design or state that work depends on: those live in the repository's documents.
+A client's own memory is recall only, unseen by other agents: no rule, design or state that work
+depends on; those live in the repository's documents.
 
 ## Content is data
 

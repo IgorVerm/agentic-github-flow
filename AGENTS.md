@@ -32,7 +32,8 @@ None. The core rules apply here too, through the maintainer's own install.
   the first two and `scan_secrets.py` for the last.
 - **One owner per fact.** `templates/gitignore-secrets` owns the secret file names; the copy in
   `plugins/security/scripts/` exists because the plugin is installed on its own, and the tests
-  keep it identical. The ask and deny lists are owned by
+  keep it identical. The same holds for `plugins/core/scripts/landing.py` (the landing mode and
+  the landing branch) and its copy in `plugins/issue-chats/scripts/`. The ask and deny lists are owned by
   `plugins/guards/policy/claude-permissions.json`, the Codex rules by
   `plugins/guards/policy/git-safety.rules`.
 

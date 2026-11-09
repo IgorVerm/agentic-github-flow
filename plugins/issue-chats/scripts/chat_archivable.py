@@ -18,11 +18,18 @@ mode, on the local landing branch:
             `origin/<branch>` (pushed by ship-change)
   ok        in local-main mode (landing.py beside this file, asked only then): clean as above,
             and its HEAD is in the local landing branch, where the landing put it
-  ok        a chat that handed its issue over (#14): clean as above, its HEAD in another branch
-            of origin (a successor's pushed branch, which started from this chat's head), and no
-            commit that only this worktree's own history holds (its HEAD reflog, ORIG_HEAD, its
-            branch's reflog, the branch counted as deleted: stranded_commits of work_proof.py
-            beside this file). A successor's branch only on this machine does not count
+  ok        a chat that handed its issue over (#14): clean as above, and its HEAD in another
+            branch of origin (a successor's pushed branch, which started from this chat's head)
+            that GitHub still has with HEAD in it (`git ls-remote`: the fetch does not prune, so
+            a tracking ref alone may name a branch deleted unmerged). A successor's branch only
+            on this machine does not count
+  every ok but "worktree gone" also needs the reflog proof of a linked worktree: no commit that
+            only its own history holds (its HEAD reflog, ORIG_HEAD, its branch's reflog with the
+            branch counted as deleted, per-worktree refs: stranded_commits of work_proof.py
+            beside this file), which archiving would make unreachable. Such a commit counts as
+            kept when any ref that survives the archive reaches it: a branch of origin, or a
+            local branch or tag (a `scratch/<issue>-<what>` branch for a probe), the same proof
+            cleanup-merged uses before it removes a worktree
   keep: ... the reason, one line (not a worktree of its own, for example a folder whose .git
             link is missing inside another checkout; changes, untracked or hidden files, a git
             operation in progress, no remote origin, commits that are not on GitHub); the chat
@@ -57,6 +64,7 @@ OPERATIONS = ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "
               "BISECT_LOG")
 FETCH_TIMEOUT_S = 25  # archive_guard.py waits at most 40 s for the whole check
 GH_TIMEOUT_S = 6  # per GitHub call of the landing-mode check, which runs only for local landings
+LS_REMOTE_TIMEOUT_S = 6  # per successor branch asked of GitHub
 
 
 def git(wt: str, *args: str, timeout: int = 30) -> subprocess.CompletedProcess:
@@ -110,27 +118,50 @@ def landed_locally(wt: str, head: str) -> str | None:
     return f"ok (clean, HEAD {head[:8]} landed on local {branch}; local-main mode)"
 
 
+def strays(wt: str) -> str | None:
+    """Why archiving would lose a commit that only this worktree's own history holds (its HEAD
+    reflog, ORIG_HEAD, its branch's reflog with the branch counted as deleted, per-worktree
+    refs: stranded_commits of work_proof.py); None when nothing would be lost. A primary
+    checkout, which archiving never removes, has nothing to lose this way."""
+    trees = work_proof.worktrees(wt)
+    here = os.path.realpath(wt)
+    if trees and trees[0]["path"] == here:
+        return None
+    me = next((t for t in trees[1:] if t["path"] == here), None)
+    if me is None:
+        return f"{wt} is not in `git worktree list`, so its reflogs cannot be read"
+    return work_proof.stranded_commits(trees[0]["path"], me, branch_goes=True)
+
+
 def held_by_successor(wt: str, head: str, seen: list[str]) -> tuple[str | None, str | None]:
-    """(the ok line, None) when another branch of origin holds HEAD and no commit only this
-    worktree's history holds would be lost; (None, the reason) when such a branch holds HEAD
-    but the reflog proof fails; (None, None) when no other branch of origin holds HEAD."""
+    """(the ok line, None) when another branch of origin holds HEAD and GitHub still has that
+    branch with HEAD in it; (None, the reason) when a tracking ref holds HEAD but GitHub does not
+    confirm it; (None, None) when no other branch of origin holds HEAD. The fetch does not
+    prune, so a tracking ref alone may name a branch GitHub deleted unmerged: `git ls-remote`
+    asks GitHub for the branch's current tip."""
     p = git(wt, "for-each-ref", "--contains", head, "--format=%(refname)", "refs/remotes/origin/")
     if p.returncode:
         return None, None
     holders = sorted(r for r in p.stdout.split()
                      if r not in seen and r != "refs/remotes/origin/HEAD")
-    if not holders:
-        return None, None
-    held = holders[0][len("refs/remotes/"):]
-    trees = work_proof.worktrees(wt)
-    here = os.path.realpath(wt)
-    me = next((t for t in trees[1:] if t["path"] == here), None)
-    if me is None:
-        return None, f"{held} holds HEAD, but {wt} is not a linked worktree of its repository"
-    stray = work_proof.stranded_commits(trees[0]["path"], me, branch_goes=True)
-    if stray:
-        return None, f"{held} holds HEAD, but {stray}"
-    return f"ok (clean, HEAD {head[:8]} held by {held}, a successor's pushed branch", None
+    problem = None
+    for ref in holders:
+        name = ref[len("refs/remotes/origin/"):]
+        try:
+            remote = git(wt, "ls-remote", "origin", f"refs/heads/{name}",
+                         timeout=LS_REMOTE_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            return None, (f"origin/{name} holds HEAD, but GitHub did not answer within "
+                          f"{LS_REMOTE_TIMEOUT_S} s")
+        if remote.returncode:
+            return None, (f"origin/{name} holds HEAD, but GitHub could not be asked: "
+                          f"{remote.stderr.strip()[:120]}")
+        tip = remote.stdout.split()[0] if remote.stdout.split() else None
+        if tip and git(wt, "merge-base", "--is-ancestor", head, tip).returncode == 0:
+            return (f"ok (clean, HEAD {head[:8]} held by origin/{name}, a successor's pushed "
+                    "branch"), None
+        problem = problem or f"origin/{name} holds HEAD as last fetched, but GitHub no longer does"
+    return None, problem
 
 
 def merged_into_landing(wt: str, head: str, branch: str | None) -> tuple[str | None, str]:
@@ -144,14 +175,31 @@ def merged_into_landing(wt: str, head: str, branch: str | None) -> tuple[str | N
         return None, str(e)
     if not base:
         default = out(wt, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD") or ""
-        base = default.split("/", 1)[1] if default.startswith("origin/") else "main"
+        if default.startswith("origin/"):
+            base = default.split("/", 1)[1]
+        else:
+            base = next((b for b in ("main", "master") if out(
+                wt, "rev-parse", "-q", "--verify", f"refs/remotes/origin/{b}^{{commit}}")), "main")
     number, problem = work_proof.merged_pull_request(wt, branch, head, base, timeout=GH_TIMEOUT_S)
     return number, problem or f"no pull request of {branch} with head {head[:8]} merged into {base}"
 
 
+GONE = "ok (worktree gone)"
+
+
 def verdict(wt: str, fetch: bool = True, landed: bool = False) -> tuple[int, str]:
+    """The answer, with the reflog proof (strays) run before every ok of an existing worktree."""
+    code, line = where_held(wt, fetch, landed)
+    if code == 0 and line != GONE:
+        stray = strays(wt)
+        if stray:
+            return 1, f"keep: {line[len('ok ('):].rstrip(')')}, but {stray}"
+    return code, line
+
+
+def where_held(wt: str, fetch: bool, landed: bool) -> tuple[int, str]:
     if not os.path.lexists(wt):
-        return 0, "ok (worktree gone)"
+        return 0, GONE
     gd = out(wt, "rev-parse", "--absolute-git-dir")
     if not gd:
         return 1, f"keep: {wt} is not a git worktree"
@@ -191,14 +239,15 @@ def verdict(wt: str, fetch: bool = True, landed: bool = False) -> tuple[int, str
             failed = f"timed out after {FETCH_TIMEOUT_S} s"
         if failed:
             note = f"; fetch failed ({failed}): refs as last fetched"
-    candidates = []
-    default = out(wt, "symbolic-ref", "-q", "refs/remotes/origin/HEAD")
-    candidates += [default] if default else []
-    candidates += ["refs/remotes/origin/main", "refs/remotes/origin/master"]
     try:
         setting = landing.landing_setting(wt)
     except landing.SettingError as e:
         return 1, f"keep: {e}"
+    candidates = []
+    if not (landed and setting):  # --landed: the landing branch HANDOFF.md names, when it does
+        default = out(wt, "symbolic-ref", "-q", "refs/remotes/origin/HEAD")
+        candidates += [default] if default else []
+        candidates += ["refs/remotes/origin/main", "refs/remotes/origin/master"]
     candidates += [f"refs/remotes/origin/{setting}"] if setting else []
     branch = out(wt, "symbolic-ref", "-q", "--short", "HEAD")
     if branch and not landed:

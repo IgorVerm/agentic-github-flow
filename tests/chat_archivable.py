@@ -250,6 +250,46 @@ class ChatArchivable(unittest.TestCase):
         self.git(succ, 'push', '-q', 'origin', 'agent/succ-reflog')
         self.assertKeep(pred, 'only this worktree')
 
+    def test_a_successor_branch_github_deleted_unmerged_keeps(self):
+        # the fetch does not prune: a tracking ref of a branch GitHub no longer has proves nothing
+        pred = self.worktree('pred-stale')
+        self.commit(pred, 'pred\n')
+        succ = self.worktree('succ-stale', base='agent/pred-stale')
+        self.git(succ, 'push', '-q', 'origin', 'agent/succ-stale')
+        self.git(self.origin, 'branch', '-D', 'agent/succ-stale')  # closed unmerged, deleted
+        self.git(pred, 'fetch', '-q', 'origin')
+        self.assertEqual(self.git(pred, 'rev-parse', '-q', '--verify',
+                                  'refs/remotes/origin/agent/succ-stale'),
+                         self.git(pred, 'rev-parse', 'HEAD'))  # the stale ref is still here
+        self.assertKeep(pred, 'not on GitHub')
+
+    def test_every_ok_runs_the_reflog_proof(self):
+        # a commit dropped by a reset is held only by this worktree's reflog: archiving the
+        # worktree would lose it, whatever branch holds HEAD
+        wt = self.worktree('pushed-dropped')
+        self.commit(wt, 'kept\n')
+        self.commit(wt, 'dropped\n')
+        self.git(wt, 'reset', '-q', '--hard', 'HEAD~1')
+        self.git(wt, 'push', '-q', 'origin', 'agent/pushed-dropped')
+        self.assertKeep(wt, 'only this worktree')
+        # a branch for the dropped commit (a scratch branch) keeps it, and the chat may go
+        dropped = self.git(wt, 'rev-parse', 'HEAD@{1}')
+        self.git(wt, 'branch', 'scratch/1-dropped', dropped)
+        self.assertOk(wt)
+
+    def test_landed_runs_the_reflog_proof(self):
+        wt = self.worktree('side-detached')
+        self.commit(wt, 'side\n')
+        self.git(wt, 'push', '-q', 'origin', 'agent/side-detached')
+        head = self.git(wt, 'rev-parse', 'HEAD')
+        merged = self.fake_gh([{'number': 7, 'headRefOid': head, 'baseRefName': 'main'}])
+        self.assertOk(wt, '--landed', env={'AGENTIC_GITHUB_FLOW_GH': merged})
+        self.git(wt, 'switch', '-q', '--detach')
+        self.commit(wt, 'after the merge, on a detached HEAD\n')
+        self.git(wt, 'switch', '-q', 'agent/side-detached')
+        self.assertKeep(wt, 'only this worktree', '--landed',
+                        env={'AGENTIC_GITHUB_FLOW_GH': merged})
+
     def test_a_live_local_successor_alone_keeps(self):
         # a successor's branch that is only on this machine is not on GitHub, in either mode
         pred = self.worktree('pred-local')

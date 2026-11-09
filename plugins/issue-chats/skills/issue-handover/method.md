@@ -194,8 +194,9 @@ not touch.
 
 A chat that handed its unfinished issue to a successor working on its own branch (started from
 this chat's head) passes once that branch is pushed: the check then finds HEAD in another branch
-of origin and proves with the reflogs that no commit only this worktree held is lost. A
-successor's branch only on this machine does not count, in either mode.
+of origin that GitHub still has, and, as for every `ok`, proves with the reflogs that no commit
+only this worktree held is lost. A successor's branch only on this machine does not count, in
+either mode.
 
 ### The next chat starts in the background
 
@@ -279,8 +280,12 @@ weeks. So it ends this way:
   archive a session when its pull request closes (its setting `auto_archive_on_pr_close`): the
   user's setting, not measured with side chats, and of no help in local-main mode, so it is an
   addition, never the rule.
-- **The guard** checks every side chat with `--landed`, whoever archives it: a side chat whose
-  work is only pushed, or only held by a successor's branch, is denied.
+- **The guard** checks a side chat with `--landed` whenever `archive_session` names it, the
+  chat itself or another: a side chat whose work is only pushed, or only held by a successor's
+  branch, is denied. It does not see the side chats that archiving their parent takes along
+  (§6, `archive_session`): a parent stays while a side chat it started is running or fails the
+  `--landed` check (`issue-handover`, *Never archive this chat*; `archive-finished-chats` step
+  3).
 
 ## 5. Sharing the repository
 

@@ -22,8 +22,9 @@ the folder two levels above this skill's folder
 ([chat_archivable.py](../../scripts/chat_archivable.py)): `ok` when the worktree is gone, or
 clean with its HEAD in origin's default branch or in the branch's own `origin/<branch>` after a
 fetch, or in local-main mode clean with its HEAD on the local landing branch, or, for a chat that
-handed its issue over, held by another branch of origin (a successor's pushed branch) with no
-commit that only its own reflogs hold; otherwise `keep:` and the reason. A chat whose branch
+handed its issue over, held by another branch of origin that GitHub still has (a successor's
+pushed branch); every `ok` but a gone worktree also needs that no commit only its own reflogs
+hold would be lost; otherwise `keep:` and the reason. A chat whose branch
 still waits for the user's push fails it, and stays. A side chat is checked with `--landed`
 added: `ok` only once its HEAD is in origin's default or landing branch, on the local landing
 branch in local-main mode, or the head of a merged pull request; a pushed branch with an open
@@ -34,7 +35,8 @@ pull request stays.
    chat still nested under its predecessor would be archived with it. If it is refused, say so.
    A chat that `issue-handover` started from the CLI has no parent: nothing to do. This step
    is for issue chats only: a side chat started for other work stays under its parent and ends
-   as method.md §4 *Side chats* says.
+   as method.md §4 *Side chats* says. Until it detaches, an issue chat counts as a side chat
+   and is archived only once its work landed or merged.
 1. **List** the sessions (`list_sessions`, limit 50; it gives each one's `startedBy`). Issue
    chats carry the title form (`<title prefix>#<issue> · <topic>`), requirements chats
    `<title prefix>Requirements · …` (method.md §2), or one of the older forms the settings list,

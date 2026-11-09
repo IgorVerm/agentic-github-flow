@@ -6,8 +6,8 @@ the next ready issue, starts the chat for it, and archives itself once the user 
 and its work is on GitHub, or, in local-main mode, once its work has landed on local main. Several such chains run at once, at most five (§1). *The guide*
 below is Anthropic's <https://code.claude.com/docs/en/best-practices>, cited by section.
 
-This file owns the method, the repository settings, the chat title form and the limit of five
-chains. The procedures are skills: `issue-handover` (pickup, claim and how a chat ends, in
+This file owns the method, the repository settings, the chat title form, the limit of five
+chains and how side chats end (§4). The procedures are skills: `issue-handover` (pickup, claim and how a chat ends, in
 [SKILL.md](SKILL.md)), `archive-finished-chats` (how finished chats leave the sidebar), and in
 the core plugin `open-issue` (how an issue becomes ready), `requirements` (how new work is
 specified and split into ready issues) and `ship-change` (review, checks, overlap check, the
@@ -192,6 +192,11 @@ branch is on GitHub: a chat whose work exists only in its worktree never leaves 
 local-main mode it passes once the work is on the local landing branch, which the archive does
 not touch.
 
+A chat that handed its unfinished issue to a successor working on its own branch (started from
+this chat's head) passes once that branch is pushed: the check then finds HEAD in another branch
+of origin and proves with the reflogs that no commit only this worktree held is lost. A
+successor's branch only on this machine does not count, in either mode.
+
 ### The next chat starts in the background
 
 Measured with Claude Code CLI 2.1.292 and the desktop app on macOS: the desktop app refuses
@@ -247,6 +252,36 @@ notification began. So:
   no half-made next chat is left, leaves a card (`start_session`, `"own_initiative"`) or, where
   there is no card, the brief to paste, and says so (`issue-handover`, *The card fallback*).
 
+### Side chats
+
+A side chat is a chat another chat started with `start_session` and that has not detached
+(`get_session` shows a `parentSessionId` and `detached` false), for work of its own: a fix, a
+review, a pull request. It is no issue chat, whatever its title, and nothing archived it so
+far: the app archives it with its parent only, and a parent the user types in may live for
+weeks. So it ends this way:
+
+- **It archives itself once its work has landed or merged,** not when it is merely pushed: in
+  local-main mode in the turn its work lands on the local landing branch (`local-main.md` §1 or
+  §2); in pull-request mode in the turn its pull request is merged in that chat, on the user's
+  word for that pull request or by `merge_pr.py` where a standing grant allows it. While the
+  pull request is open the chat stays, so a follow-up from its parent or a review comment still
+  reaches it. Then: `chat_archivable.py <its worktree> --landed` (this plugin's `scripts/`); on
+  `ok`, its report (it reaches the parent as the chat's last words), `get_session "self"`, and
+  `archive_session "self"` as the last call of the turn. On `keep:` it stays and says why.
+- **The brief says so.** A chat that starts a side chat ends the brief with: "Once your work has
+  landed on local main or your pull request is merged, and `chat_archivable.py --landed` says
+  ok for your worktree, report, then archive yourself (`archive_session "self"`); never before."
+  The parent does not archive a side chat on its own initiative: the app leaves that to the
+  user, and `archive-finished-chats` is the fallback.
+- **A merge elsewhere** (on GitHub, from another chat) does not reach the side chat. Then
+  `archive-finished-chats` archives it, under the settings section's standing permission or on
+  the user's yes (its step 1 lists side chats). For pull-request work the desktop app can also
+  archive a session when its pull request closes (its setting `auto_archive_on_pr_close`): the
+  user's setting, not measured with side chats, and of no help in local-main mode, so it is an
+  addition, never the rule.
+- **The guard** checks every side chat with `--landed`, whoever archives it: a side chat whose
+  work is only pushed, or only held by a successor's branch, is denied.
+
 ## 5. Sharing the repository
 
 Several chains work in one repository at once. What catches collisions between branches is the
@@ -289,9 +324,9 @@ Claude Code desktop tools, as read with the CLI version above. Codex has differe
 | `send_message` | delivers a message to another session as a user turn labelled with the sender's title; the result says "delivered" (its turn has started), "queued" or why not | it cannot deliver into a session an orchestrator dispatched |
 | `move_sessions` | files sessions under a sidebar section (`section_id` from `list_sections`) | moving any session but `"self"` asks the user first, so each chat files itself |
 | `request_directory` | grants this session a folder outside its working directory | the working directory itself moves only with `change_directory`, at the end of the turn |
-| `start_session` | starts a separate chat; `initiation: "user_asked"` starts it now; `"own_initiative"` only shows a card the user clicks | refused with `"user_asked"` in a turn the user did not type, so an issue chat uses it only for the card; `context: "fresh"` needs `prompt` (the brief) and `background` (at least 80 characters); `use_worktree: true` gives it its own worktree, cut from `source_branch` |
+| `start_session` | starts a separate chat; `initiation: "user_asked"` starts it now; `"own_initiative"` only shows a card the user clicks | refused with `"user_asked"` in a turn the user did not type, so an issue chat uses it only for the card; `context: "fresh"` needs `prompt` (the brief) and `background` (at least 80 characters); `use_worktree: true` gives it its own worktree, cut from `source_branch`; a chat it starts for other work is a side chat, whose brief ends with the self-archive sentence (§4 *Side chats*) |
 | `detach_session` | moves a session this chat started to top level: no longer archived with it; cannot be undone | only for a session this chat started, or `"self"` when another session started this one; refused for a session the user placed and for one that shares another session's worktree |
-| `archive_session` | stops a session and by default removes its app-made worktree; `"self"` ends this conversation after the result; reversible from the Archived list | also archives its side sessions that share its worktree or have finished; refuses a session that is still working or has live background work, a pinned one, and one open on screen unless the user allowed it |
+| `archive_session` | stops a session and by default removes its app-made worktree; `"self"` ends this conversation after the result; reversible from the Archived list | also archives its side sessions that share its worktree or have finished, without the guard checking them; refuses a session that is still working or has live background work, a pinned one, and one open on screen unless the user allowed it |
 | `get_session` | `"self"` or an id: `worktreePath`, `parentSessionId`, `detached`, `isRunning`, `model` | it reports no effort; a chat's own effort is in `$CLAUDE_EFFORT` of its Bash |
 | `request_keep_awake` | keeps the machine from idle sleep; `until: "session_idle"` also covers follow-up turns until the session is idle for about 5 minutes | a closed lid still sleeps; in auto mode the classifier decides each call unless an allow rule covers it |
 

@@ -19,7 +19,8 @@ Checked on 2026-11-09 (v2, and the landing modes of #13).
   - guards: a delete guard for Claude Code (asks, never denies); Codex prompt rules for deletes;
     Codex rules files installed as copies, because Codex skips a symlinked rules file.
   - issue-chats (new, opt-in): one issue per chat, hand-over to the next ready issue, archiving
-    only once a chat's work is on GitHub. The method: `plugins/issue-chats/skills/issue-handover/method.md`.
+    only once a chat's work is on GitHub (also when a successor's pushed branch holds it); a
+    side chat started with `start_session` only once its work landed or its pull request merged. The method: `plugins/issue-chats/skills/issue-handover/method.md`.
     The automatic start of the next chat needs the Claude Code CLI and desktop app (measured on
     macOS only); Codex uses its own thread tools; elsewhere the chat hands over a brief to paste.
 - Landing modes (#13): finished work lands through a pull request or on local main, detected

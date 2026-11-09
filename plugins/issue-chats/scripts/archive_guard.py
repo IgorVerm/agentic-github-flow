@@ -5,7 +5,9 @@ plugin's hooks/hooks.json, so it runs wherever the plugin is enabled in Claude C
 
 Archiving a chat in the desktop app removes its worktree, so the chat may go only when
 chat_archivable.py (beside this file) calls that worktree "ok": clean, and every commit on
-GitHub. It works for any repository: it reads nothing of the repository but the worktree path
+GitHub. A side chat (the get_session result has a parentSessionId and `detached` is not true:
+another chat started it with start_session) is checked with --landed: it goes only once its work
+landed or its pull request merged, not when its branch is merely pushed (#18). It works for any repository: it reads nothing of the repository but the worktree path
 the app reports. It only ever denies; a pass leaves the call to the permission rules, so the
 app still asks unless the user added an allow rule for archive_session.
 
@@ -203,9 +205,12 @@ def linked_worktree(directory: str) -> str | None:
 
 
 def check_worktree(data: dict) -> int:
-    """Pass when chat_archivable.py calls the session's worktree ok, or when the session has no
-    worktree: no worktreePath, and its working directory is in no linked worktree."""
+    """Pass when chat_archivable.py calls the session's worktree ok (with --landed for a side
+    chat), or when the session has no worktree: no worktreePath, and its working directory is in
+    no linked worktree."""
     worktree = data.get("worktreePath")
+    parent = data.get("parentSessionId")
+    side = bool(parent) and data.get("detached") is not True
     if worktree is not None and not isinstance(worktree, str):
         return deny("get_session gave a worktreePath that is not a path")
     if not worktree:
@@ -220,14 +225,16 @@ def check_worktree(data: dict) -> int:
         if not worktree:
             return 0
     try:
-        r = subprocess.run([sys.executable, CHECK, worktree], stdin=subprocess.DEVNULL,
+        r = subprocess.run([sys.executable, CHECK, worktree, *(["--landed"] if side else [])],
+                           stdin=subprocess.DEVNULL,
                            capture_output=True, text=True, timeout=CHECK_TIMEOUT_S)
     except (OSError, subprocess.TimeoutExpired) as e:
         return deny(f"chat_archivable.py did not run: {e}")
     verdict = (r.stdout.strip().splitlines() or [""])[0]
     if r.returncode == 0 and verdict.startswith("ok"):
         return 0
-    return deny(f"{worktree}: {verdict or r.stderr.strip() or 'no verdict'}")
+    kind = "side chat, checked with --landed; " if side else ""
+    return deny(f"{worktree}: {kind}{verdict or r.stderr.strip() or 'no verdict'}")
 
 
 if __name__ == "__main__":

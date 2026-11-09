@@ -54,9 +54,10 @@ repository lands finished work, and states the answer with its reasons on the is
 
 In pull-request mode you merge, unless you grant automatic merging in the repository's
 `HANDOFF.md` (§Standing permissions) or in your own overlay: then an agent merges its own pull
-request through `merge_pr.py`, only with green checks on every platform, an approving review of
+request through `merge_pr.py`, only with every required check green, an approving review of
 the head commit by another agent, the overlap result in the body, and no change to rules,
-guards, permission settings, hooks, the installer, CI or deployment configuration.
+guards, permission settings, hooks, the installer, CI or deployment configuration, the merge
+gate, or the grant and landing settings in `HANDOFF.md`.
 
 A repository can fix its mode, and name a landing branch other than its default branch, in its
 `HANDOFF.md`; `local main` there cannot overrule a server that requires pull requests. Pull

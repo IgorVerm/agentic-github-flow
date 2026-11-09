@@ -50,8 +50,9 @@ The review route, in both modes:
   dependencies, agent rules. A context that did not write the change reviews it: `/code-review`
   in Claude Code, `/review` in Codex, run in a fresh session or subagent. In pull-request mode
   that happens before the pull request is marked ready, and the repository's own required
-  reviewers still review it on GitHub; the reviewer's verdict is a signed comment on the pull
-  request opening `Approved <sha>` (the commit it reviewed) or listing its findings. In
+  reviewers still review it on GitHub; the reviewer's verdict is a comment on the pull
+  request signed with the role `review` (`🤖 <agent> (review): Approved <sha>`, the commit it
+  reviewed) or listing its findings. In
   local-main mode the reviewer also lands it. A change
   touching authentication, permissions, secrets, dependencies or deployment also gets the
   `review-security` skill when it is installed.

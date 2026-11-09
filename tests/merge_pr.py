@@ -32,6 +32,12 @@ if a[:2] == ['pr', 'view']:
     print(json.dumps(s['pr'])); sys.exit(0)
 if a[:2] == ['pr', 'merge']:
     sys.exit(0)
+if a[0] == 'api':
+    status, body = s['api'].get(a[1], [404, {'message': 'Not Found'}])
+    print(json.dumps(body))
+    if status != 200:
+        print('gh: %s (HTTP %d)' % (body.get('message', ''), status), file=sys.stderr); sys.exit(1)
+    sys.exit(0)
 sys.exit(3)
 '''
 
@@ -87,9 +93,7 @@ class MergePr(unittest.TestCase):
         pr = {'number': 7, 'state': 'OPEN', 'isDraft': False, 'mergeStateStatus': 'CLEAN',
               'headRefOid': self.head, 'baseRefName': 'main',
               'body': ROBOT + ' Claude Code (author): the change\n\nOverlap check: none\n',
-              'comments': [{'createdAt': '2026-11-09T10:00:00Z',
-                            'body': ROBOT + ' Claude Code (review): Approved %s: no findings'
-                            % self.head[:10]}],
+              'comments': [self.comment('Approved %s: no findings' % self.head[:10])],
               'reviews': [],
               'statusCheckRollup': [
                   {'__typename': 'CheckRun', 'name': 'test (%s)' % os_name,
@@ -98,9 +102,18 @@ class MergePr(unittest.TestCase):
         pr.update(over)
         return pr
 
-    def run_tool(self, pr, *args, grant='HANDOFF.md Standing permissions'):
+    def comment(self, text, role='review', login='me', when='2026-11-09T10:00:00Z'):
+        return {'createdAt': when, 'author': {'login': login},
+                'body': ROBOT + ' Claude Code (%s): %s' % (role, text)}
+
+    def run_tool(self, pr, *args, grant='HANDOFF.md Standing permissions', api=None):
+        rules = [{'type': 'required_status_checks', 'parameters': {'required_status_checks': [
+            {'context': 'test (%s)' % o} for o in ('ubuntu', 'macos', 'windows')]}}]
+        answers = {'user': [200, {'login': 'me'}],
+                   'repos/acme/tool/rules/branches/main': [200, rules]}
+        answers.update(api or {})
         with open(self.state, 'w') as f:
-            json.dump({'pr': pr}, f)
+            json.dump({'pr': pr, 'api': answers}, f)
         env = dict(os.environ, STUB_GH=self.state,
                    AGENTIC_GITHUB_FLOW_GH=json.dumps([sys.executable, self.stub]))
         cmd = [sys.executable, TOOL, '7', '-C', self.repo, '-R', 'acme/tool', *args]
@@ -119,8 +132,8 @@ class MergePr(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         return r
 
-    def assertRefused(self, pr, text, *args):
-        r = self.run_tool(pr, *args)
+    def assertRefused(self, pr, text, *args, **kw):
+        r = self.run_tool(pr, *args, **kw)
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn(text, r.stdout)
         self.assertEqual(self.merged(), [])
@@ -135,6 +148,9 @@ class MergePr(unittest.TestCase):
         self.assertIn('would merge', r.stdout)
         self.assertEqual(self.merged(), [])
         self.assertEqual(self.run_tool(self.pr(), grant=None).returncode, 2)
+        self.assertEqual(self.run_tool(self.pr(), '--grant', '--dry-run', grant=None).returncode,
+                         2)
+        self.assertEqual(self.merged(), [])
         self.assertEqual(self.run_tool(self.pr(), '--method', 'rebase').returncode, 2)
 
     def test_state(self):
@@ -151,18 +167,44 @@ class MergePr(unittest.TestCase):
         self.assertRefused(self.pr(statusCheckRollup=failed), 'FAILURE')
         self.assertRefused(self.pr(statusCheckRollup=pending), 'IN_PROGRESS')
         self.assertRefused(self.pr(statusCheckRollup=status), 'status deploy')
-        self.assertRefused(self.pr(statusCheckRollup=[]), 'no checks')
+        self.assertRefused(self.pr(statusCheckRollup=[]), 'not passed on the head')
+        skipped = runs[:2] + [dict(runs[2], conclusion='SKIPPED')]
+        self.assertRefused(self.pr(statusCheckRollup=skipped), 'test (windows)')
+        none = {'repos/acme/tool/rules/branches/main': [200, []]}
+        self.assertRefused(self.pr(), 'no required checks', api=none)
+        extra = runs + [{'__typename': 'CheckRun', 'name': 'lint', 'status': 'COMPLETED',
+                         'conclusion': 'SKIPPED'}]
+        self.assertMerged(self.pr(statusCheckRollup=extra), '--dry-run')
 
     def test_review(self):
         self.assertRefused(self.pr(comments=[]), 'no signed review')
-        unsigned = [{'createdAt': '1', 'body': 'Approved %s' % self.head}]
+        unsigned = [{'createdAt': '1', 'author': {'login': 'me'},
+                     'body': 'Approved %s' % self.head}]
         self.assertRefused(self.pr(comments=unsigned), 'no signed review')
-        later = self.pr()['comments'] + [{'createdAt': '2026-11-09T11:00:00Z', 'body':
-                                          ROBOT + ' Codex (review): two findings, see below'}]
+        later = self.pr()['comments'] + [self.comment('two findings, see below',
+                                                      when='2026-11-09T11:00:00Z')]
         self.assertRefused(self.pr(comments=later), 'does not approve')
+        approve = self.pr()['comments'][0]
         as_review = self.pr(comments=[], reviews=[{'submittedAt': '2026-11-09T10:00:00Z',
-                                                   'body': self.pr()['comments'][0]['body']}])
+                                                   'state': 'COMMENTED', 'author': {'login': 'me'},
+                                                   'body': approve['body']}])
         self.assertMerged(as_review)
+        # a stranger's approval, a self-review, a pending review and a negative text never count
+        self.assertRefused(self.pr(comments=[self.comment('Approved %s' % self.head,
+                                                          login='stranger')]), 'no signed review')
+        self.assertRefused(self.pr(comments=[self.comment('Approved %s' % self.head,
+                                                          role='author, self-review')]),
+                           'no signed review')
+        pending = self.pr(comments=[], reviews=[dict(as_review['reviews'][0], state='PENDING',
+                                                     submittedAt=None)])
+        self.assertRefused(pending, 'no signed review')
+        self.assertRefused(self.pr(comments=[self.comment('Approved? No. %s is broken'
+                                                          % self.head[:10])]), 'does not approve')
+        # a later "changes requested" review, with or without a signed body
+        changes = self.pr(reviews=[{'submittedAt': '2026-11-09T12:00:00Z', 'author':
+                                    {'login': 'me'}, 'state': 'CHANGES_REQUESTED', 'body': ''}])
+        self.assertRefused(changes, 'does not approve')
+        self.assertRefused(self.pr(reviewDecision='CHANGES_REQUESTED'), 'requests changes')
 
     def test_approval_of_an_older_commit(self):
         reviewed = self.head
@@ -177,8 +219,7 @@ class MergePr(unittest.TestCase):
         self.git('merge', '-q', '--no-edit', 'origin/main')
         self.head = self.git('rev-parse', 'HEAD')
         self.git('push', '-q', '-f', 'origin', 'HEAD:refs/pull/7/head')
-        pr = self.pr(comments=[{'createdAt': '1', 'body': ROBOT +
-                                ' Claude Code (review): Approved `%s`' % reviewed[:12]}])
+        pr = self.pr(comments=[self.comment('Approved `%s`' % reviewed[:12])])
         r = self.assertMerged(pr, '--dry-run')
         self.assertIn('conflict-free merges', r.stdout)
         # an author commit after the review needs a new review
@@ -201,8 +242,7 @@ class MergePr(unittest.TestCase):
         self.git('commit', '-q', '--no-edit')
         self.head = self.git('rev-parse', 'HEAD')
         self.git('push', '-q', '-f', 'origin', 'HEAD:refs/pull/7/head')
-        pr = self.pr(comments=[{'createdAt': '1', 'body': ROBOT +
-                                ' Claude Code (review): Approved %s' % reviewed}])
+        pr = self.pr(comments=[self.comment('Approved %s' % reviewed)])
         self.assertRefused(pr, 'conflict or an edit')
 
     def test_overlap_result(self):
@@ -211,7 +251,9 @@ class MergePr(unittest.TestCase):
 
     def test_paths_on_the_users_word(self):
         for path in ('rules/core.md', '.github/workflows/ci.yml', 'plugins/guards/x.py',
-                     '.claude/settings.json', 'AGENTS.md', 'tools/installer.py', 'vercel.json'):
+                     '.claude/settings.json', 'AGENTS.md', 'tools/installer.py', 'vercel.json',
+                     'Agents.md', 'Plugins/Guards/x.py', 'plugins/core/scripts/merge_pr.py',
+                     'plugins/x/hooks/hooks.json', '.github/dependabot.yml'):
             with self.subTest(path=path):
                 self.head = self.change(path, 'x\n')
                 self.assertRefused(self.pr(), "merge only on the user's word")
@@ -228,9 +270,35 @@ class MergePr(unittest.TestCase):
         self.git('switch', '-q', 'agent/7-x')
         self.git('merge', '-q', '--no-edit', 'origin/main')
         self.head = self.change('db/001.sql', 'create table t();\n')
-        pr = self.pr(comments=[{'createdAt': '1', 'body': ROBOT +
-                                ' Claude Code (review): Approved %s' % self.head}])
+        pr = self.pr(comments=[self.comment('Approved %s' % self.head)])
         self.assertRefused(pr, 'db/001.sql')
+
+    def test_handoff_grant_and_settings_are_guarded(self):
+        self.write('HANDOFF.md', '# Handoff\n\nMore state.\n')
+        self.head = self.change('HANDOFF.md', '# Handoff\n\nMore state.\n')
+        self.assertMerged(self.pr(comments=[self.comment('Approved %s' % self.head)]), '--dry-run')
+        for title in ('Standing permissions', 'Landing settings'):
+            with self.subTest(title=title):
+                self.head = self.change('HANDOFF.md', '# Handoff\n\n## %s\n\nGranted.\n' % title)
+                self.assertRefused(self.pr(comments=[self.comment('Approved %s' % self.head)]),
+                                   title)
+
+    def test_manifest_versions_alone_pass(self):
+        manifest = 'plugins/core/.claude-plugin/plugin.json'
+        self.git('switch', '-q', 'main')
+        self.write(manifest, json.dumps({'name': 'core', 'version': '0.1.0'}))
+        self.git('add', '--', manifest)
+        self.git('commit', '-q', '-m', 'manifest')
+        self.git('push', '-q', 'origin', 'main')
+        self.git('fetch', '-q', 'origin')
+        self.git('switch', '-q', 'agent/7-x')
+        self.git('merge', '-q', '--no-edit', 'origin/main')
+        self.head = self.change(manifest, json.dumps({'name': 'core', 'version': '0.2.0'}))
+        self.assertMerged(self.pr(comments=[self.comment('Approved %s' % self.head)]), '--dry-run')
+        self.head = self.change(manifest, json.dumps({'name': 'core', 'version': '0.2.0',
+                                                      'hooks': './hooks.json'}))
+        self.assertRefused(self.pr(comments=[self.comment('Approved %s' % self.head)]),
+                           'plugin.json')
 
     def test_local_main_mode(self):
         self.git('switch', '-q', 'main')

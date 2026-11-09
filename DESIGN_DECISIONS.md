@@ -11,15 +11,19 @@ the rule below; for what is excluded, "Not rules, guards, CI (recommended)".
 request only where a standing grant allows it: the repository's `HANDOFF.md` §Standing
 permissions, or an overlay the user installed. It merges through
 `plugins/core/scripts/merge_pr.py`, and only when all hold: pull-request mode; not a draft and
-merge state CLEAN; every check finished successfully on every platform; the newest signed
-review comment, by an agent that did not write the change, approves the head commit (or an
-earlier one followed only by conflict-free merges of the base branch, which need green checks
-again and no new review); the overlap check's result in the body; no path that merges only on
-the user's word.
+merge state CLEAN, no review requesting changes; every required check (the ruleset's or branch
+protection's, and the `required checks` row) passed on the head, so every platform; the newest
+signed review by the user's own account (agents post under it), role `review`, by an agent
+that did not write the change, approves the head commit (or an earlier one followed only by
+conflict-free merges of the base branch, which need green checks again and no new review); the
+overlap check's result in the body; no path that merges only on the user's word.
 **Excluded, merged only on the user's word:** `rules/core.md` and a repository's own rules
 (`AGENTS.md`, `CLAUDE.md`), a personal or company overlay, the guards, permission settings,
-hooks, the installer, CI workflows and deployment configuration; a repository adds patterns in
-`## Landing settings`. Skills, scripts, tests and documents may merge automatically.
+hooks and plugin manifests beyond their versions, the installer, CI and `.github/`
+configuration, deployment configuration, the merge gate itself (`merge_pr.py`, `landing.py`),
+and the `HANDOFF.md` sections that hold the grant and these settings (§Standing permissions,
+§Landing settings); a repository adds patterns in `## Landing settings`. Skills, scripts,
+tests and documents may merge automatically. Paths compare without case.
 **Why:** a green CI on three systems and an independent review are what the user's word checked
 for; the excluded paths change what every later session may do, so they stay with the user.
 **Where the grant lives:** this repository grants nothing (`HANDOFF.md`: Standing permissions:

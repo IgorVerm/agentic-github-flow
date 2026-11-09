@@ -35,8 +35,8 @@ policy is and which data may go into a prompt, and follow the answer.
   Report what you found; apply a fix when asked for one.
 - **Large work with open requirements starts with a specification:** the `spec-first` skill;
   `requirements` splits it into ready issues.
-- **Issue chats:** where `HANDOFF.md` has *Issue chats settings*, the `issue-handover` skill
-  picks, claims, starts and archives chats without asking; pushes still ask.
+- **Issue chats:** where `HANDOFF.md` on the default branch has *Issue chats settings*, the
+  issue-chats skills pick, claim, start and archive chats without asking; pushes still ask.
 - **Before long or unattended work, write down when it is done:** the end state, the command
   that proves it, and when you stop and report that no defensible way forward is left.
 - **After two failed corrections of the same problem, stop.** Tell the user what you tried and

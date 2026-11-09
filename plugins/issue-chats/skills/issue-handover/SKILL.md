@@ -37,7 +37,7 @@ next chat only on the user's request or by the card of step 5, and archive nothi
 **A probe that must not be merged** keeps its commits on a local branch
 `scratch/<issue>-<what>` (`git branch scratch/<issue>-<what> <sha>`), named on the issue with
 what it proved; then `git switch --detach origin/<default branch>` in its worktree, since the
-worktree check reads HEAD. Deleting that branch later is the user's call.
+worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is closed.
 
 1. **Leave nothing half-held.** Stop or finish your runs and agents. Run the hand-over extras.
    Commit verified work on the task branch, each commit a call of its own

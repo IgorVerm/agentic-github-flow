@@ -168,8 +168,8 @@ class Promote(unittest.TestCase):
         write(os.path.join(self.primary, 'HANDOFF.md'), '# Handoff\n')
         git(self.primary, 'commit', '-q', '-am', 'no setting')
         sha = self.task({'app.txt': 'two\n'})
-        self.assertRefused(self.promote(sha), "no remote 'origin'")
-        r = self.promote('--no-fetch', sha)
+        r = self.promote(sha)
+        self.assertIn("no remote 'origin': nothing to fetch", r.stdout)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(git(self.primary, 'rev-parse', 'main'), sha)
 

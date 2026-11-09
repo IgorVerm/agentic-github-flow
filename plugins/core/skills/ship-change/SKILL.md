@@ -16,7 +16,7 @@ above this skill's folder ([new_worktree.py](../../scripts/new_worktree.py)).
 
 ## 1. Detect the mode, pick the review route, say both on the issue
 
-Run `python3 <plugin>/scripts/landing.py` in your worktree ([landing.py](../../scripts/landing.py),
+Run `python3 <plugin>/scripts/landing.py --explain` in your worktree ([landing.py](../../scripts/landing.py),
 whose header owns the rule). Its last line is the mode, the line before it the landing branch
 (`<landing>` below; the remote's default branch unless the repository names another):
 
@@ -26,17 +26,19 @@ whose header owns the rule). Its last line is the mode, the line before it the l
   development for a very small team). Steps 2, 3 and 5 below, then
   [local-main.md](local-main.md) in place of 4, 6 and 7.
 
-Run it again at every landing: never carry a mode over from an earlier task. A repository fixes
-its mode in `HANDOFF.md`, merged like any other change; `local main` there cannot overrule a
-server that requires pull requests:
+Run it again at every landing, with `--explain` to see the signals it read, and never carry a
+mode over from an earlier task. A repository fixes its mode in `HANDOFF.md`, merged like any
+other change: `landing` is `pull request`, `local main` (which cannot overrule a server that
+requires pull requests) or `auto` (detect); `landing branch`, left out, is the remote's default
+branch. A value cell holds the value alone:
 
 ```markdown
 ## Landing settings
 
 | Setting | Value |
 |---|---|
-| landing | `pull request` (or `local main`, or `auto`: detect) |
-| landing branch | `main` (left out: the remote's default branch) |
+| landing | `auto` |
+| landing branch | `main` |
 ```
 
 The review route, in both modes:
@@ -61,14 +63,17 @@ check of step 5 reads.
 
 `git fetch origin`. If `origin/<landing>` is not an ancestor of your branch
 (`git merge-base --is-ancestor origin/<landing> HEAD`), merge it: `git merge origin/<landing>`.
-Never rebase. Conflicts whose combined intent is unclear go to the user.
+In local-main mode do the same with the local `<landing>`, which holds landings not pushed yet.
+Without a remote, the local `<landing>` alone. Never rebase. Conflicts whose combined intent is
+unclear go to the user.
 
 ## 3. Checks
 
 - Read the whole diff: `git diff origin/<landing>...HEAD`.
 - Run the checks the repository requires for this kind of change (`HANDOFF.md`, `AGENTS.md`,
   the CI workflow); a failing check is fixed, never weakened or skipped. In local-main mode no
-  server runs them after you: the full gate runs here.
+  server runs them after you: every check the repository requires for this change type runs
+  here.
 - `git status` shows nothing you meant to commit and did not.
 - With the security plugin installed, its `scan_secrets.py` on the repository is clean, or every
   hit is explained.

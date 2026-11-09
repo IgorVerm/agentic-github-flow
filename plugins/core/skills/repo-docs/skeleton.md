@@ -73,7 +73,8 @@ Rulings, newest first. Re-opening one needs the person who decided and a new ent
 ```markdown
 # <Project>: what landed
 
-Newest first: `YYYY-MM-DD — <item> (#issue) — PR #n — merge <commit>`.
+Newest first: `YYYY-MM-DD — <item> (#issue) — PR #n — merge <commit>`, or in local-main mode
+`YYYY-MM-DD — <item> (#issue) — landed <commit>`.
 ```
 
 Also for a new repository, from the agentic-github-flow repository's `templates/` folder (the

@@ -7,7 +7,8 @@ Usage: python3 overlap_check.py [-C <checkout>] (--branch <name> | --paths <path
 The ship-change skill runs it with the task branch (`--branch`) right before it proposes the
 push; a chat that picks up an issue can run it with the paths the issue names (`--paths`, and
 `--issue` the issue being picked). <base> is the landing branch when HANDOFF.md's
-`## Landing settings` names one (landing.py), else the default branch: `refs/remotes/origin/HEAD` as
+`## Landing settings` names one (landing.py; in local-main mode the local branch while it holds
+unpushed landings), else the default branch: `refs/remotes/origin/HEAD` as
 last fetched (else origin/main, origin/master), or local main or master in a repository without
 origin. "Unmerged" means not merged into <base>. It lists:
 
@@ -50,7 +51,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from landing import SettingError, landing_setting  # noqa: E402  (owner of the setting)
+from landing import SettingError, landing_setting, unpushed_landings  # noqa: E402
 
 GENERIC = {
     "mod.rs", "lib.rs", "main.rs", "build.rs", "__init__.py", "README.md", "SKILL.md",
@@ -103,7 +104,7 @@ def default_base(cwd):
         candidates = ["refs/heads/main", "refs/heads/master"]
     for ref in candidates:
         if ref and verified(cwd, ref):
-            return ref
+            return unpushed_landings(cwd, ref)
     raise Usage("error: no default branch found (origin/HEAD, origin/main, origin/master, "
                 "or local main or master); fetch, or name it with --base")
 

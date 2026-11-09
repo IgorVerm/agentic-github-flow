@@ -62,7 +62,7 @@ class SettingError(Exception):
 
 def git(cwd: str, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", "-C", cwd, *args], stdin=subprocess.DEVNULL,
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, encoding="utf-8", errors="replace")
 
 
 def settings_text(path: str) -> tuple[str, str | None]:

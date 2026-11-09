@@ -55,14 +55,15 @@ repository lands finished work, and states the answer with its reasons on the is
 A repository can fix its mode, and name a landing branch other than its default branch, in its
 `HANDOFF.md`; `local main` there cannot overrule a server that requires pull requests. Pull
 requests target the landing branch, and the cleanup scripts and the `pre-push` template count
-"merged" against it:
+"merged" against it. `landing` takes `pull request`, `local main` or `auto` (detect); a value
+cell holds the value alone:
 
 ```markdown
 ## Landing settings
 
 | Setting | Value |
 |---|---|
-| landing | `pull request` (or `local main`, or `auto`) |
+| landing | `auto` |
 | landing branch | `main` |
 ```
 

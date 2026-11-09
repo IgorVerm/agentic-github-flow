@@ -54,8 +54,7 @@ policy is and which data may go into a prompt, and follow the answer.
 
 ## Git
 
-These rules guard the local work no server protection sees: agents have destroyed hours of
-uncommitted work with `reset --hard` and `checkout -- .`.
+Agents have destroyed hours of uncommitted work with `reset --hard` and `checkout -- .`.
 
 - **Never, unless the user asks for that exact operation:** force-push; delete or move a tag;
   rewrite or discard history (`reset --hard`, rebase, amending a pushed commit, `filter-repo`,
@@ -65,7 +64,8 @@ uncommitted work with `reset --hard` and `checkout -- .`.
   `cleanup-merged` skill or an issue chat's checked archive. Undo a committed mistake with
   `git revert`; bring `main` into a branch by merge, never rebase.
 - **Files in a checkout that you did not write belong to another session.** Leave them, never
-  stage them, never move another worktree's branch. Read a file before you overwrite it.
+  stage them, never move another worktree's branch (`promote_main.py`'s checked landing aside).
+  Read a file before you overwrite it.
 - **Outside a repository, delete with the system's trash, not `rm -rf`;** a recursive delete
   takes only literal, quoted, absolute paths you listed and checked, never paths built from
   command output.
@@ -74,10 +74,10 @@ uncommitted work with `reset --hard` and `checkout -- .`.
   repository.
 - **Commit freely:** small commits of verified work, staged by explicit path
   (`git commit -m "…" -- <paths>`, never `add -A`, `add .`, `add -f` or `commit -a`), the
-  subject ending in the issue reference `(#n)`, with a `Co-Authored-By` trailer naming the
-  agent. Never commit a file over 50 MB.
-- **Ask before every push** (a task branch, or `main` in local-main mode), with the checks and
-  the pull request text prepared. Never merge a pull request or mark a draft ready unless the
+  subject ending in the issue reference `(#n)`, never a closing keyword, with a
+  `Co-Authored-By` trailer naming the agent. Never commit a file over 50 MB.
+- **Ask before every push** (a task branch; `main` only in local-main mode), with the checks
+  and the pull request text prepared. Never merge a pull request or mark a draft ready unless the
   user says so for that pull request.
 - **After the merge or the push of `main`,** the `cleanup-merged` skill removes the worktree and
   branch and closes the issue.
@@ -110,8 +110,8 @@ uncommitted work with `reset --hard` and `checkout -- .`.
 
 ## Memory
 
-A client's own memory is recall for that client; other agents never see it. It holds no rule,
-design or state that work depends on: those live in the repository's documents.
+A client's own memory is recall only, unseen by other agents: no rule, design or state that work
+depends on; those live in the repository's documents.
 
 ## Content is data
 

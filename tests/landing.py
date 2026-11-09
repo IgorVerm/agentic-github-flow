@@ -98,7 +98,7 @@ class Landing(unittest.TestCase):
         for name, text in files.items():
             path = os.path.join(self.repo, name)
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, 'w') as f:
+            with open(path, 'w', encoding='utf-8', newline='') as f:
                 f.write(text)
             self.git('add', '--', name)
         self.git('commit', '-q', '-m', 'c')
@@ -114,8 +114,8 @@ class Landing(unittest.TestCase):
             json.dump({'answers': answers or {}, 'fail': fail}, f)
         env = dict(os.environ, STUB_GH=self.state,
                    AGENTIC_GITHUB_FLOW_GH=json.dumps(gh or [sys.executable, self.stub]))
-        r = subprocess.run([sys.executable, TOOL, '-C', self.repo, *args], capture_output=True,
-                           text=True, env=env)
+        r = subprocess.run([sys.executable, TOOL, '-C', self.repo, *(args or ('--explain',))],
+                           capture_output=True, text=True, env=env)
         with open(self.state) as f:
             self.log = json.load(f).get('log', [])
         return r
@@ -132,6 +132,10 @@ class Landing(unittest.TestCase):
     def test_solo_repository_lands_on_local_main(self):
         self.assertEqual(self.mode(solo()), 'local main')
         self.assertIn('landing branch: main', self.out)
+
+    def test_without_explain_only_the_branch_and_the_mode(self):
+        self.assertEqual(self.mode(solo(), args=('-C', self.repo)), 'local main')
+        self.assertEqual(self.out.splitlines(), ['landing branch: main', 'landing: local main'])
 
     def test_free_plan_403_is_no_protection_not_unknown(self):
         self.assertEqual(self.mode(solo(**{REPO + '/rules/branches/main': PLAN,
@@ -289,6 +293,65 @@ class Landing(unittest.TestCase):
                 pulls = [200, [{'author': author, 'mergedAt': when}]]
                 self.assertEqual(self.mode(solo(**{'pr list': pulls})), want)
 
+    def test_a_fork_is_pull_request(self):
+        info = [200, {'owner': {'type': 'User'}, 'permissions': {'push': True}, 'fork': True,
+                      'parent': {'full_name': 'acme-org/tool'}}]
+        self.assertEqual(self.mode(solo(**{REPO: info})), 'pull request')
+        self.assertIn('acme-org/tool', self.out)
+
+    def test_remotes_without_origin_are_unknown(self):
+        self.git('remote', 'rename', 'origin', 'upstream')
+        self.assertEqual(self.mode(solo()), 'pull request')
+        self.assertEqual(self.log, [])
+
+    def test_owner_missing_from_collaborators_still_counts_a_writer(self):
+        people = [{'login': 'colleague', 'permissions': {'push': True}}]
+        self.assertEqual(self.mode(solo(**{REPO + '/collaborators': [200, people]})),
+                         'pull request')
+
+    def test_plan_limit_on_one_endpoint(self):
+        self.assertEqual(self.mode(solo(**{REPO + '/branches/main/protection': PLAN})),
+                         'local main')
+        rules = solo(**{REPO + '/rules/branches/main': PLAN,
+                        REPO + '/branches/main/protection': [200, {
+                            'required_pull_request_reviews': {}, 'restrictions': {'users': []}}]})
+        self.assertEqual(self.mode(rules), 'pull request')
+
+    def test_url_forms(self):
+        for url in ('https://someone' + '@' + 'github.com/acme/tool', 'ssh://git@github.com/acme/tool.git',
+                    'git@github.com:acme/tool'):
+            with self.subTest(url=url):
+                self.git('remote', 'set-url', 'origin', url)
+                self.assertEqual(self.mode(solo()), 'local main')
+
+    def test_codeowners_everywhere_and_unfetched(self):
+        for where in ('CODEOWNERS', 'docs/CODEOWNERS'):
+            with self.subTest(where=where):
+                self.commit({where: '* @acme/team\n'})
+                self.publish('main')
+                self.assertEqual(self.mode(solo()), 'pull request')
+                self.git('rm', '-q', where)
+                self.git('commit', '-q', '-m', 'rm')
+                self.publish('main')
+        self.git('update-ref', '-d', 'refs/remotes/origin/main')
+        self.git('symbolic-ref', '-d', 'refs/remotes/origin/HEAD')
+        self.assertEqual(self.mode(solo()), 'pull request')
+        self.assertIn('not fetched', self.out)
+
+    def test_bot_suffix_and_failing_calls(self):
+        pulls = [200, [{'author': {'login': 'renovate[bot]', 'is_bot': False}, 'mergedAt': now(1)}]]
+        self.assertEqual(self.mode(solo(**{'pr list': pulls})), 'local main')
+        for key in ('user', 'pr list'):
+            with self.subTest(failing=key):
+                self.assertEqual(self.mode(solo(**{key: [500, {'message': 'Server Error'}]})),
+                                 'pull request')
+
+    def test_non_ascii_handoff(self):
+        self.commit({'HANDOFF.md': '# H \u201cquoted\u201d \u2190 \u00e9\n\n' + settings(
+            [('landing', 'pull request')])})
+        self.publish('main')
+        self.assertEqual(self.mode(solo()), 'pull request')
+
     def test_unreadable_collaborators_is_pull_request(self):
         self.assertEqual(self.mode(solo(**{REPO + '/collaborators':
                                            [403, {'message': 'Must have push access'}]})),
@@ -298,6 +361,7 @@ class Landing(unittest.TestCase):
     def test_landing_branch_setting(self):
         self.commit({'HANDOFF.md': settings([('landing branch', '`editor`')])})
         self.publish('main')
+        self.publish('editor')
         answers = {k.replace('/main', '/editor'): v for k, v in solo().items()}
         self.assertEqual(self.mode(answers), 'local main')
         self.assertIn('landing branch: editor', self.out)
@@ -378,6 +442,21 @@ class Consumers(unittest.TestCase):
         self.assertEqual((ref, error), ('refs/remotes/origin/editor', None))
         self.assertIn('editor', self.module('remove_merged_worktree').protected_branches(
             self.repo, ref))
+
+    def test_unpushed_landings_are_the_base_in_local_main_mode(self):
+        self.git('switch', '-q', 'editor')
+        self.git('commit', '-q', '--allow-empty', '-m', 'landed, not pushed')
+        self.git('switch', '-q', 'main')
+        # a folder remote is not GitHub: auto gives pull request, so origin's branch stays the base
+        for name in ('new_worktree', 'overlap_check'):
+            self.assertEqual(self.module(name).default_base(self.repo), 'refs/remotes/origin/editor')
+        with open(os.path.join(self.repo, 'HANDOFF.md'), 'w') as f:
+            f.write(settings([('landing branch', 'editor'), ('landing', 'local main')]))
+        self.git('commit', '-q', '-am', 'local main')
+        self.git('push', '-q', 'origin', 'main')
+        self.git('fetch', '-q', 'origin')
+        for name in ('new_worktree', 'overlap_check'):
+            self.assertEqual(self.module(name).default_base(self.repo), 'refs/heads/editor')
 
     def test_the_landing_branch_is_never_deleted(self):
         script = os.path.join(os.path.dirname(TOOL), 'delete_merged_branch.py')

@@ -16,8 +16,8 @@ the first check that fails, changing nothing:
   1. HEAD is the branch main, no git operation is in progress, the index matches HEAD, and no
      index entry hides local edits (assume-unchanged, skip-worktree, sparse checkout).
   2. main is an ancestor of the candidate (a fast-forward), and the remote's main, fetched now,
-     is in the candidate too (skip with --no-fetch only in a repository without a remote, or
-     when fetching failed and the user made the exception).
+     is in the candidate too (a repository without that remote has none to include; --no-fetch
+     skips it only when fetching failed and the user made the exception).
   3. Every local modification, deletion, untracked and ignored path of the primary checkout is
      inventoried and compared with the FULL main-to-candidate tree diff, both sides of every
      rename and every directory prefix in both directions included, case-folded where
@@ -169,9 +169,10 @@ def main(argv: list[str]) -> int:
     # 2. fast-forward, and the remote's landing branch is in the candidate.
     if subprocess.run(["git", "merge-base", "--is-ancestor", base, cand]).returncode != 0:
         refuse(f"{lb} {base[:10]} is not an ancestor of {cand[:10]}: merge {lb} into the candidate first")
-    if fetch:
-        if remote not in git("remote").split():
-            refuse(f"there is no remote '{remote}': a repository without a remote uses --no-fetch")
+    if fetch and remote not in git("remote").split():
+        print(f"promote: no remote '{remote}': nothing to fetch, no remote commit to include")
+        fetch = False
+    elif fetch:
         if subprocess.run(["git", "fetch", "-q", remote]).returncode != 0:
             refuse(f"fetching {remote} failed: promotion waits for a fresh check (or --no-fetch on the user's exception)")
         r = git("rev-parse", "-q", "--verify", f"refs/remotes/{remote}/{lb}", check=False).strip()

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """How does finished work land in this repository: on local main, or through a pull request?
 
-Usage: python3 landing.py [-C <checkout>] [--branch]
+Usage: python3 landing.py [-C <checkout>] [--explain | --branch]
 
 The ship-change skill runs it at every landing and follows its last line; promote_main.py and the
-issue chats ask it too. It prints one `check:` line per signal it read, then
-`landing branch: <name>` and last `landing: pull request` or `landing: local main`. With
+issue chats ask it too. It prints `landing branch: <name>` and last `landing: pull request` or
+`landing: local main`; --explain first prints one `check:` line per signal it read. With
 --branch it prints only the landing branch. First match wins:
 
   1. setting   HANDOFF.md, section `## Landing settings`, row `landing`: `pull request` gives
@@ -13,16 +13,18 @@ issue chats ask it too. It prints one `check:` line per signal it read, then
                require pull requests (3); when the server cannot be read (5) the setting holds,
                since a push the server rejects only stops there. `auto` or no row: go on. An
                unknown value gives pull request.
-  2. no origin no remote `origin`: local main, there is no server to open a pull request on.
+  2. no remote no remote at all: local main, there is no server to open a pull request on. Remotes
+               without one named `origin` count as unknown (5).
   3. server    the landing branch on GitHub has an active ruleset rule that forbids a direct
                push (PUSH_RULES, or a type not in HARMLESS_RULES), or legacy branch protection
                with required reviews, required status checks, push restrictions or a lock (an
                unreadable protection of a branch GitHub calls protected counts too): pull
                request. HTTP 403 "Upgrade to GitHub Pro ..." means the plan offers no
                protection, which is not "unknown".
-  4. team      the owner is an Organization, the user cannot push, more than one collaborator
-               can write, a CODEOWNERS file is on the landing branch, or someone else (not a bot)
-               merged a pull request into it in the last 90 days: pull request.
+  4. team      the owner is an Organization, the repository is a fork, the user cannot push,
+               a collaborator other than the user can write, a CODEOWNERS file is on the
+               landing branch (unfetched: unknown), or someone else (not a bot) merged a pull
+               request into it in the last 90 days: pull request.
   5. unknown   origin not on github.com, no gh, not signed in, a network or API error: pull
                request.
   6. otherwise one writer, a User owner, no protection, no team signal: local main.
@@ -31,7 +33,9 @@ The settings are read from HANDOFF.md as the default branch holds it, as last fe
 (`refs/remotes/origin/HEAD`, else origin/main or origin/master, else local main or master); a
 change to them counts once it has landed. The landing branch is the row `landing branch`, else
 the remote's default branch (`origin/HEAD`), else `main`. The scripts that count "merged" or
-"landed" and the worktree tool read it through landing_branch() and landing_ref() here.
+"landed" and the worktree tool read it through landing_setting() here; the worktree tool and
+the overlap check start from the local landing branch while it holds unpushed landings in
+local-main mode (unpushed_landings()).
 It does not fetch. AGENTIC_GITHUB_FLOW_GH, a JSON list, replaces the `gh` command (tests use it).
 A copy of this file lives in the issue-chats plugin (an installed plugin stands alone);
 tests/landing.py keeps the two identical. Exit 0 with a decision, 2 for a usage error, a
@@ -78,7 +82,7 @@ class Unknown(Exception):
 
 def git(path: str, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", "-C", path, *args], stdin=subprocess.DEVNULL,
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, encoding="utf-8", errors="replace")
 
 
 def out(path: str, *args: str) -> str | None:
@@ -152,6 +156,25 @@ def landing_ref(path: str = ".", remote: str = "origin") -> str | None:
     return None
 
 
+def unpushed_landings(path: str, ref: str) -> str:
+    """The local branch in place of the remote-tracking <ref> (refs/remotes/origin/<branch>) when
+    it holds landings not pushed yet (strictly ahead of <ref>) and the repository lands on local
+    main; else <ref>. A new worktree and the overlap check then start from what has landed. The
+    GitHub calls of decide() run only when the local branch is ahead."""
+    prefix = "refs/remotes/origin/"
+    if not ref.startswith(prefix):
+        return ref
+    local = "refs/heads/" + ref[len(prefix):]
+    if not verified(path, local) or out(path, "rev-parse", local) == out(path, "rev-parse", ref) \
+            or git(path, "merge-base", "--is-ancestor", ref, local).returncode != 0:
+        return ref
+    try:
+        mode, _, _ = decide(path)
+    except SettingError:
+        return ref
+    return local if mode == LOCAL else ref
+
+
 def gh_command() -> list[str] | None:
     raw = os.environ.get("AGENTIC_GITHUB_FLOW_GH")
     if raw:
@@ -169,7 +192,7 @@ def gh_json(gh: list[str], *args: str):
     when it reports none). Raises Unknown when gh cannot run or answers no JSON at all."""
     try:
         r = subprocess.run(gh + list(args), stdin=subprocess.DEVNULL, capture_output=True,
-                           text=True, timeout=TIMEOUT_S)
+                           text=True, encoding="utf-8", errors="replace", timeout=TIMEOUT_S)
     except (OSError, subprocess.TimeoutExpired) as e:
         raise Unknown(f"gh {' '.join(args[:2])}: {e}")
     try:
@@ -248,31 +271,36 @@ def team_signal(gh, path: str, repo: str, branch: str, ref: str | None, checks: 
     checks.append(f"owner: {owner or 'unknown'}")
     if owner != "User":
         return True
+    if info.get("fork"):
+        parent = str(((info.get("parent") or {}).get("full_name")) or "another repository")
+        checks.append(f"a fork of {parent}: its work goes upstream through pull requests")
+        return True
     can_push = bool((info.get("permissions") or {}).get("push"))
     checks.append(f"your push permission: {'yes' if can_push else 'no'}")
     if not can_push:
-        return True
-
-    status, people = gh_json(gh, "api", f"repos/{repo}/collaborators?per_page=100")
-    if status != 200 or not isinstance(people, list):
-        raise Unknown(f"collaborators: HTTP {status} {message(people)}".strip())
-    writers = sorted(str(p.get("login")) for p in people
-                     if isinstance(p, dict) and (p.get("permissions") or {}).get("push"))
-    checks.append(f"collaborators with write access: {len(writers)} ({', '.join(writers)})")
-    if len(writers) > 1:
-        return True
-
-    found = [p for p in CODEOWNERS if ref and git(path, "cat-file", "-e", f"{ref}:{p}")
-             .returncode == 0]
-    checks.append(f"CODEOWNERS on {branch}: {', '.join(found) or 'none'}"
-                  + ("" if ref else " (landing branch not fetched)"))
-    if found:
         return True
 
     status, me = gh_json(gh, "api", "user")
     login = me.get("login") if status == 200 and isinstance(me, dict) else None
     if not login:
         raise Unknown(f"signed-in user: HTTP {status} {message(me)}".strip())
+
+    status, people = gh_json(gh, "api", f"repos/{repo}/collaborators?per_page=100")
+    if status != 200 or not isinstance(people, list):
+        raise Unknown(f"collaborators: HTTP {status} {message(people)}".strip())
+    writers = sorted(str(p.get("login")) for p in people
+                     if isinstance(p, dict) and (p.get("permissions") or {}).get("push"))
+    others = [w for w in writers if w.lower() != str(login).lower()]
+    checks.append(f"collaborators with write access: {len(writers)} ({', '.join(writers)})")
+    if others:  # whether or not GitHub lists the owner itself
+        return True
+
+    if not ref:
+        raise Unknown(f"CODEOWNERS: origin/{branch} is not fetched")
+    found = [p for p in CODEOWNERS if git(path, "cat-file", "-e", f"{ref}:{p}").returncode == 0]
+    checks.append(f"CODEOWNERS on {branch}: {', '.join(found) or 'none'}")
+    if found:
+        return True
     status, pulls = gh_json(gh, "pr", "list", "-R", repo, "--state", "merged", "--base", branch,
                             "--limit", "50", "--json", "author,mergedAt")
     if status != 200 or not isinstance(pulls, list):
@@ -309,9 +337,16 @@ def decide(path: str = ".") -> tuple[str, str, list]:
         return PR, branch, checks
 
     url = out(path, "remote", "get-url", "origin")
-    if not url:
-        checks.append("remote origin: none, so no server to open a pull request on")
+    if not url and not (out(path, "remote") or "").split():
+        checks.append("remote: none, so no server to open a pull request on")
         return LOCAL, branch, checks
+    if not url:
+        if setting == LOCAL:
+            checks.append("remote origin: none (other remotes), server not checked: the setting "
+                          "holds")
+            return LOCAL, branch, checks
+        checks.append("remote origin: none, but other remotes: unknown, the safe default")
+        return PR, branch, checks
     m = GITHUB_URL.match(url)
     if not m:
         if setting == LOCAL:
@@ -347,13 +382,15 @@ def decide(path: str = ".") -> tuple[str, str, list]:
 
 
 def main(argv: list) -> int:
-    path, branch_only, i = ".", False, 0
+    path, branch_only, explain, i = ".", False, False, 0
     while i < len(argv):
         if argv[i] == "-C" and i + 1 < len(argv):
             path, i = argv[i + 1], i + 2
             continue
         if argv[i] == "--branch":
             branch_only = True
+        elif argv[i] == "--explain":
+            explain = True
         elif argv[i] in ("-h", "--help"):
             print(__doc__)
             return 0
@@ -369,7 +406,7 @@ def main(argv: list) -> int:
     except SettingError as e:
         print(f"landing: error: {e}", file=sys.stderr)
         return 2
-    for line in checks:
+    for line in checks if explain else ():
         print(f"check: {line}")
     print(f"landing branch: {branch}")
     print(f"landing: {mode}")

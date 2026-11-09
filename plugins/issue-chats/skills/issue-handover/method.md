@@ -53,7 +53,7 @@ The skills read their values from it; a row left out takes its default:
 | area labels | labels a chain may be limited to (`--area`); they own nothing | none |
 | spread over areas | `yes` or `no`; after `yes`, the area labels in backticks that a pick spreads over, up to the first `;` (the rest is a comment), without them every label in backticks of the row `area labels` (*Spreading over areas* below) | `no` |
 | sidebar section | the desktop app sidebar section the chats file themselves under | the repository's name |
-| worktree tool | the command, run from the primary checkout, that makes a new worktree for `<issue>-<short name>` | the core plugin's `new_worktree.py <issue>-<short name>`, as the `ship-change` skill names it; or `git worktree add -b agent/<issue>-<short name> ../<repo>-worktrees/<issue>-<short name> origin/<default branch>` |
+| worktree tool | the command, run from the primary checkout, that makes a new worktree for `<issue>-<short name>` | the core plugin's `new_worktree.py <issue>-<short name>`, as the `ship-change` skill names it (in local-main mode it starts from landings not pushed yet); or, in pull-request mode, `git worktree add -b agent/<issue>-<short name> ../<repo>-worktrees/<issue>-<short name> origin/<default branch>` |
 | title prefix | what the chat title puts before `#<issue>` (§2), and older title forms that still count as this repository's issue chats when archiving | none |
 | context limit | the context size at which a chat hands over | none: the chat judges |
 | start reading | what every chat reads at its start besides its issue: named sections, the repository's reading map | none |

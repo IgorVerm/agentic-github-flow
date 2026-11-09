@@ -6,9 +6,9 @@ separate step and needs the user's word (§5). Nothing is rebased, squashed or f
 landing work. Commits name the issue as `(#n)` without a closing keyword: the issue is closed
 after the push is verified, by the `cleanup-merged` skill.
 
-Between pushes the local landing branch is ahead of origin's. Start a worktree for this mode from
-it, `python3 <plugin>/scripts/new_worktree.py <task> --base <landing>`, and in SKILL step 2
-also merge the local `<landing>` when it is not an ancestor of your branch.
+Between pushes the local landing branch is ahead of origin's: `new_worktree.py` and the overlap
+check start from it then, and SKILL step 2 merges it in. A repository without a remote has
+nothing to fetch or push; `promote_main.py` says so and lands all the same.
 
 ## 1. Small change: the author lands it
 
@@ -25,7 +25,8 @@ landings at once git lets one through.
   move or delete another session's files in the primary checkout to make it pass. If your client
   may not reach the primary checkout, hand the landing to an agent that may.
 
-Then one signed comment on the issue:
+Then one signed comment on the issue, and in the same landing, when the repository keeps
+`archive_implementations.md`, its line `YYYY-MM-DD — <item> (#n) — landed <commit>`:
 `🤖 <agent> (<role>): Landed on local <landing> at <sha>: <what>; checks: <what ran, result>; overlap: <result>`.
 The issue stays open, assigned to you, until the push.
 
@@ -36,13 +37,16 @@ The issue stays open, assigned to you, until the push.
 2. **The reviewer,** a fresh session or subagent that did not write the change, reviews the diff
    and the evidence of S. What affects correctness or the stated requirements goes back to the
    author; a new author commit needs a new review.
-3. **It lands S.** When the local `<landing>` and the fetched `origin/<landing>` are both in S:
-   the overlap check (SKILL step 5) on S's branch, then `promote_main.py <S>`. Otherwise it builds
-   away from the landing branch: `python3 <plugin>/scripts/new_worktree.py <n>-integrate --branch integrate/<n> --base <landing>`,
-   then `git merge --no-ff <S>` there. Conflicts whose combined intent is unclear go back to the
+3. **It lands S.** `git fetch origin` first. When the local `<landing>` and the fetched
+   `origin/<landing>` are both in S: the overlap check (SKILL step 5) on S's branch, then
+   `promote_main.py <S>`. Otherwise it builds away from the landing branch:
+   `python3 <plugin>/scripts/new_worktree.py <n>-integrate --branch integrate/<n> --base <landing>`,
+   there `git merge origin/<landing>` when the local `<landing>` lacks it, then
+   `git merge --no-ff <S>`. Conflicts whose combined intent is unclear go back to the
    author or the user. A merge commit commits the whole reviewed merge index: stage the resolved
    paths by name, read the complete staged diff, then commit without paths. The full gate runs on
-   that result M, then the overlap check, then `promote_main.py <M>`.
+   that result M, then the overlap check, then `promote_main.py <M>`. Its refusals are handled
+   as in §1: a moved landing branch is merged into the integration branch and checked per §3.
 4. **It records** on the issue: the landing branch's commit before, S, the landed commit, the
    reviewer, and which commit each check covered.
 

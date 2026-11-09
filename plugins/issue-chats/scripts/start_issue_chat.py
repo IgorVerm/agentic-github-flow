@@ -23,17 +23,31 @@ calling chat, by its session id (`CLAUDE_CODE_SESSION_ID`, or `CLAUDE_CODE_HOST_
 `local_<id>`) or by the full path of the worktree its working directory is in, so the flag
 cannot take over another chat's claim. Then it runs
 `claude --bg --name <title> --model <model> --effort <level> <ready prompt>` in <worktree>,
-waits up to 120 s until `claude agents --json --cwd <worktree>` lists that one session idle,
-runs `claude stop <short id>`, and opens it with `claude --desktop --resume <sessionId>` under
+waits up to 120 s until `claude agents --json --cwd <worktree>` lists that one session idle and
+its transcript (`<CLAUDE_CONFIG_DIR or ~/.claude>/projects/*/<sessionId>.jsonl`) holds a real
+reply to the ready prompt, checks that reply's model against --model, runs
+`claude stop <short id>`, and opens it with `claude --desktop --resume <sessionId>` under
 `script` (the desktop switch refuses without a terminal; `script -q /dev/null` on macOS, the
 measured form; `script -q -c` on Linux, not measured). It claims nothing: the caller assigns
 the issue right after exit 0. --effort left out: this chat's own effort (`CLAUDE_EFFORT`), else
-the user's default. AGENTIC_GITHUB_FLOW_GH, a JSON list, replaces the `gh` command (tests).
+the user's default. AGENTIC_GITHUB_FLOW_GH, a JSON list, replaces the `gh` command, and
+AGENTIC_GITHUB_FLOW_START_WAIT_S the 120 s (tests).
+
+Why the reply and its model are checked: `idle` can be listed before the session has answered.
+Stopped then, the ready prompt stays unanswered; the desktop open fills in a `<synthetic>`
+record ("No response requested.") and the chat's next turn runs on the app's default model, not
+--model (measured in one user's transcripts, 2026-11-09: 15 of 184 started chats had that
+record first, the 11 of them since 2026-10-30 continued on another model; none of the 169 with
+a real first reply changed model). So a chat whose ready reply is missing, or came from another
+model, is stopped and never opened. A model alias (`opus`, `sonnet`, `haiku`, `fable`) matches
+a model id of its family, and a context suffix such as `[1m]` is ignored; any other --model must
+equal the reply's model.
 
 Last line and exit code, for the caller:
   0  `ok local_<sessionId>`: open in the app; hand it the brief with `send_message` to that id.
   1  `fail: ...`: nothing runs and nothing was opened in the app (a background session that
-     started was stopped; its conversation stays on disk). Never `claude rm`, which deletes a
+     started was stopped, also one that never answered the ready prompt or answered on another
+     model than --model; its conversation stays on disk). Never `claude rm`, which deletes a
      session's worktree.
   2  `unsure: ...`: it may be open in the app or still running, with `local_<sessionId>` or the
      short id when known; the caller checks `list_sessions` and `claude agents --json --cwd
@@ -42,6 +56,7 @@ Last line and exit code, for the caller:
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import os
 import re
@@ -54,6 +69,7 @@ import time
 READY = "Reply with exactly one line: ready. Use no tools."
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 WAIT_IDLE_S = 120
+ALIASES = ("opus", "sonnet", "haiku", "fable")
 TITLE = r"(?:Requirements · )?#([1-9][0-9]*) · \S.*|Requirements · new · \S.*"
 # A claim comment: the signature, then the opening the skill issue-handover gives it (the same
 # marker next_issue.py reads), optionally in bold.
@@ -231,7 +247,7 @@ def start(wt: str, title: str, model: str, effort: str | None) -> tuple[int, str
         return 1, f"fail: claude --bg: {(p.stderr or p.stdout).strip()[:300]}"
     short = m.group(1)
     try:
-        return after_start(wt, title, short)
+        return after_start(wt, title, short, model)
     except (Fail, subprocess.TimeoutExpired) as e:
         try:
             s = run(["claude", "stop", short])
@@ -241,25 +257,87 @@ def start(wt: str, title: str, model: str, effort: str | None) -> tuple[int, str
         return 2, f"unsure: {e}; background session {short} {state}; check list_sessions"
 
 
-def after_start(wt: str, title: str, short: str) -> tuple[int, str]:
+def wait_s() -> int:
+    try:
+        return max(1, min(600, int(os.environ.get("AGENTIC_GITHUB_FLOW_START_WAIT_S", ""))))
+    except ValueError:
+        return WAIT_IDLE_S
+
+
+def transcript(sid: str, wt: str) -> str | None:
+    """The session's transcript file: under the folder Claude Code names after its working
+    directory, else under any project folder (the naming may differ)."""
+    base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+    projects = os.path.join(base, "projects")
+    guess = os.path.join(projects, re.sub(r"[^A-Za-z0-9]", "-", wt), sid + ".jsonl")
+    if os.path.isfile(guess):
+        return guess
+    hits = glob.glob(os.path.join(glob.escape(projects), "*", sid + ".jsonl"))
+    return hits[0] if hits else None
+
+
+def reply_model(path: str | None) -> str | None:
+    """The model of the first real assistant record: not the `<synthetic>` placeholder and not
+    an API error."""
+    if not path:
+        return None
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(r, dict) or r.get("type") != "assistant" or \
+                        r.get("isApiErrorMessage"):
+                    continue
+                m = (r.get("message") or {}).get("model") if isinstance(r.get("message"), dict) \
+                    else None
+                if isinstance(m, str) and m and m != "<synthetic>":
+                    return m
+    except OSError:
+        return None
+    return None
+
+
+def same_model(requested: str, got: str) -> bool:
+    want = re.sub(r"\[[^\]]*\]$", "", requested).lower()
+    got = re.sub(r"\[[^\]]*\]$", "", got).lower()
+    if want in ALIASES:
+        return f"-{want}-" in f"-{got}-"
+    return want == got
+
+
+def after_start(wt: str, title: str, short: str, model: str) -> tuple[int, str]:
     def stop_and(code: int, msg: str) -> tuple[int, str]:
         s = run(["claude", "stop", short])
         if s.returncode != 0:
             return 2, f"unsure: {msg}; claude stop {short} failed too"
         return code, f"fail: {msg}; background session {short} stopped, not opened in the app"
 
-    sid = None
-    deadline = time.monotonic() + WAIT_IDLE_S
+    sid = got = None
+    limit = wait_s()
+    deadline = time.monotonic() + limit
     while time.monotonic() < deadline:
         rows = agents(wt)
         if len(rows) > 1:
             return stop_and(1, f"{len(rows)} sessions run in {wt}")
         if rows and rows[0].get("name") == title and rows[0].get("status") == "idle":
             sid = str(rows[0].get("sessionId") or "")
-            break
+            if not re.fullmatch(r"[0-9a-f-]{36}", sid):
+                return stop_and(1, f"the session id {sid[:40]!r} is not plain")
+            got = reply_model(transcript(sid, wt))
+            if got:
+                break
         time.sleep(2)
-    if not sid or not re.fullmatch(r"[0-9a-f-]{36}", sid):
-        return stop_and(1, f"the session did not turn idle within {WAIT_IDLE_S} s")
+    if not sid:
+        return stop_and(1, f"the session did not turn idle within {limit} s")
+    if not got:
+        return stop_and(1, f"the session turned idle but gave no real reply to the ready prompt "
+                           f"within {limit} s (none in its transcript): opened now, it would run "
+                           "on the app's default model")
+    if not same_model(model, got):
+        return stop_and(1, f"the session answered on {got}, not on --model {model}")
     s = run(["claude", "stop", short])
     if s.returncode != 0:
         return 2, f"unsure: claude stop {short}: {s.stderr.strip()}; local_{sid}"

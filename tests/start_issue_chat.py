@@ -3,14 +3,17 @@
 python3 tests/start_issue_chat.py.
 
 No real session starts: a stand-in `claude` first on PATH answers `auth status`, `agents --json`,
-`--bg`, `stop` and `--desktop --resume` from a state file and logs each call, and a stand-in `gh`
-(AGENTIC_GITHUB_FLOW_GH) answers `issue view` for the title's issue. Each case exposes one way
+`--bg`, `stop` and `--desktop --resume` from a state file and logs each call, writes the new
+session's transcript (its reply to the ready prompt: a real one on a chosen model, the
+`<synthetic>` placeholder, or none until a later poll) under a stand-in CLAUDE_CONFIG_DIR, and a
+stand-in `gh` (AGENTIC_GITHUB_FLOW_GH) answers `issue view` for the title's issue. Each case exposes one way
 the hand-over could go wrong: a next chat started in a primary checkout, a dirty or busy
 worktree, a second chat with the same title, a second chat on an issue another chat has claimed
 (assigned, also when --handover claims it is the caller's own) or one that is closed or
 unreadable, a title without its GitHub issue or the repository prefix, a refused value reaching
 `claude --bg`, a session left running after a failure, or a chat opened in the app before its
-background run stopped. On Windows, where the tool knows no form of `script`, it checks only
+background run stopped, or a chat opened although it never answered the ready prompt or answered
+on another model than --model. On Windows, where the tool knows no form of `script`, it checks only
 that the tool refuses before starting anything. Offline.
 """
 import json
@@ -25,12 +28,30 @@ TOOL = os.path.join(ROOT, 'plugins', 'issue-chats', 'scripts', 'start_issue_chat
 SID = '0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0'
 WINDOWS = os.name == 'nt'
 
-STUB = r'''import json, os, sys
+STUB = r'''import json, os, re, sys
 st = os.environ['STUB_STATE']
 s = json.load(open(st))
 a = sys.argv[1:]
 s['log'].append(a)
 def save(): json.dump(s, open(st, 'w'))
+def write_reply(cwd, kind, model):
+    # The session's transcript as Claude Code keeps it: the ready prompt, then its reply.
+    folder = re.sub(r'[^A-Za-z0-9]', '-', cwd) if s.get('reply_dir') != 'other' else 'renamed'
+    d = os.path.join(os.environ['CLAUDE_CONFIG_DIR'], 'projects', folder)
+    os.makedirs(d, exist_ok=True)
+    recs = [{'type': 'user', 'message': {'role': 'user', 'content': 'Reply ...'}}]
+    if kind == 'synthetic':
+        recs.append({'type': 'assistant', 'isApiErrorMessage': False,
+                     'message': {'model': '<synthetic>', 'content': [
+                         {'type': 'text', 'text': 'No response requested.'}]}})
+    elif kind == 'real':
+        recs.append({'type': 'assistant', 'message': {'model': model, 'content': [
+            {'type': 'text', 'text': 'ready'}]}})
+    with open(os.path.join(d, s['sid'] + '.jsonl'), 'w') as f:
+        f.write('not json\n' + ''.join(json.dumps(r) + '\n' for r in recs))
+def reply_model(m):
+    m = re.sub(r'\[.*\]$', '', m)
+    return s.get('reply_model') or {'opus': 'claude-opus-5-5'}.get(m, m)
 if a[:2] == ['auth', 'status']:
     print(json.dumps({'loggedIn': s['logged_in']}))
 elif a[:2] == ['agents', '--json']:
@@ -40,6 +61,10 @@ elif a[:2] == ['agents', '--json']:
     if '--cwd' in a:
         cwd = os.path.realpath(a[a.index('--cwd') + 1])
         rows = [r for r in s['bg'] if os.path.realpath(r['cwd']) == cwd and not r.get('stopped')]
+        s['polls'] = s.get('polls', 0) + 1
+        late = s.get('reply_after_polls')
+        if rows and late and s['polls'] == late:
+            write_reply(rows[0]['cwd'], 'real', s['bg_model'])
     print(json.dumps(rows, indent=2))
 elif a[:1] == ['--bg']:
     name = a[a.index('--name') + 1]
@@ -47,6 +72,9 @@ elif a[:1] == ['--bg']:
                     'name': name, 'status': s['bg_status']})
     if s.get('bg_fail'):
         print('error: something went wrong', file=sys.stderr); save(); sys.exit(1)
+    s['bg_model'] = reply_model(a[a.index('--model') + 1])
+    kind = s.get('reply', 'real')
+    write_reply(os.getcwd(), 'none' if s.get('reply_after_polls') else kind, s['bg_model'])
     print('backgrounded · 0f1e2d3c · ' + name)
 elif a[:1] == ['stop']:
     for r in s['bg']:
@@ -131,8 +159,11 @@ def case(name, expect_code, *, args=None, logged_in=True, others=(), bg_status='
         json.dump({'log': [], 'logged_in': logged_in, 'others': list(others), 'bg': [],
                    'sid': SID, 'bg_status': bg_status, 'desktop_ok': desktop_ok, 'gh': gh,
                    **(stub or {})}, f)
+    config = os.path.join(tmp, 'config')
+    shutil.rmtree(config, ignore_errors=True)
     env = dict(GENV, PATH=bindir + os.pathsep + os.environ['PATH'], STUB_STATE=state,
-               AGENTIC_GITHUB_FLOW_GH=GH_CMD, CLAUDE_CODE_SESSION_ID='me', CLAUDE_EFFORT='high')
+               AGENTIC_GITHUB_FLOW_GH=GH_CMD, CLAUDE_CODE_SESSION_ID='me', CLAUDE_EFFORT='high',
+               CLAUDE_CONFIG_DIR=config, AGENTIC_GITHUB_FLOW_START_WAIT_S='8')
     env.pop('CLAUDE_CODE_HOST_SESSION_ID', None)
     env.update(env_extra or {})
     argv = args if args is not None else [wt, '#12 · next', '--model', 'claude-opus-5-5']
@@ -279,6 +310,32 @@ else:
          stub={'agents_fail_after_bg': True}, needs_pty=False,
          check=lambda log, out: unsure_with_id(log, out) or (
              None if '0f1e2d3c' in out else 'no short id in %r' % out))
+    def not_opened(log, out):
+        kinds = [c[0] for c in log]
+        if '--desktop' in kinds:
+            return 'opened in the app: %s' % kinds
+        if 'stop' not in kinds or not out.strip().startswith('fail:'):
+            return 'calls %s, last line %r' % (kinds, out)
+        return None
+
+    case('a synthetic ready reply at idle never gives ok', 1, stub={'reply': 'synthetic'},
+         check=lambda log, out: not_opened(log, out) or (
+             None if 'ready prompt' in out else 'reason missing in %r' % out))
+    case('no reply at all at idle never gives ok', 1, stub={'reply': 'none'}, check=not_opened)
+    case('a reply on another model: stopped, not opened', 1,
+         stub={'reply_model': 'claude-fable-5-1'},
+         check=lambda log, out: not_opened(log, out) or (
+             None if 'claude-fable-5-1' in out else 'model missing in %r' % out))
+    case('a reply on another model of the alias\'s family name refused', 1,
+         args=[wt, '#12 · next', '--model', 'opus'], stub={'reply_model': 'claude-sonnet-5-5'},
+         check=not_opened)
+    case('idle before the reply: waits for it, then ok', 0, stub={'reply_after_polls': 3},
+         check=lambda log, out: order_ok(log, out) or (
+             None if sum(c[:2] == ['agents', '--json'] and '--cwd' in c for c in log) >= 3
+             else 'stopped before the reply: %s' % log))
+    case('a context suffix on the model id', 0,
+         args=[wt, '#12 · next', '--model', 'claude-opus-5-5[1m]'])
+    case('the transcript in a project folder of another name', 0, stub={'reply_dir': 'other'})
     case('closed issue refused', 1, gh={'state': 'CLOSED', 'assignees': []},
          check=nothing_started)
     case('unreadable issue refused', 1, gh=None, check=nothing_started)

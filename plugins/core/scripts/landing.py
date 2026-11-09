@@ -9,8 +9,10 @@ issue chats ask it too. It prints one `check:` line per signal it read, then
 --branch it prints only the landing branch. First match wins:
 
   1. setting   HANDOFF.md, section `## Landing settings`, row `landing`: `pull request` gives
-               pull request; `local main` gives local main unless the server requires pull
-               requests (3); `auto` or no row: go on. An unknown value gives pull request.
+               pull request; `local main` gives local main unless the server is seen to
+               require pull requests (3); when the server cannot be read (5) the setting holds,
+               since a push the server rejects only stops there. `auto` or no row: go on. An
+               unknown value gives pull request.
   2. no origin no remote `origin`: local main, there is no server to open a pull request on.
   3. server    the landing branch on GitHub has an active ruleset rule that forbids a direct
                push (PUSH_RULES, or a type not in HARMLESS_RULES), or legacy branch protection
@@ -305,6 +307,10 @@ def decide(path: str = ".") -> tuple[str, str, list]:
         return LOCAL, branch, checks
     m = GITHUB_URL.match(url)
     if not m:
+        if setting == LOCAL:
+            checks.append("remote origin: not on github.com, server not checked: the setting "
+                          "holds, and a push the server rejects stops there")
+            return LOCAL, branch, checks
         checks.append("remote origin: not on github.com: unknown, the safe default")
         return PR, branch, checks
     repo = f"{m.group(1)}/{m.group(2)}"
@@ -324,6 +330,10 @@ def decide(path: str = ".") -> tuple[str, str, list]:
         if team_signal(gh, path, repo, branch, ref, checks):
             return PR, branch, checks
     except Unknown as e:
+        if setting == LOCAL:
+            checks.append(f"server not checked ({e}): the setting holds, and a push the server "
+                          "rejects stops there")
+            return LOCAL, branch, checks
         checks.append(f"unknown: {e}: the safe default")
         return PR, branch, checks
     return LOCAL, branch, checks

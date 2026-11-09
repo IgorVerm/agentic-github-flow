@@ -160,6 +160,14 @@ class Landing(unittest.TestCase):
         self.assertEqual(self.mode(rules), 'pull request')
         self.assertIn('overrules the setting', self.out)
 
+    def test_setting_local_main_holds_when_the_server_cannot_be_read(self):
+        self.commit({'HANDOFF.md': settings([('landing', 'local main')])})
+        self.publish('main')
+        self.assertEqual(self.mode(solo(), fail=True), 'local main')
+        self.git('remote', 'set-url', 'origin', 'https://gitlab.com/acme/tool.git')
+        self.assertEqual(self.mode(solo()), 'local main')
+        self.assertIn('server not checked', self.out)
+
     def test_unknown_setting_value_is_pull_request(self):
         self.commit({'HANDOFF.md': settings([('landing', 'trunk')])})
         self.publish('main')

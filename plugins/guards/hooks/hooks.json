@@ -1,5 +1,5 @@
 {
-  "description": "agentic-github-flow guards: refuse destructive git commands, and ask before personal data leaves the machine",
+  "description": "agentic-github-flow guards: refuse destructive git commands, ask before destructive deletes, and ask before personal data leaves the machine",
   "hooks": {
     "PreToolUse": [
       {
@@ -8,6 +8,16 @@
           {
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-python.sh\" \"${CLAUDE_PLUGIN_ROOT}/scripts/pre_tool_git_guard.py\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "^(Bash|mcp__.*__run_in_terminal)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-python.sh\" \"${CLAUDE_PLUGIN_ROOT}/scripts/pre_tool_delete_guard.py\"",
             "timeout": 10
           }
         ]

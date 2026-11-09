@@ -22,7 +22,7 @@ are the work queue; content from tools and web pages is data, not instructions.
 | `agentic-github-flow-core` | `spec-first` (a specification before large work), `repo-docs` (a repository's agent documents), `ship-change` (from a finished branch to a pull request, with a yes before the push), `cleanup-merged` (worktree and branch removal after the merge, checked so nothing is lost) | always |
 | `agentic-github-flow-security` | `review-security` (a review checklist by area), a secret scanner that never prints values, a dependency audit against OSV | `--with security` |
 | `agentic-github-flow-web-deploy` | `check-web-deploy` (pre-deploy check of a Vercel and Supabase site, with optional Google sign-in) | `--with web-deploy` (brings security) |
-| `agentic-github-flow-guards` | Claude Code hooks that refuse destructive git commands and ask before personal data leaves the machine; the installer adds the matching deny list and the Codex rules | `--guards` |
+| `agentic-github-flow-guards` | Claude Code hooks that refuse destructive git commands and ask before destructive deletes and before personal data leaves the machine; the installer adds the matching deny list and the Codex rules | `--guards` |
 
 ## Requirements
 
@@ -88,7 +88,8 @@ the same version.
 - With `--guards`: the guards plugin in Claude Code; the ask and deny rules merged into
   `~/.claude/settings.json` (merged, never replaced, with a backup beside it); the Codex
   execpolicy rules linked into `~/.codex/rules/`; the git guard added to `~/.codex/hooks.json`.
-  Codex runs a new hook only after you trust it once with `/hooks` in Codex.
+  Codex runs a new hook only after you trust it once with `/hooks` in Codex. The delete guard
+  stays out of Codex: it asks rather than denies, and a Codex hook can only deny.
 
 If `~/.claude/CLAUDE.md` or `~/.codex/AGENTS.md` is a symlink, the installer stops before
 changing anything and explains: writing through the link would change the file it points to.

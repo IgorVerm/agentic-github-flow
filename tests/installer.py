@@ -315,6 +315,8 @@ class InstallerTests(unittest.TestCase):
         hooks = json.loads(self.read('.codex', 'hooks.json'))
         command = hooks['hooks']['PreToolUse'][0]['hooks'][0]['command']
         self.assertIn('pre_tool_git_guard.py', command)
+        # the delete guard can only ask, which Codex hooks cannot: it stays out of Codex
+        self.assertNotIn(b'pre_tool_delete_guard.py', self.read('.codex', 'hooks.json'))
         rules = self.path('.codex', 'rules', 'agentic-github-flow-git-safety.rules')
         self.assertTrue(os.path.exists(rules))
         self.assertTrue(any(n.startswith('settings.json.agentic-github-flow-backup-')

@@ -27,8 +27,9 @@ Outbound calls (everything else is local and passes):
   is outside the rule. To any other host it is judged in full.
 - WebFetch (the URL; the prompt stays with the model), WebSearch (the query).
 - Artifact publish (the page and its files), ArtifactData, ArtifactComments.
-- Every MCP tool except the desktop app's own local controls (LOCAL_MCP); `run_in_terminal` is
-  judged as a Bash command. Browser tools are scanned in full: a typed text, a form value, a URL
+- Every MCP tool except the desktop app's own local controls (LOCAL_MCP) and the servers the user
+  lists in `local-mcp` (below); `run_in_terminal` is judged as a Bash command, whatever its
+  server. Browser tools are scanned in full: a typed text, a form value, a URL
   or page script.
 - Codex: its shell tool arrives as Bash and its MCP tools as `mcp__<server>__<tool>`, so the rules
   above apply; its web tool `webrun` or `web.run` is scanned in full. Text written into a running
@@ -52,6 +53,21 @@ fields hold `<login>/<repo>` (the configured identity on pushes and issue posts 
 rule; the user's name and addresses in a connector body are not). Any other e-mail address in
 an outbound call is someone's personal data and is asked too, except placeholder, no-reply and
 git-host addresses (NOT_PERSONAL).
+
+The user's settings, beside `personal-data` in `${XDG_CONFIG_HOME:-~/.config}/agentic-github-flow/`
+(outside every repository, so no repository can bring them): one entry per line, blank lines and
+`#` comments ignored, a missing or unreadable file an empty list.
+- `exempt-dirs`: absolute folders (`~` expanded; a relative line is ignored) whose sessions are not
+  judged, for work that other rules govern. A call passes when the event's `cwd` is inside one
+  and, when Claude Code names the session's project folder (`CLAUDE_PROJECT_DIR`), that folder is
+  inside one too: a `cd` into an exempt folder does not move the project, and a folder the call
+  names itself (`workdir`, `cd … &&`) counts for nothing. In Codex the event's `cwd` is the turn's
+  folder, not the call's `workdir`. Symlinks are resolved first.
+- `local-mcp`: names of MCP servers that run on this machine and send nothing on; their
+  `mcp__<name>__*` tools pass like LOCAL_MCP. Listing a server is the user's statement that it is
+  local: the hook cannot check it.
+These files, like `personal-data`, turn the check off where they say so: whoever can write them
+(the user, or an agent the user lets write outside its workspace) decides what is judged.
 
 An input it cannot read passes, as with the git guard: a fault must not stop all work.
 
@@ -89,6 +105,7 @@ HTTP_CLIENTS = {'curl', 'wget', 'http', 'https', 'xh'}
 LOCAL_MCP = ('mcp__ccd_', 'mcp__visualize__', 'mcp__Claude_Code_iOS_Simulator__',
              'mcp__terminal__', 'mcp__scheduled-tasks__list', 'mcp__mcp-registry__')
 CLOUD_CCD = ('mcp__ccd_session__move_to_cloud',)
+MCP_NAME = re.compile(r'[A-Za-z0-9_.-]+')  # a server name as it appears in `mcp__<name>__`
 WEB_TOOLS = {'WebFetch': ('url',), 'WebSearch': ('query',)}
 # Codex's web search and page opening: `webrun` measured 2026-10-25; the bundled binary names
 # the tool `web.run`, so that spelling is judged too
@@ -135,6 +152,48 @@ def _run(args):
         return r.stdout if r.returncode == 0 else ''
     except (OSError, subprocess.SubprocessError):
         return ''
+
+
+def config_lines(name):
+    """The entries of the user's settings file `name`: stripped lines, without blanks and `#`
+    comments; [] when the file is missing or unreadable."""
+    base = os.environ.get('XDG_CONFIG_HOME') or os.path.expanduser('~/.config')
+    try:
+        with open(os.path.join(base, 'agentic-github-flow', name), encoding='utf-8') as f:
+            lines = f.read().splitlines()
+    except (OSError, UnicodeDecodeError):
+        return []
+    return [line.strip() for line in lines if line.strip() and not line.strip().startswith('#')]
+
+
+def local_mcp():
+    """LOCAL_MCP and the `mcp__<name>__` prefixes of the servers listed in `local-mcp`."""
+    return LOCAL_MCP + tuple('mcp__%s__' % name for name in config_lines('local-mcp')
+                             if MCP_NAME.fullmatch(name))
+
+
+def _inside(path, folders):
+    if not path or not os.path.isabs(path):
+        return False
+    path = os.path.normcase(os.path.realpath(path))
+    for folder in folders:
+        try:
+            if os.path.commonpath([path, folder]) == folder:
+                return True
+        except ValueError:  # another drive on Windows
+            pass
+    return False
+
+
+def exempt_session(cwd):
+    """True when the session's folder lies inside a folder listed in `exempt-dirs`."""
+    folders = [os.path.normcase(os.path.realpath(p)) for p in
+               (os.path.expanduser(line) for line in config_lines('exempt-dirs'))
+               if os.path.isabs(p)]
+    if not folders:
+        return False
+    places = [cwd] + [p for p in (os.environ.get('CLAUDE_PROJECT_DIR'),) if p]
+    return all(_inside(p, folders) for p in places)
 
 
 def gh_config_dir():
@@ -192,16 +251,7 @@ def identifiers():
     if len(account) >= 6:
         found.append(("the user's account name", re.compile(_boundary(re.escape(account)), re.I),
                       False))
-    base = os.environ.get('XDG_CONFIG_HOME') or os.path.expanduser('~/.config')
-    try:
-        lines = open(os.path.join(base, 'agentic-github-flow', 'personal-data'), encoding='utf-8')
-        lines = lines.read().splitlines()
-    except OSError:
-        lines = []
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith('#'):
-            continue
+    for line in config_lines('personal-data'):
         kind, sep, value = line.partition(':')
         kind, value = (kind.strip().lower(), value.strip()) if sep and kind.strip().lower() in (
             'email', 'phone', 'name', 'text') else ('text', line)
@@ -438,7 +488,7 @@ def outbound(tool, tool_input, cwd):
                     pass
         return 'this Artifact publish', [(set(), t) for t in texts]
     if tool in ARTIFACT_TOOLS or tool in CODEX_WEB or (tool.startswith('mcp__') and (
-            tool.startswith(CLOUD_CCD) or not tool.startswith(LOCAL_MCP))):
+            tool.startswith(CLOUD_CCD) or not tool.startswith(local_mcp()))):
         programs = {'github-connector'} if tool.startswith(GITHUB_MCP) else set()
         return 'this %s call' % tool, [(programs, t) for t in strings(tool_input)]
     return None
@@ -527,7 +577,7 @@ def judge(event):
     cwd = event.get('cwd') or ''
     tool = event.get('tool_name') or ''
     found = outbound(tool, event.get('tool_input'), cwd)
-    if not found:
+    if not found or exempt_session(cwd):
         return None
     what, segs = found
     hits = []

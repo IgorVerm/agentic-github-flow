@@ -368,3 +368,456 @@ REPO T=$(mktemp -d); trap 'rm -rf "$T"' EXIT; cd "$T"; rm -rf out
 REPO cd plugins && rm -rf __pycache__; cd ..; rm -rf build
 REPO pushd plugins >/dev/null; rm -rf build; popd >/dev/null; rm -rf dist
 REPO while read f; do rm -f "$f"; done < list
+# the independent review of the second attempt (round 2)
+REPO HOME=~/Library; cd; rm -rf "Application Support/Foo"
+REPO HOME=~/Library cd && rm -rf "Application Support/Foo"
+REPO alias go='cd ~'\ngo\nrm -rf Documents
+REPO \cd ~; rm -rf Documents
+REPO c\d ~; rm -rf Documents
+REPO 'cd' ~ && rm -rf Documents
+REPO pushd ~ >/dev/null; pushd /tmp/x; popd; rm -rf Library
+REPO cd ~ & rm -rf Documents
+REPO f() { cd ~; }; f; rm -rf Documents
+REPO f() (cd ~); f; rm -rf Documents
+REPO f() { cd ~; }\nf\nrm -rf Documents
+REPO function f { cd ~; }; f; rm -rf Documents
+REPO set -- ~; cd "$1"; rm -rf Documents
+REPO cd "$OLDPWD"; rm -rf Documents
+REPO X=~; cd $X; rm -rf Documents
+REPO cd ~ ; R=rm; $R -r Library
+REPO eval 'cd ~'; rm -rf Documents
+REPO eval cd ~; rm -rf Documents
+REPO eval "cd ~ && rm -rf Documents"
+REPO C='cd ~'; $C; rm -rf Documents
+REPO C='cd ~'; $C && rm -rf Documents
+REPO C='cd'; $C && rm -rf Documents
+REPO cd; rm -rf Documents
+REPO builtin cd; rm -rf Documents
+REPO exec 3<&0; cd ~; rm -rf Documents
+REPO until cd ~; do :; done; rm -rf Documents
+REPO while ! cd ~; do :; done; rm -rf Documents
+REPO if ! cd ~; then :; else rm -rf Documents; fi
+REPO [ -d ~ ] && cd ~ && rm -rf Documents
+REPO test -d x || cd ~; rm -rf Documents
+REPO cd ~ || cd ~; rm -rf Documents
+REPO case x in x) cd ~ ;; esac; rm -rf Documents
+REPO case x in (x) cd ~ ;; esac; rm -rf Documents
+REPO case x in x) cd ~ ;& y) rm -rf Documents;; esac
+REPO trap 'cd ~' DEBUG; true; rm -rf Documents
+REPO trap -- 'cd ~' DEBUG; true; rm -rf Documents
+REPO trap "cd ~" RETURN; f() { :; }; f; rm -rf Documents
+REPO trap 'rm -rf Documents' SIGEXIT; cd ~
+REPO trap 'rm -rf Documents' INT TERM EXIT; cd ~
+REPO trap 'rm -rf "$D"' EXIT; D=~/Documents
+REPO D=x; trap 'rm -rf "$D"' EXIT; D=~/Documents
+REPO D=/tmp/x; trap 'rm -rf $D' EXIT; D=~/Documents
+REPO D=/tmp/x; trap 'rm -rf "$D"' EXIT; D=~; true
+REPO cleanup() { rm -rf "$T"; }; trap cleanup EXIT; T=$(mktemp -d); T=~/Documents
+REPO cleanup() { rm -rf "$T"; }; T=/tmp/x; trap cleanup EXIT; T=~/Documents
+REPO f() { rm -rf Documents; }; cd ~; f
+REPO f() { rm -rf Documents; }\ncd ~\nf
+REPO f() { rm -rf "$1"; }; f ~/Documents
+REPO f() { rm -rf "$@"; }; f ~/Documents
+REPO f() { rm -rf $1; }; f ~
+REPO C=(cd ~); "${C[@]}"; rm -rf Documents
+REPO read C <<< "cd ~"; $C; rm -rf Documents
+REPO C='cd'; "$C" ~; rm -rf Documents
+REPO C='cd'; ${C} ~ && rm -rf Documents
+REPO eval "f() { cd ~; }"; f; rm -rf Documents
+REPO function TRAPZERR { cd ~; }; false; rm -rf Documents
+REPO function TRAPDEBUG { cd ~; }; rm -rf Documents
+REPO () { cd ~ && rm -rf Documents }
+DEEP for ((i=0;i<3;i++)); do cd ..; done; rm -rf Documents
+DEEP for i in 1 2 3; do cd ..; done; rm -rf Documents
+DEEP repeat 3 { cd .. }; rm -rf Documents
+DEEP repeat 3 cd ..; rm -rf Documents
+DEEP for i (1 2 3) { cd .. }; rm -rf Documents
+DEEP for i (1 2 3) cd ..; rm -rf Documents
+DEEP foreach i (1 2 3)\ncd ..\nend\nrm -rf Documents
+DEEP while [ ! -d Documents ]; do cd ..; done; rm -rf Documents
+DEEP until [ -d Documents ]; do cd ..; done && rm -rf Documents
+DEEP cd ../../..; rm -rf Documents
+DEEP f() { cd ..; }; f; f; f; rm -rf Documents
+DEEP function f { cd ..; }; f; f; f; rm -rf Documents
+DEEP alias up='cd ..'; up; up; up; rm -rf Documents
+DEEP cd "$(git rev-parse --show-toplevel)/../.." && rm -rf Documents
+DEEP cd $(dirname $(dirname $PWD)) && rm -rf b
+REPO cd ~; cd /tmp/x; rm ~-/.zshrc
+REPO pushd ~; pushd /tmp/x; rm -f ~1/.ssh/known_hosts
+REPO pushd ~; pushd /tmp/x; rm -f ~-1/.ssh/known_hosts
+REPO pushd ~; pushd /tmp/x; rm -rf ~1/Documents
+REPO pushd ~; pushd /tmp/x; rm -rf ~2
+REPO rm -rf {~,x}/Documents
+REPO rm -rf {x,~}
+REPO rm -rf {{~,a},b}/Documents
+REPO rm -rf {~/Lib,/x}rary
+REPO rm -rf {~+,x}/../../Documents
+REPO rm -f {~,x}/.zshrc
+REPO rm -rf {~,x}{/Documents,}
+REPO rm -rf {a..c}{~,}
+REPO rm -rf x{,~}
+REPO find {~,/tmp/x}/Documents -delete
+REPO find ~{/Documents,} -name '*.tmp' -delete
+REPO rm -rf ${X:-~+}
+REPO rm -rf ${X:-~+0}/Documents
+REPO X=; rm -rf ${X:-~+}/../../Documents
+REPO X=; rm -rf ${X:-~-}
+REPO rm -f ${X:=~/.ssh/id_rsa}
+REPO rm -f ${X:-~/.ssh/id_rsa}
+HOME rm -rf ~+0/Documents
+HOME rm -rf ~+0
+REPO cd ~ ; rm -rf ~+0/Documents
+REPO cd /tmp/x || cd ~; rm -rf Documents
+REPO cd /tmp/x || exit; cd ~ 2>/dev/null; rm -rf Documents
+REPO pushd ~; pushd -; rm -rf Documents
+REPO cd ~; cd /tmp/x; cd -; rm -rf Documents
+REPO pushd /tmp/x && pushd ~ && pushd +1 && rm -rf Documents
+REPO cd ~ x; rm -rf Documents
+SCRIPTS cd scripts guards && rm -rf ../../../../Documents
+REPO CDPATH=~ cd Documents && rm -rf notes
+REPO export CDPATH=~:.; cd Documents && rm -rf notes
+REPO CDPATH=$HOME; cd Library && rm -rf "Application Support"
+REPO CDPATH=~ cd Library && rm -rf "Application Support"
+REPO export CDPATH=~:.; cd Library && rm -rf "Application Support"
+REPO CDPATH=~ pushd Library && rm -rf "Application Support"
+REPO declare -x CDPATH=~; cd Library && rm -rf "Application Support"
+REPO typeset CDPATH=$HOME; cd Library && rm -rf "Application Support"
+REPO cdpath=(~); cd Library && rm -rf "Application Support"
+REPO HOME rm -rf ~/Documents/notes
+HOME R=rm; $R -r Library
+REPO CDPATH=.:~; cd Library && rm -rf "Application Support"
+REPO export CDPATH=.:~/; cd Library && rm -rf "Application Support"
+REPO CDPATH=.:$HOME; cd Library && rm -rf "Application Support"
+HOME for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do R=rm; $R -r Library
+HOME f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; R=rm; $R -r Library
+HOME for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do R=rm; $R -r Library
+HOME f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; R=rm; $R -r Library
+HOME cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; R=rm; $R -r Library
+HOME cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; R=rm; $R -r Library
+HOME eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; R=rm; $R -r Library
+HOME trap 'cd a' DEBUG; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; R=rm; $R -r Library
+HOME pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; R=rm; $R -r Library
+HOME for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do for i in 1; do R=rm; $R -r Library
+HOME f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; R=rm; $R -r Library
+HOME cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; cd a; R=rm; $R -r Library
+HOME cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; cd a || true; R=rm; $R -r Library
+HOME eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; eval "cd a"; R=rm; $R -r Library
+HOME trap 'cd a' DEBUG; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; R=rm; $R -r Library
+HOME pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; pushd a; R=rm; $R -r Library
+REPO f0() { cd /tmp/x0 && make; }; f1() { cd /tmp/x1 && make; }; f2() { cd /tmp/x2 && make; }; f3() { cd /tmp/x3 && make; }; f4() { cd /tmp/x4 && make; }; function g { cd ~; }; g; rm -rf Documents
+REPO f0() { echo 0; }; f1() { echo 1; }; f2() { echo 2; }; f3() { echo 3; }; f4() { echo 4; }; function g { cd ~; }; g; rm -rf Documents
+REPO for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; function g { cd ~; }; g; rm -rf Documents
+REPO cd /tmp/x0 || cd /tmp/y0; cd /tmp/x1 || cd /tmp/y1; cd /tmp/x2 || cd /tmp/y2; cd /tmp/x3 || cd /tmp/y3; cd /tmp/x4 || cd /tmp/y4; function g { cd ~; }; g; rm -rf Documents
+REPO f0() { cd /tmp/x0 && make; }; f1() { cd /tmp/x1 && make; }; f2() { cd /tmp/x2 && make; }; f3() { cd /tmp/x3 && make; }; f4() { cd /tmp/x4 && make; }; f5() { cd /tmp/x5 && make; }; f6() { cd /tmp/x6 && make; }; f7() { cd /tmp/x7 && make; }; f8() { cd /tmp/x8 && make; }; f9() { cd /tmp/x9 && make; }; function g { cd ~; }; g; rm -rf Documents
+REPO f0() { echo 0; }; f1() { echo 1; }; f2() { echo 2; }; f3() { echo 3; }; f4() { echo 4; }; f5() { echo 5; }; f6() { echo 6; }; f7() { echo 7; }; f8() { echo 8; }; f9() { echo 9; }; function g { cd ~; }; g; rm -rf Documents
+REPO for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; function g { cd ~; }; g; rm -rf Documents
+REPO cd /tmp/x0 || cd /tmp/y0; cd /tmp/x1 || cd /tmp/y1; cd /tmp/x2 || cd /tmp/y2; cd /tmp/x3 || cd /tmp/y3; cd /tmp/x4 || cd /tmp/y4; cd /tmp/x5 || cd /tmp/y5; cd /tmp/x6 || cd /tmp/y6; cd /tmp/x7 || cd /tmp/y7; cd /tmp/x8 || cd /tmp/y8; cd /tmp/x9 || cd /tmp/y9; function g { cd ~; }; g; rm -rf Documents
+REPO f0() { cd /tmp/x0 && make; }; f1() { cd /tmp/x1 && make; }; f2() { cd /tmp/x2 && make; }; f3() { cd /tmp/x3 && make; }; f4() { cd /tmp/x4 && make; }; f5() { cd /tmp/x5 && make; }; f6() { cd /tmp/x6 && make; }; f7() { cd /tmp/x7 && make; }; f8() { cd /tmp/x8 && make; }; f9() { cd /tmp/x9 && make; }; f10() { cd /tmp/x10 && make; }; f11() { cd /tmp/x11 && make; }; f12() { cd /tmp/x12 && make; }; f13() { cd /tmp/x13 && make; }; f14() { cd /tmp/x14 && make; }; f15() { cd /tmp/x15 && make; }; f16() { cd /tmp/x16 && make; }; f17() { cd /tmp/x17 && make; }; f18() { cd /tmp/x18 && make; }; f19() { cd /tmp/x19 && make; }; function g { cd ~; }; g; rm -rf Documents
+REPO f0() { echo 0; }; f1() { echo 1; }; f2() { echo 2; }; f3() { echo 3; }; f4() { echo 4; }; f5() { echo 5; }; f6() { echo 6; }; f7() { echo 7; }; f8() { echo 8; }; f9() { echo 9; }; f10() { echo 10; }; f11() { echo 11; }; f12() { echo 12; }; f13() { echo 13; }; f14() { echo 14; }; f15() { echo 15; }; f16() { echo 16; }; f17() { echo 17; }; f18() { echo 18; }; f19() { echo 19; }; function g { cd ~; }; g; rm -rf Documents
+REPO for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; function g { cd ~; }; g; rm -rf Documents
+REPO cd /tmp/x0 || cd /tmp/y0; cd /tmp/x1 || cd /tmp/y1; cd /tmp/x2 || cd /tmp/y2; cd /tmp/x3 || cd /tmp/y3; cd /tmp/x4 || cd /tmp/y4; cd /tmp/x5 || cd /tmp/y5; cd /tmp/x6 || cd /tmp/y6; cd /tmp/x7 || cd /tmp/y7; cd /tmp/x8 || cd /tmp/y8; cd /tmp/x9 || cd /tmp/y9; cd /tmp/x10 || cd /tmp/y10; cd /tmp/x11 || cd /tmp/y11; cd /tmp/x12 || cd /tmp/y12; cd /tmp/x13 || cd /tmp/y13; cd /tmp/x14 || cd /tmp/y14; cd /tmp/x15 || cd /tmp/y15; cd /tmp/x16 || cd /tmp/y16; cd /tmp/x17 || cd /tmp/y17; cd /tmp/x18 || cd /tmp/y18; cd /tmp/x19 || cd /tmp/y19; function g { cd ~; }; g; rm -rf Documents
+REPO f0() { cd /tmp/x0 && make; }; f1() { cd /tmp/x1 && make; }; f2() { cd /tmp/x2 && make; }; f3() { cd /tmp/x3 && make; }; f4() { cd /tmp/x4 && make; }; f5() { cd /tmp/x5 && make; }; f6() { cd /tmp/x6 && make; }; f7() { cd /tmp/x7 && make; }; f8() { cd /tmp/x8 && make; }; f9() { cd /tmp/x9 && make; }; f10() { cd /tmp/x10 && make; }; f11() { cd /tmp/x11 && make; }; f12() { cd /tmp/x12 && make; }; f13() { cd /tmp/x13 && make; }; f14() { cd /tmp/x14 && make; }; f15() { cd /tmp/x15 && make; }; f16() { cd /tmp/x16 && make; }; f17() { cd /tmp/x17 && make; }; f18() { cd /tmp/x18 && make; }; f19() { cd /tmp/x19 && make; }; f20() { cd /tmp/x20 && make; }; f21() { cd /tmp/x21 && make; }; f22() { cd /tmp/x22 && make; }; f23() { cd /tmp/x23 && make; }; f24() { cd /tmp/x24 && make; }; f25() { cd /tmp/x25 && make; }; f26() { cd /tmp/x26 && make; }; f27() { cd /tmp/x27 && make; }; f28() { cd /tmp/x28 && make; }; f29() { cd /tmp/x29 && make; }; f30() { cd /tmp/x30 && make; }; f31() { cd /tmp/x31 && make; }; f32() { cd /tmp/x32 && make; }; f33() { cd /tmp/x33 && make; }; f34() { cd /tmp/x34 && make; }; f35() { cd /tmp/x35 && make; }; f36() { cd /tmp/x36 && make; }; f37() { cd /tmp/x37 && make; }; f38() { cd /tmp/x38 && make; }; f39() { cd /tmp/x39 && make; }; function g { cd ~; }; g; rm -rf Documents
+REPO f0() { echo 0; }; f1() { echo 1; }; f2() { echo 2; }; f3() { echo 3; }; f4() { echo 4; }; f5() { echo 5; }; f6() { echo 6; }; f7() { echo 7; }; f8() { echo 8; }; f9() { echo 9; }; f10() { echo 10; }; f11() { echo 11; }; f12() { echo 12; }; f13() { echo 13; }; f14() { echo 14; }; f15() { echo 15; }; f16() { echo 16; }; f17() { echo 17; }; f18() { echo 18; }; f19() { echo 19; }; f20() { echo 20; }; f21() { echo 21; }; f22() { echo 22; }; f23() { echo 23; }; f24() { echo 24; }; f25() { echo 25; }; f26() { echo 26; }; f27() { echo 27; }; f28() { echo 28; }; f29() { echo 29; }; f30() { echo 30; }; f31() { echo 31; }; f32() { echo 32; }; f33() { echo 33; }; f34() { echo 34; }; f35() { echo 35; }; f36() { echo 36; }; f37() { echo 37; }; f38() { echo 38; }; f39() { echo 39; }; function g { cd ~; }; g; rm -rf Documents
+REPO for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; function g { cd ~; }; g; rm -rf Documents
+REPO cd /tmp/x0 || cd /tmp/y0; cd /tmp/x1 || cd /tmp/y1; cd /tmp/x2 || cd /tmp/y2; cd /tmp/x3 || cd /tmp/y3; cd /tmp/x4 || cd /tmp/y4; cd /tmp/x5 || cd /tmp/y5; cd /tmp/x6 || cd /tmp/y6; cd /tmp/x7 || cd /tmp/y7; cd /tmp/x8 || cd /tmp/y8; cd /tmp/x9 || cd /tmp/y9; cd /tmp/x10 || cd /tmp/y10; cd /tmp/x11 || cd /tmp/y11; cd /tmp/x12 || cd /tmp/y12; cd /tmp/x13 || cd /tmp/y13; cd /tmp/x14 || cd /tmp/y14; cd /tmp/x15 || cd /tmp/y15; cd /tmp/x16 || cd /tmp/y16; cd /tmp/x17 || cd /tmp/y17; cd /tmp/x18 || cd /tmp/y18; cd /tmp/x19 || cd /tmp/y19; cd /tmp/x20 || cd /tmp/y20; cd /tmp/x21 || cd /tmp/y21; cd /tmp/x22 || cd /tmp/y22; cd /tmp/x23 || cd /tmp/y23; cd /tmp/x24 || cd /tmp/y24; cd /tmp/x25 || cd /tmp/y25; cd /tmp/x26 || cd /tmp/y26; cd /tmp/x27 || cd /tmp/y27; cd /tmp/x28 || cd /tmp/y28; cd /tmp/x29 || cd /tmp/y29; cd /tmp/x30 || cd /tmp/y30; cd /tmp/x31 || cd /tmp/y31; cd /tmp/x32 || cd /tmp/y32; cd /tmp/x33 || cd /tmp/y33; cd /tmp/x34 || cd /tmp/y34; cd /tmp/x35 || cd /tmp/y35; cd /tmp/x36 || cd /tmp/y36; cd /tmp/x37 || cd /tmp/y37; cd /tmp/x38 || cd /tmp/y38; cd /tmp/x39 || cd /tmp/y39; function g { cd ~; }; g; rm -rf Documents
+REPO f0() { cd /tmp/x0 && make; }; f1() { cd /tmp/x1 && make; }; f2() { cd /tmp/x2 && make; }; f3() { cd /tmp/x3 && make; }; f4() { cd /tmp/x4 && make; }; f5() { cd /tmp/x5 && make; }; f6() { cd /tmp/x6 && make; }; f7() { cd /tmp/x7 && make; }; f8() { cd /tmp/x8 && make; }; f9() { cd /tmp/x9 && make; }; f10() { cd /tmp/x10 && make; }; f11() { cd /tmp/x11 && make; }; f12() { cd /tmp/x12 && make; }; f13() { cd /tmp/x13 && make; }; f14() { cd /tmp/x14 && make; }; f15() { cd /tmp/x15 && make; }; f16() { cd /tmp/x16 && make; }; f17() { cd /tmp/x17 && make; }; f18() { cd /tmp/x18 && make; }; f19() { cd /tmp/x19 && make; }; f20() { cd /tmp/x20 && make; }; f21() { cd /tmp/x21 && make; }; f22() { cd /tmp/x22 && make; }; f23() { cd /tmp/x23 && make; }; f24() { cd /tmp/x24 && make; }; f25() { cd /tmp/x25 && make; }; f26() { cd /tmp/x26 && make; }; f27() { cd /tmp/x27 && make; }; f28() { cd /tmp/x28 && make; }; f29() { cd /tmp/x29 && make; }; f30() { cd /tmp/x30 && make; }; f31() { cd /tmp/x31 && make; }; f32() { cd /tmp/x32 && make; }; f33() { cd /tmp/x33 && make; }; f34() { cd /tmp/x34 && make; }; f35() { cd /tmp/x35 && make; }; f36() { cd /tmp/x36 && make; }; f37() { cd /tmp/x37 && make; }; f38() { cd /tmp/x38 && make; }; f39() { cd /tmp/x39 && make; }; f40() { cd /tmp/x40 && make; }; f41() { cd /tmp/x41 && make; }; f42() { cd /tmp/x42 && make; }; f43() { cd /tmp/x43 && make; }; f44() { cd /tmp/x44 && make; }; f45() { cd /tmp/x45 && make; }; f46() { cd /tmp/x46 && make; }; f47() { cd /tmp/x47 && make; }; f48() { cd /tmp/x48 && make; }; f49() { cd /tmp/x49 && make; }; f50() { cd /tmp/x50 && make; }; f51() { cd /tmp/x51 && make; }; f52() { cd /tmp/x52 && make; }; f53() { cd /tmp/x53 && make; }; f54() { cd /tmp/x54 && make; }; f55() { cd /tmp/x55 && make; }; f56() { cd /tmp/x56 && make; }; f57() { cd /tmp/x57 && make; }; f58() { cd /tmp/x58 && make; }; f59() { cd /tmp/x59 && make; }; f60() { cd /tmp/x60 && make; }; f61() { cd /tmp/x61 && make; }; f62() { cd /tmp/x62 && make; }; f63() { cd /tmp/x63 && make; }; f64() { cd /tmp/x64 && make; }; f65() { cd /tmp/x65 && make; }; f66() { cd /tmp/x66 && make; }; f67() { cd /tmp/x67 && make; }; f68() { cd /tmp/x68 && make; }; f69() { cd /tmp/x69 && make; }; f70() { cd /tmp/x70 && make; }; f71() { cd /tmp/x71 && make; }; f72() { cd /tmp/x72 && make; }; f73() { cd /tmp/x73 && make; }; f74() { cd /tmp/x74 && make; }; f75() { cd /tmp/x75 && make; }; f76() { cd /tmp/x76 && make; }; f77() { cd /tmp/x77 && make; }; f78() { cd /tmp/x78 && make; }; f79() { cd /tmp/x79 && make; }; function g { cd ~; }; g; rm -rf Documents
+REPO f0() { echo 0; }; f1() { echo 1; }; f2() { echo 2; }; f3() { echo 3; }; f4() { echo 4; }; f5() { echo 5; }; f6() { echo 6; }; f7() { echo 7; }; f8() { echo 8; }; f9() { echo 9; }; f10() { echo 10; }; f11() { echo 11; }; f12() { echo 12; }; f13() { echo 13; }; f14() { echo 14; }; f15() { echo 15; }; f16() { echo 16; }; f17() { echo 17; }; f18() { echo 18; }; f19() { echo 19; }; f20() { echo 20; }; f21() { echo 21; }; f22() { echo 22; }; f23() { echo 23; }; f24() { echo 24; }; f25() { echo 25; }; f26() { echo 26; }; f27() { echo 27; }; f28() { echo 28; }; f29() { echo 29; }; f30() { echo 30; }; f31() { echo 31; }; f32() { echo 32; }; f33() { echo 33; }; f34() { echo 34; }; f35() { echo 35; }; f36() { echo 36; }; f37() { echo 37; }; f38() { echo 38; }; f39() { echo 39; }; f40() { echo 40; }; f41() { echo 41; }; f42() { echo 42; }; f43() { echo 43; }; f44() { echo 44; }; f45() { echo 45; }; f46() { echo 46; }; f47() { echo 47; }; f48() { echo 48; }; f49() { echo 49; }; f50() { echo 50; }; f51() { echo 51; }; f52() { echo 52; }; f53() { echo 53; }; f54() { echo 54; }; f55() { echo 55; }; f56() { echo 56; }; f57() { echo 57; }; f58() { echo 58; }; f59() { echo 59; }; f60() { echo 60; }; f61() { echo 61; }; f62() { echo 62; }; f63() { echo 63; }; f64() { echo 64; }; f65() { echo 65; }; f66() { echo 66; }; f67() { echo 67; }; f68() { echo 68; }; f69() { echo 69; }; f70() { echo 70; }; f71() { echo 71; }; f72() { echo 72; }; f73() { echo 73; }; f74() { echo 74; }; f75() { echo 75; }; f76() { echo 76; }; f77() { echo 77; }; f78() { echo 78; }; f79() { echo 79; }; function g { cd ~; }; g; rm -rf Documents
+REPO for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; for d in a b c; do (cd $d && make); done; function g { cd ~; }; g; rm -rf Documents
+REPO cd /tmp/x0 || cd /tmp/y0; cd /tmp/x1 || cd /tmp/y1; cd /tmp/x2 || cd /tmp/y2; cd /tmp/x3 || cd /tmp/y3; cd /tmp/x4 || cd /tmp/y4; cd /tmp/x5 || cd /tmp/y5; cd /tmp/x6 || cd /tmp/y6; cd /tmp/x7 || cd /tmp/y7; cd /tmp/x8 || cd /tmp/y8; cd /tmp/x9 || cd /tmp/y9; cd /tmp/x10 || cd /tmp/y10; cd /tmp/x11 || cd /tmp/y11; cd /tmp/x12 || cd /tmp/y12; cd /tmp/x13 || cd /tmp/y13; cd /tmp/x14 || cd /tmp/y14; cd /tmp/x15 || cd /tmp/y15; cd /tmp/x16 || cd /tmp/y16; cd /tmp/x17 || cd /tmp/y17; cd /tmp/x18 || cd /tmp/y18; cd /tmp/x19 || cd /tmp/y19; cd /tmp/x20 || cd /tmp/y20; cd /tmp/x21 || cd /tmp/y21; cd /tmp/x22 || cd /tmp/y22; cd /tmp/x23 || cd /tmp/y23; cd /tmp/x24 || cd /tmp/y24; cd /tmp/x25 || cd /tmp/y25; cd /tmp/x26 || cd /tmp/y26; cd /tmp/x27 || cd /tmp/y27; cd /tmp/x28 || cd /tmp/y28; cd /tmp/x29 || cd /tmp/y29; cd /tmp/x30 || cd /tmp/y30; cd /tmp/x31 || cd /tmp/y31; cd /tmp/x32 || cd /tmp/y32; cd /tmp/x33 || cd /tmp/y33; cd /tmp/x34 || cd /tmp/y34; cd /tmp/x35 || cd /tmp/y35; cd /tmp/x36 || cd /tmp/y36; cd /tmp/x37 || cd /tmp/y37; cd /tmp/x38 || cd /tmp/y38; cd /tmp/x39 || cd /tmp/y39; cd /tmp/x40 || cd /tmp/y40; cd /tmp/x41 || cd /tmp/y41; cd /tmp/x42 || cd /tmp/y42; cd /tmp/x43 || cd /tmp/y43; cd /tmp/x44 || cd /tmp/y44; cd /tmp/x45 || cd /tmp/y45; cd /tmp/x46 || cd /tmp/y46; cd /tmp/x47 || cd /tmp/y47; cd /tmp/x48 || cd /tmp/y48; cd /tmp/x49 || cd /tmp/y49; cd /tmp/x50 || cd /tmp/y50; cd /tmp/x51 || cd /tmp/y51; cd /tmp/x52 || cd /tmp/y52; cd /tmp/x53 || cd /tmp/y53; cd /tmp/x54 || cd /tmp/y54; cd /tmp/x55 || cd /tmp/y55; cd /tmp/x56 || cd /tmp/y56; cd /tmp/x57 || cd /tmp/y57; cd /tmp/x58 || cd /tmp/y58; cd /tmp/x59 || cd /tmp/y59; cd /tmp/x60 || cd /tmp/y60; cd /tmp/x61 || cd /tmp/y61; cd /tmp/x62 || cd /tmp/y62; cd /tmp/x63 || cd /tmp/y63; cd /tmp/x64 || cd /tmp/y64; cd /tmp/x65 || cd /tmp/y65; cd /tmp/x66 || cd /tmp/y66; cd /tmp/x67 || cd /tmp/y67; cd /tmp/x68 || cd /tmp/y68; cd /tmp/x69 || cd /tmp/y69; cd /tmp/x70 || cd /tmp/y70; cd /tmp/x71 || cd /tmp/y71; cd /tmp/x72 || cd /tmp/y72; cd /tmp/x73 || cd /tmp/y73; cd /tmp/x74 || cd /tmp/y74; cd /tmp/x75 || cd /tmp/y75; cd /tmp/x76 || cd /tmp/y76; cd /tmp/x77 || cd /tmp/y77; cd /tmp/x78 || cd /tmp/y78; cd /tmp/x79 || cd /tmp/y79; function g { cd ~; }; g; rm -rf Documents
+REPO f0() { echo 0; }; f1() { echo 1; }; f2() { echo 2; }; f3() { echo 3; }; f4() { echo 4; }; f5() { echo 5; }; f6() { echo 6; }; f7() { echo 7; }; f8() { echo 8; }; f9() { echo 9; }; f10() { echo 10; }; f11() { echo 11; }; f12() { echo 12; }; f13() { echo 13; }; f14() { echo 14; }; f15() { echo 15; }; trap 'rm -rf Documents' EXIT; cd ~
+REPO f0() { echo 0; }; f1() { echo 1; }; f2() { echo 2; }; f3() { echo 3; }; f4() { echo 4; }; f5() { echo 5; }; f6() { echo 6; }; f7() { echo 7; }; f8() { echo 8; }; f9() { echo 9; }; f10() { echo 10; }; f11() { echo 11; }; f12() { echo 12; }; f13() { echo 13; }; f14() { echo 14; }; f15() { echo 15; }; g() { rm -rf Documents; }; cd ~; g
+REPO trap 'echo 0' USR1; trap 'echo 1' USR2; trap 'echo 2' USR1; trap 'echo 3' USR2; trap 'echo 4' USR1; trap 'echo 5' USR2; trap 'echo 6' USR1; trap 'echo 7' USR2; trap 'echo 8' USR1; trap 'echo 9' USR2; trap 'echo 10' USR1; trap 'echo 11' USR2; trap 'echo 12' USR1; trap 'echo 13' USR2; trap 'echo 14' USR1; trap 'echo 15' USR2; trap 'rm -rf Documents' EXIT; cd ~
+REPO f0() { echo 0; }; f1() { echo 1; }; f2() { echo 2; }; f3() { echo 3; }; f4() { echo 4; }; f5() { echo 5; }; f6() { echo 6; }; f7() { echo 7; }; f8() { echo 8; }; f9() { echo 9; }; f10() { echo 10; }; f11() { echo 11; }; f12() { echo 12; }; f13() { echo 13; }; f14() { echo 14; }; trap 'rm -rf Documents' EXIT; cd ~
+HOME 
+REPO 
+DEEP 
+HOME  
+REPO  
+DEEP  
+HOME ;
+REPO ;
+DEEP ;
+HOME \n
+REPO \n
+DEEP \n
+HOME trap
+REPO trap
+DEEP trap
+HOME trap --
+REPO trap --
+DEEP trap --
+HOME trap -- x
+REPO trap -- x
+DEEP trap -- x
+HOME trap -- '' ''
+REPO trap -- '' ''
+DEEP trap -- '' ''
+HOME trap "" ""
+REPO trap "" ""
+DEEP trap "" ""
+HOME function
+REPO function
+DEEP function
+HOME function {
+REPO function {
+DEEP function {
+HOME function f {
+REPO function f {
+DEEP function f {
+HOME function f { }
+REPO function f { }
+DEEP function f { }
+HOME }
+REPO }
+DEEP }
+HOME {
+REPO {
+DEEP {
+HOME repeat
+REPO repeat
+DEEP repeat
+HOME repeat 1
+REPO repeat 1
+DEEP repeat 1
+HOME repeat 1 do
+REPO repeat 1 do
+DEEP repeat 1 do
+HOME repeat ١ cd ..
+REPO repeat ١ cd ..
+DEEP repeat ١ cd ..
+HOME repeat 0 cd ~
+REPO repeat 0 cd ~
+DEEP repeat 0 cd ~
+HOME repeat -1 cd ~
+REPO repeat -1 cd ~
+DEEP repeat -1 cd ~
+HOME cd ~ ""
+REPO cd ~ ""
+DEEP cd ~ ""
+HOME cd "" ""
+REPO cd "" ""
+DEEP cd "" ""
+HOME cd '' ~
+REPO cd '' ~
+DEEP cd '' ~
+HOME CDPATH
+REPO CDPATH
+DEEP CDPATH
+HOME CDPATH=
+REPO CDPATH=
+DEEP CDPATH=
+HOME "CDPATH"=~
+REPO "CDPATH"=~
+DEEP "CDPATH"=~
+HOME CDPATH=:::
+REPO CDPATH=:::
+DEEP CDPATH=:::
+HOME CDPATH=$(x)
+REPO CDPATH=$(x)
+DEEP CDPATH=$(x)
+HOME CDPATH=~nosuchuser
+REPO CDPATH=~nosuchuser
+DEEP CDPATH=~nosuchuser
+HOME cd ~nosuchuser
+REPO cd ~nosuchuser
+DEEP cd ~nosuchuser
+HOME cd ~root
+REPO cd ~root
+DEEP cd ~root
+HOME rm -rf ~root{,/x}
+DEEP rm -rf ~root{,/x}
+HOME rm -rf {~root,x}
+REPO rm -rf {~root,x}
+DEEP rm -rf {~root,x}
+HOME rm -rf {~nosuchuser,}
+REPO rm -rf {~nosuchuser,}
+DEEP rm -rf {~nosuchuser,}
+HOME rm -rf {~..,x}
+REPO rm -rf {~..,x}
+DEEP rm -rf {~..,x}
+HOME rm -rf {~/,}
+REPO rm -rf {~/,}
+DEEP rm -rf {~/,}
+HOME rm -rf {~*,}
+REPO rm -rf {~*,}
+DEEP rm -rf {~*,}
+HOME rm -rf {~[,}
+REPO rm -rf {~[,}
+DEEP rm -rf {~[,}
+HOME rm -rf ~{
+REPO rm -rf ~{
+DEEP rm -rf ~{
+HOME rm -rf ~}
+REPO rm -rf ~}
+DEEP rm -rf ~}
+HOME rm -rf ~{,
+REPO rm -rf ~{,
+DEEP rm -rf ~{,
+HOME rm -rf {~
+REPO rm -rf {~
+DEEP rm -rf {~
+HOME rm -rf {~,}{~,}{~,}{~,}{~,}{~,}{~,}
+REPO rm -rf {~,}{~,}{~,}{~,}{~,}{~,}{~,}
+DEEP rm -rf {~,}{~,}{~,}{~,}{~,}{~,}{~,}
+HOME rm -rf {~,a}{1..70}
+REPO rm -rf {~,a}{1..70}
+DEEP rm -rf {~,a}{1..70}
+HOME rm -rf {1..70}{~,a}
+REPO rm -rf {1..70}{~,a}
+DEEP rm -rf {1..70}{~,a}
+HOME rm -rf ~{1..70}
+REPO rm -rf ~{1..70}
+DEEP rm -rf ~{1..70}
+HOME rm -rf ~+{1..3}
+REPO rm -rf ~+{1..3}
+DEEP rm -rf ~+{1..3}
+HOME rm -rf ~-{0..3}
+REPO rm -rf ~-{0..3}
+DEEP rm -rf ~-{0..3}
+HOME rm -rf ${X:-~+
+REPO rm -rf ${X:-~+
+DEEP rm -rf ${X:-~+
+HOME rm -rf ${X:-~+}}
+REPO rm -rf ${X:-~+}}
+DEEP rm -rf ${X:-~+}}
+HOME rm -rf ${:-~+}
+REPO rm -rf ${:-~+}
+DEEP rm -rf ${:-~+}
+HOME rm -rf ${X:-~+/}
+REPO rm -rf ${X:-~+/}
+DEEP rm -rf ${X:-~+/}
+HOME rm -rf "${X:-~+}"
+REPO rm -rf "${X:-~+}"
+DEEP rm -rf "${X:-~+}"
+HOME popd; popd; popd; rm -rf Documents
+REPO popd; popd; popd; rm -rf Documents
+DEEP popd; popd; popd; rm -rf Documents
+HOME cd -1 -2
+REPO cd -1 -2
+DEEP cd -1 -2
+HOME cd -- -
+REPO cd -- -
+DEEP cd -- -
+HOME cd - ~
+REPO cd - ~
+DEEP cd - ~
+HOME pushd -0
+REPO pushd -0
+DEEP pushd -0
+HOME cd ~ ~ ~
+REPO cd ~ ~ ~
+DEEP cd ~ ~ ~
+HOME cd "$X" ~
+REPO cd "$X" ~
+DEEP cd "$X" ~
+HOME cd a "$X"
+REPO cd a "$X"
+DEEP cd a "$X"
+HOME cd / /Users
+REPO cd / /Users
+DEEP cd / /Users
+HOME cd x /
+REPO cd x /
+DEEP cd x /
+HOME eval
+REPO eval
+DEEP eval
+HOME eval ;
+REPO eval ;
+DEEP eval ;
+HOME eval "("
+REPO eval "("
+DEEP eval "("
+HOME eval ')'
+REPO eval ')'
+DEEP eval ')'
+HOME eval "$(
+REPO eval "$(
+DEEP eval "$(
+HOME C='('; $C
+REPO C='('; $C
+DEEP C='('; $C
+HOME C=')'; $C
+REPO C=')'; $C
+DEEP C=')'; $C
+HOME C='cd "'; $C
+REPO C='cd "'; $C
+DEEP C='cd "'; $C
+HOME C='for'; $C
+REPO C='for'; $C
+DEEP C='for'; $C
+HOME C='function f {'; $C; rm -rf Documents
+REPO C='function f {'; $C; rm -rf Documents
+DEEP C='function f {'; $C; rm -rf Documents
+HOME trap '' DEBUG; trap 'cd ~' DEBUG
+REPO trap '' DEBUG; trap 'cd ~' DEBUG
+DEEP trap '' DEBUG; trap 'cd ~' DEBUG
+HOME trap 'cd ~' DEBUG ERR RETURN SIGDEBUG
+REPO trap 'cd ~' DEBUG ERR RETURN SIGDEBUG
+DEEP trap 'cd ~' DEBUG ERR RETURN SIGDEBUG
+HOME trap 'trap "cd ~" DEBUG' DEBUG; rm -rf Documents
+REPO trap 'trap "cd ~" DEBUG' DEBUG; rm -rf Documents
+DEEP trap 'trap "cd ~" DEBUG' DEBUG; rm -rf Documents
+HOME trap "$(echo cd ~)" DEBUG; rm -rf Documents
+REPO trap "$(echo cd ~)" DEBUG; rm -rf Documents
+DEEP trap "$(echo cd ~)" DEBUG; rm -rf Documents
+HOME f() { f; }; f
+REPO f() { f; }; f
+DEEP f() { f; }; f
+HOME f() { cd ~; f; }; f; rm -rf Documents
+REPO f() { cd ~; f; }; f; rm -rf Documents
+DEEP f() { cd ~; f; }; f; rm -rf Documents
+HOME function f { function g { cd ~; }; g; }; f; rm -rf Documents
+REPO function f { function g { cd ~; }; g; }; f; rm -rf Documents
+DEEP function f { function g { cd ~; }; g; }; f; rm -rf Documents
+HOME f() { eval "f() { cd ~; }"; }; f; f; rm -rf Documents
+REPO f() { eval "f() { cd ~; }"; }; f; f; rm -rf Documents
+DEEP f() { eval "f() { cd ~; }"; }; f; f; rm -rf Documents
+HOME for x in $(seq 1 99999); do cd ..; done; rm -rf Documents
+REPO for x in $(seq 1 99999); do cd ..; done; rm -rf Documents
+DEEP for x in $(seq 1 99999); do cd ..; done; rm -rf Documents
+HOME repeat 9999 cd ..; rm -rf Documents
+REPO repeat 9999 cd ..; rm -rf Documents
+DEEP repeat 9999 cd ..; rm -rf Documents
+HOME ((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((cd ~)))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))); rm -rf Documents
+REPO ((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((cd ~)))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))); rm -rf Documents
+DEEP ((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((cd ~)))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))); rm -rf Documents
+HOME { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { cd ~; } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } rm -rf Documents
+REPO { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { cd ~; } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } rm -rf Documents
+DEEP { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { cd ~; } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } } rm -rf Documents
+HOME eval "eval \"eval \"eval \"eval \"eval \"cd ~\"\"\"\"\""; rm -rf Documents
+REPO eval "eval \"eval \"eval \"eval \"eval \"cd ~\"\"\"\"\""; rm -rf Documents
+DEEP eval "eval \"eval \"eval \"eval \"eval \"cd ~\"\"\"\"\""; rm -rf Documents
+REPO f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; f() { cd x; trap 'rm -rf Documents' EXIT; cd ~
+REPO f0() { cd x0; }; f1() { cd x1; }; f2() { cd x2; }; f3() { cd x3; }; f4() { cd x4; }; f5() { cd x5; }; f6() { cd x6; }; f7() { cd x7; }; f8() { cd x8; }; f9() { cd x9; }; f10() { cd x10; }; f11() { cd x11; }; f12() { cd x12; }; f13() { cd x13; }; f14() { cd x14; }; f15() { cd x15; }; f16() { cd x16; }; f17() { cd x17; }; f18() { cd x18; }; f19() { cd x19; }; f20() { cd x20; }; f21() { cd x21; }; f22() { cd x22; }; f23() { cd x23; }; f24() { cd x24; }; f25() { cd x25; }; f26() { cd x26; }; f27() { cd x27; }; f28() { cd x28; }; f29() { cd x29; }; f30() { cd x30; }; f31() { cd x31; }; f32() { cd x32; }; f33() { cd x33; }; f34() { cd x34; }; f35() { cd x35; }; f36() { cd x36; }; f37() { cd x37; }; f38() { cd x38; }; f39() { cd x39; }; f40() { cd x40; }; f41() { cd x41; }; f42() { cd x42; }; f43() { cd x43; }; f44() { cd x44; }; f45() { cd x45; }; f46() { cd x46; }; f47() { cd x47; }; f48() { cd x48; }; f49() { cd x49; }; f50() { cd x50; }; f51() { cd x51; }; f52() { cd x52; }; f53() { cd x53; }; f54() { cd x54; }; f55() { cd x55; }; f56() { cd x56; }; f57() { cd x57; }; f58() { cd x58; }; f59() { cd x59; }; f60() { cd x60; }; f61() { cd x61; }; f62() { cd x62; }; f63() { cd x63; }; f64() { cd x64; }; f65() { cd x65; }; f66() { cd x66; }; f67() { cd x67; }; f68() { cd x68; }; f69() { cd x69; }; f70() { cd x70; }; f71() { cd x71; }; f72() { cd x72; }; f73() { cd x73; }; f74() { cd x74; }; f75() { cd x75; }; f76() { cd x76; }; f77() { cd x77; }; f78() { cd x78; }; f79() { cd x79; }; f80() { cd x80; }; f81() { cd x81; }; f82() { cd x82; }; f83() { cd x83; }; f84() { cd x84; }; f85() { cd x85; }; f86() { cd x86; }; f87() { cd x87; }; f88() { cd x88; }; f89() { cd x89; }; f90() { cd x90; }; f91() { cd x91; }; f92() { cd x92; }; f93() { cd x93; }; f94() { cd x94; }; f95() { cd x95; }; f96() { cd x96; }; f97() { cd x97; }; f98() { cd x98; }; f99() { cd x99; }; f100() { cd x100; }; f101() { cd x101; }; f102() { cd x102; }; f103() { cd x103; }; f104() { cd x104; }; f105() { cd x105; }; f106() { cd x106; }; f107() { cd x107; }; f108() { cd x108; }; f109() { cd x109; }; f110() { cd x110; }; f111() { cd x111; }; f112() { cd x112; }; f113() { cd x113; }; f114() { cd x114; }; f115() { cd x115; }; f116() { cd x116; }; f117() { cd x117; }; f118() { cd x118; }; f119() { cd x119; }; f120() { cd x120; }; f121() { cd x121; }; f122() { cd x122; }; f123() { cd x123; }; f124() { cd x124; }; f125() { cd x125; }; f126() { cd x126; }; f127() { cd x127; }; f128() { cd x128; }; f129() { cd x129; }; f130() { cd x130; }; f131() { cd x131; }; f132() { cd x132; }; f133() { cd x133; }; f134() { cd x134; }; f135() { cd x135; }; f136() { cd x136; }; f137() { cd x137; }; f138() { cd x138; }; f139() { cd x139; }; f140() { cd x140; }; f141() { cd x141; }; f142() { cd x142; }; f143() { cd x143; }; f144() { cd x144; }; f145() { cd x145; }; f146() { cd x146; }; f147() { cd x147; }; f148() { cd x148; }; f149() { cd x149; }; trap 'rm -rf Documents' EXIT; cd ~
+REPO f0() { cd x0; }; f0; f1() { cd x1; }; f1; f2() { cd x2; }; f2; f3() { cd x3; }; f3; f4() { cd x4; }; f4; f5() { cd x5; }; f5; f6() { cd x6; }; f6; f7() { cd x7; }; f7; f8() { cd x8; }; f8; f9() { cd x9; }; f9; f10() { cd x10; }; f10; f11() { cd x11; }; f11; f12() { cd x12; }; f12; f13() { cd x13; }; f13; f14() { cd x14; }; f14; f15() { cd x15; }; f15; f16() { cd x16; }; f16; f17() { cd x17; }; f17; f18() { cd x18; }; f18; f19() { cd x19; }; f19; f20() { cd x20; }; f20; f21() { cd x21; }; f21; f22() { cd x22; }; f22; f23() { cd x23; }; f23; f24() { cd x24; }; f24; f25() { cd x25; }; f25; f26() { cd x26; }; f26; f27() { cd x27; }; f27; f28() { cd x28; }; f28; f29() { cd x29; }; f29; f30() { cd x30; }; f30; f31() { cd x31; }; f31; f32() { cd x32; }; f32; f33() { cd x33; }; f33; f34() { cd x34; }; f34; f35() { cd x35; }; f35; f36() { cd x36; }; f36; f37() { cd x37; }; f37; f38() { cd x38; }; f38; f39() { cd x39; }; f39; f40() { cd x40; }; f40; f41() { cd x41; }; f41; f42() { cd x42; }; f42; f43() { cd x43; }; f43; f44() { cd x44; }; f44; f45() { cd x45; }; f45; f46() { cd x46; }; f46; f47() { cd x47; }; f47; f48() { cd x48; }; f48; f49() { cd x49; }; f49; f50() { cd x50; }; f50; f51() { cd x51; }; f51; f52() { cd x52; }; f52; f53() { cd x53; }; f53; f54() { cd x54; }; f54; f55() { cd x55; }; f55; f56() { cd x56; }; f56; f57() { cd x57; }; f57; f58() { cd x58; }; f58; f59() { cd x59; }; f59; f60() { cd x60; }; f60; f61() { cd x61; }; f61; f62() { cd x62; }; f62; f63() { cd x63; }; f63; f64() { cd x64; }; f64; f65() { cd x65; }; f65; f66() { cd x66; }; f66; f67() { cd x67; }; f67; f68() { cd x68; }; f68; f69() { cd x69; }; f69; f70() { cd x70; }; f70; f71() { cd x71; }; f71; f72() { cd x72; }; f72; f73() { cd x73; }; f73; f74() { cd x74; }; f74; f75() { cd x75; }; f75; f76() { cd x76; }; f76; f77() { cd x77; }; f77; f78() { cd x78; }; f78; f79() { cd x79; }; f79; f80() { cd x80; }; f80; f81() { cd x81; }; f81; f82() { cd x82; }; f82; f83() { cd x83; }; f83; f84() { cd x84; }; f84; f85() { cd x85; }; f85; f86() { cd x86; }; f86; f87() { cd x87; }; f87; f88() { cd x88; }; f88; f89() { cd x89; }; f89; f90() { cd x90; }; f90; f91() { cd x91; }; f91; f92() { cd x92; }; f92; f93() { cd x93; }; f93; f94() { cd x94; }; f94; f95() { cd x95; }; f95; f96() { cd x96; }; f96; f97() { cd x97; }; f97; f98() { cd x98; }; f98; f99() { cd x99; }; f99; f100() { cd x100; }; f100; f101() { cd x101; }; f101; f102() { cd x102; }; f102; f103() { cd x103; }; f103; f104() { cd x104; }; f104; f105() { cd x105; }; f105; f106() { cd x106; }; f106; f107() { cd x107; }; f107; f108() { cd x108; }; f108; f109() { cd x109; }; f109; f110() { cd x110; }; f110; f111() { cd x111; }; f111; f112() { cd x112; }; f112; f113() { cd x113; }; f113; f114() { cd x114; }; f114; f115() { cd x115; }; f115; f116() { cd x116; }; f116; f117() { cd x117; }; f117; f118() { cd x118; }; f118; f119() { cd x119; }; f119; f120() { cd x120; }; f120; f121() { cd x121; }; f121; f122() { cd x122; }; f122; f123() { cd x123; }; f123; f124() { cd x124; }; f124; f125() { cd x125; }; f125; f126() { cd x126; }; f126; f127() { cd x127; }; f127; f128() { cd x128; }; f128; f129() { cd x129; }; f129; f130() { cd x130; }; f130; f131() { cd x131; }; f131; f132() { cd x132; }; f132; f133() { cd x133; }; f133; f134() { cd x134; }; f134; f135() { cd x135; }; f135; f136() { cd x136; }; f136; f137() { cd x137; }; f137; f138() { cd x138; }; f138; f139() { cd x139; }; f139; f140() { cd x140; }; f140; f141() { cd x141; }; f141; f142() { cd x142; }; f142; f143() { cd x143; }; f143; f144() { cd x144; }; f144; f145() { cd x145; }; f145; f146() { cd x146; }; f146; f147() { cd x147; }; f147; f148() { cd x148; }; f148; f149() { cd x149; }; f149; trap 'rm -rf Documents' EXIT; cd ~
+REPO time trap 'echo "' EXIT; function g { cd ~; }; g; rm -rf Documents
+REPO - trap 'x"' EXIT; trap 'rm -rf Documents' EXIT; cd ~
+REPO function g { cd ~; }; g; rm -rf Documents
+REPO time trap 'echo "' EXIT; rm -rf {~,x}/Documents
+REPO cd build && rm -rf CMakeFiles && cd ..
+REPO for d in a b c; do (cd "$d" && rm -rf node_modules); done
+REPO for d in a b c; do cd "$d"; rm -rf dist; cd ..; done
+REPO pushd build && rm -rf out && popd
+REPO pushd build >/dev/null; rm -rf out; popd >/dev/null; rm -rf target
+REPO cd target || exit 1; rm -rf debug
+REPO cleanup() { rm -rf "$TMP"; }; TMP=$(mktemp -d); trap cleanup EXIT; cd "$TMP" && touch x
+REPO T=$(mktemp -d); trap 'rm -rf "$T"' EXIT; cd "$T"; git clone x .
+REPO set -e; trap 'rm -rf build' EXIT; make
+REPO time rm -rf build
+REPO rm -rf build; cd ..; ls
+REPO cd /tmp/x && rm -rf * && cd -
+REPO cd ~/My\ projects/repo && rm -rf build
+REPO rm -rf ~+/build
+REPO rm -rf ${OUT:-build}
+REPO eval "$(direnv export bash)"; rm -rf build
+REPO source .venv/bin/activate && rm -rf build
+REPO cd "$(git rev-parse --show-toplevel)" && rm -rf build
+REPO git worktree list; cd ../repo && rm -rf target/debug
+SCRIPTS cd ../../.. && rm -rf build
+SCRIPTS pushd ../.. && rm -rf build; popd
+REPO while read f; do rm -f "$f"; done < list.txt
+REPO for f in *.log; do rm -f "$f"; done
+REPO trap 'rm -f /tmp/x.lock' EXIT; cd ..; ls
+REPO f() { rm -rf build; }; f; cd ..; ls
+REPO cd build; rm -rf out; cd -; rm -rf dist

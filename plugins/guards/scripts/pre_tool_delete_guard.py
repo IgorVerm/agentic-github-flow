@@ -773,11 +773,15 @@ class Shell:
         #                    folder changes that happen where the function is called
         self.cdpath = None
         self.keys = set()
+        self.overflow = False  # more bodies than MAX_LATER
 
     def run_later(self, kind, item, key):
-        if key not in self.keys and len(self.later) < MAX_LATER:
+        if key not in self.keys:
             self.keys.add(key)
-            self.later.append([kind, item, []])
+            if len(self.later) < MAX_LATER:
+                self.later.append([kind, item, []])
+            else:
+                self.overflow = True
 
 
 def safe_prefix(value, state):
@@ -1609,6 +1613,9 @@ def judge_later(state, depth):
     """Judge the function and trap bodies a shell defined again, in every folder it may have
     been in, since they run where they are called or when the trap fires."""
     shell, k = state.shell, 0
+    if shell.overflow and names_delete(state.text):
+        return ('defines more functions and traps than the delete guard judges again (%d), and '
+                'names a delete' % MAX_LATER)
     frozen = [list(entry[2]) for entry in shell.later]  # not grown by the bodies judged here
     while k < len(shell.later):
         kind, item, folders = shell.later[k]
@@ -1848,8 +1855,9 @@ class MoreFolders:
         for w in words:
             if w.raw().startswith('CDPATH='):
                 value = evaluate(tail_word(w, len('CDPATH=')) or Word(), state.values())
-                shell.cdpath = [None] if value.computed else [
-                    norm(p or '.', state.cwd) for p in value.text.split(':')]
+                shell.cdpath = [None] if value.computed else [  # `~` after `:` expands too
+                    norm(state.home + p[1:] if p == '~' or p.startswith('~/') else p or '.',
+                         state.cwd) for p in value.text.split(':')]
         specs = cd_specs(rest, state)
         if specs is not None:
             targets = resolve(specs, view, state)
@@ -1932,8 +1940,11 @@ def decide(command, cwd, home=None):
         state = State.start(cwd, home, command)
         state.deadline = time.monotonic() + DEADLINE / 2
         return judge(command, state)
+    except Overtime:
+        pass  # the first reading alone, so it never asks less
     except Exception:
-        pass  # a fault or an overrun: the first reading alone, so it never asks less
+        if names_delete(command):
+            return 'deletes, and the delete guard could not read the command'
     try:
         state = State.start(cwd, home, command)
         state.more = False

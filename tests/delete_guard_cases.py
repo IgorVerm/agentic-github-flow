@@ -254,6 +254,12 @@ ASK = [
     ('for i in 1 2; do while false; do :; done; rm -rf Documents; cd ~; done', REPO),
     ("command -p trap 'rm -rf ~/Library' EXIT", REPO),
     ('command -p cd ~ && rm -rf Documents', REPO),
+    # the second review: CDPATH with `~` after `:`, more bodies than the guard judges again, a
+    # fault in the second reading
+    ('CDPATH=.:~; cd Library && rm -rf "Application Support"', REPO),
+    (''.join('f%d() { echo %d; }; ' % (n, n) for n in range(16))
+     + "trap 'rm -rf Documents' EXIT; cd ~", REPO),
+    ("time trap 'echo \"' EXIT; function g { cd ~; }; g; rm -rf Documents", REPO),
 ]
 if LINK:
     ASK.append(('rm -rf "%s/liblink/"' % R, REPO))

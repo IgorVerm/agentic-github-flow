@@ -101,7 +101,7 @@ def probes():
             if not line.strip() or line.startswith('#'):
                 continue
             where, _, command = line.partition(' ')
-            if where not in WHERE or not command:
+            if where not in WHERE:  # an empty command is a probe too
                 sys.exit('%s line %d: expected `<%s> <command>`' % (PROBES, k, '|'.join(WHERE)))
             out.append((command, WHERE[where]))
     return out

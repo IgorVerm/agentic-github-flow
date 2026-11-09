@@ -35,7 +35,7 @@ policy is and which data may go into a prompt, and follow the answer.
 - **Large work with open requirements starts with a specification:** the `spec-first` skill;
   `requirements` splits it into ready issues.
 - **Before long or unattended work, write down when it is done:** the end state, the command
-  that proves it, and when you stop because no defensible way forward is left.
+  that proves it, and when you stop and report that no defensible way forward is left.
 - **After two failed corrections of the same problem, stop.** Tell the user what you tried and
   give a better statement of the task for a fresh session.
 - **Measure instead of guessing.** A claim about performance, counts or behaviour comes from a
@@ -66,8 +66,7 @@ have destroyed hours of uncommitted work with `reset --hard` and `checkout -- .`
 - **Outside a repository, delete with the system's trash, not `rm -rf`;** a recursive delete
   takes only literal, quoted, absolute paths you listed and checked, never paths built from
   command output.
-- **Work on a branch in a worktree, never on `main`:**
-  `git worktree add -b agent/<task> ../<repo>-worktrees/<task> origin/main`.
+- **Work on a branch in a worktree, never on `main`** (the `ship-change` skill makes it).
 - **Commit freely:** small commits of verified work, staged by explicit path
   (`git commit -m "…" -- <paths>`, never `add -A`, `add .`, `add -f` or `commit -a`), the
   subject ending in the issue reference `(#n)`, with a `Co-Authored-By` trailer naming the
@@ -76,8 +75,8 @@ have destroyed hours of uncommitted work with `reset --hard` and `checkout -- .`
   On a yes, push your own task branch and open the pull request (the `ship-change` skill). Never
   push `main` and never merge; mark a draft ready, or merge, only when the user says so for that
   pull request.
-- **After the merge,** the `cleanup-merged` skill removes the worktree and branch and checks
-  that the issue is closed.
+- **After the merge,** the `cleanup-merged` skill removes the worktree and branch and makes
+  sure the issue is closed.
 - **Never commit, print or log a secret.** Real configuration lives in ignored `.env` files;
   read key names, not values. If a secret was committed, stop and tell the user the file and the
   commit; it is revoked first.

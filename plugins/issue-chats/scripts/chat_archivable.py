@@ -118,11 +118,12 @@ def landed_locally(wt: str, head: str) -> str | None:
     return f"ok (clean, HEAD {head[:8]} landed on local {branch}; local-main mode)"
 
 
-def strays(wt: str) -> str | None:
+def strays(wt: str, merged_head: str | None = None) -> str | None:
     """Why archiving would lose a commit that only this worktree's own history holds (its HEAD
     reflog, ORIG_HEAD, its branch's reflog with the branch counted as deleted, per-worktree
     refs: stranded_commits of work_proof.py); None when nothing would be lost. A primary
-    checkout, which archiving never removes, has nothing to lose this way."""
+    checkout, which archiving never removes, has nothing to lose this way. `merged_head` is the
+    head of a merged pull request, which GitHub keeps after deleting its branch."""
     trees = work_proof.worktrees(wt)
     here = os.path.realpath(wt)
     if trees and trees[0]["path"] == here:
@@ -130,7 +131,8 @@ def strays(wt: str) -> str | None:
     me = next((t for t in trees[1:] if t["path"] == here), None)
     if me is None:
         return f"{wt} is not in `git worktree list`, so its reflogs cannot be read"
-    return work_proof.stranded_commits(trees[0]["path"], me, branch_goes=True)
+    return work_proof.stranded_commits(trees[0]["path"], me, branch_goes=True,
+                                       merged_head=merged_head)
 
 
 def held_by_successor(wt: str, head: str, seen: list[str]) -> tuple[str | None, str | None]:
@@ -189,15 +191,22 @@ GONE = "ok (worktree gone)"
 
 def verdict(wt: str, fetch: bool = True, landed: bool = False) -> tuple[int, str]:
     """The answer, with the reflog proof (strays) run before every ok of an existing worktree."""
-    code, line = where_held(wt, fetch, landed)
+    code, line, merged_head = where_held(wt, fetch, landed)
     if code == 0 and line != GONE:
-        stray = strays(wt)
+        stray = strays(wt, merged_head)
         if stray:
             return 1, f"keep: {line[len('ok ('):].rstrip(')')}, but {stray}"
     return code, line
 
 
-def where_held(wt: str, fetch: bool, landed: bool) -> tuple[int, str]:
+def where_held(wt: str, fetch: bool, landed: bool) -> tuple[int, str, str | None]:
+    """(exit code, line, the head of the merged pull request the ok rests on, or None)."""
+    code, line = held(wt, fetch, landed)
+    merged = line.startswith("ok") and "is the head of pull request #" in line
+    return code, line, (out(wt, "rev-parse", "--verify", "HEAD") if merged else None)
+
+
+def held(wt: str, fetch: bool, landed: bool) -> tuple[int, str]:
     if not os.path.lexists(wt):
         return 0, GONE
     gd = out(wt, "rev-parse", "--absolute-git-dir")

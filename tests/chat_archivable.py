@@ -277,6 +277,19 @@ class ChatArchivable(unittest.TestCase):
         self.git(wt, 'branch', 'scratch/1-dropped', dropped)
         self.assertOk(wt)
 
+    def test_landed_after_github_deleted_the_merged_branch(self):
+        # a squash merge, the head branch deleted on GitHub and its tracking ref pruned: the
+        # merged pull request's head is what survives (GitHub keeps it)
+        wt = self.worktree('side-pruned')
+        self.commit(wt, 'side\n')
+        self.git(wt, 'push', '-q', 'origin', 'agent/side-pruned')
+        head = self.git(wt, 'rev-parse', 'HEAD')
+        self.git(self.origin, 'branch', '-D', 'agent/side-pruned')
+        self.git(wt, 'fetch', '-q', '--prune', 'origin')
+        merged = self.fake_gh([{'number': 9, 'headRefOid': head, 'baseRefName': 'main'}])
+        self.assertIn('pull request #9 merged',
+                      self.assertOk(wt, '--landed', env={'AGENTIC_GITHUB_FLOW_GH': merged}))
+
     def test_landed_runs_the_reflog_proof(self):
         wt = self.worktree('side-detached')
         self.commit(wt, 'side\n')

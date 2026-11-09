@@ -148,8 +148,33 @@ ASK = [
     ('find "%s" -exec rm -rf {} +' % fwd(OUTSIDE), REPO),
     ('find ~/Library/Caches -type f -delete', REPO), ('find "$DIR" -delete', REPO),
     ('find /tmp -delete', REPO),
-    # more paths than the guard reads (6,400 by brace expansion)
+    # more paths than the guard reads, and a brace expansion over its cap
     ('rm -rf /tmp/x ' + 'a{1,2}{3,4}{5,6}{7,8}{9,0}{1,2}/ ' * 100, REPO),
+    ('rm -rf ' + 'a/b ' * 5000, REPO),
+    ('rm -rf ~/Documents/w/{../../,p/}' + '{a,b}' * 6 + '/{..,z}/Library', REPO),
+    ('rm -rf ~/.{f..h}nupg/private-keys-v1.d', REPO),
+    # the independent review of the port: xargs options without a separate value
+    ('ls | xargs -i rm -rf {}', REPO), ('ls | xargs -l rm -rf', REPO),
+    ('ls | xargs -e rm -rf', REPO), ('ls | xargs --replace rm -rf {}', REPO),
+    ('ls | xargs -0 -i rm -rf {}', REPO), ("ls | xargs -I{} sh -c 'echo {}'", REPO),
+    # an unquoted known variable splits at spaces and expands its globs
+    ('D="$HOME/Documents backup/x"; rm -rf $D', REPO), ("X='*'; rm -rf ~/Documents/$X", REPO),
+    ('D="/tmp/x $HOME"; rm -rf $D', REPO), ('X="$HOME/Documents backup"; rm -r $X', REPO),
+    # find's options before its folders
+    ('find -O3 ~ -delete', REPO), ('find -D tree ~ -delete', REPO),
+    ('find -O3 ~ -exec rm -rf {} +', REPO),
+    # a cd that may have failed, a subshell's cd, env -C
+    ('cd /tmp/nonexistent; rm -rf *', HOME), ('cd /tmp/x | true; rm -rf Library', HOME),
+    ('(cd /tmp/x && make); rm -rf Library', HOME), ('env -C ~ rm -rf Library', REPO),
+    ('env --chdir="$HOME" rm -rf Library', REPO), ('env -C"$HOME" rm -rf Library', REPO),
+    # WSL's view of a Windows drive
+    ('rm -rf /mnt/c/%s/someone' % USERS, REPO), ('rm -rf /mnt/c/Windows/System32', REPO),
+    ('rm -rf /mnt/d', REPO),
+    # computed command text that names a delete
+    ('$(echo rm -rf ~/Library)', REPO), ('`echo rm -rf ~/Library`', REPO),
+    ('eval $(echo rm -rf ~/Library)', REPO), ('$(which rm) -r ~/Documents/notes', REPO),
+    ("sh -c \"$(printf 'rm -rf %s' ~/Library)\"", REPO), ('${RM:-rm} -r ~/Library', REPO),
+    ('busybox rm -rf ~/Library', REPO), ('runuser -u x -- rm -rf ~/Library', REPO),
 ]
 if LINK:
     ASK.append(('rm -rf "%s/liblink/"' % R, REPO))
@@ -186,17 +211,25 @@ PASS = [
     ('python3 tests/delete_guard.py', REPO),
     ("cat > notes.md <<'EOF'\nrm -rf ~/Library\nEOF", REPO),
     ("echo $'a\\tb' && rm -rf build", REPO),
+    # the review's cheap false ask, and trusted or harmless cd and variable forms
+    ('rm -rf "${TMPDIR:-/tmp}/foo"', REPO), ('rm -rf ${TMPDIR:-/tmp}/foo', REPO),
+    ('rm -rf "${NOT_SET_ANYWHERE_X:-build}"', REPO),
+    ('cd build && rm -rf *', REPO), ('cd target || exit 1; rm -rf debug', REPO),
+    ('(cd build && make); rm -rf target', REPO), ('env -C /tmp/session-1 rm -rf x', HOME),
+    ('D="build dist"; rm -rf $D', REPO), ('X=build; rm -rf $X', REPO),
+    ('rm -rf /mnt/c/%s/someone/code/repo/target' % USERS, REPO),
+    ('rm -rf ~/{.cache/pip,Library/Caches/pip}', REPO), ('gio trash ~/Documents/notes', REPO),
 ]
 
 failures = []
 for command, cwd in ASK:
     got = decision(run(command, cwd))
     if not got or got[0] != 'ask':
-        failures.append('NOT ASKED: %r (cwd %s)' % (command, os.path.relpath(cwd, tmp)))
+        failures.append('NOT ASKED: %r (cwd %s)' % (command[:200], os.path.relpath(cwd, tmp)))
 for command, cwd in PASS:
     got = decision(run(command, cwd))
     if got:
-        failures.append('WRONGLY ASKED: %r: %s' % (command, got[1][:160]))
+        failures.append('WRONGLY ASKED: %r: %s' % (command[:200], got[1][:220]))
 
 # Windows path reading, on any system: Git Bash and drive spellings of the same folders
 spec = importlib.util.spec_from_file_location('delete_guard_module', HOOK)
@@ -224,6 +257,29 @@ for written, cwd, want in WINDOWS_PATHS:
         failures.append('WINDOWS PATH: %r (cwd %r) read as %r, protected %s, expected %s'
                         % (written, cwd, path, got, want))
 dg.WINDOWS = os.name == 'nt'
+dg.variants.cache_clear()
+dg.git_root.cache_clear()
+dg.holds_repository.cache_clear()
+
+# the deadline: past it, a command that names a delete asks, and any other passes
+saved, dg.DEADLINE = dg.DEADLINE, -1.0
+if 'longer than' not in (dg.decide('rm -rf build', REPO) or ''):
+    failures.append('deadline: a delete judged past the deadline must ask')
+if dg.decide('ls -la', REPO) is not None:
+    failures.append('deadline: a command without a delete must pass past the deadline')
+dg.DEADLINE = saved
+
+# the review's slow shape: many recursive targets over a folder of 2,100 folders, judged
+# through the hook process well under the deadline (each folder is scanned once)
+WIDE = os.path.join(SESSION_TMP, 'wide')
+for k in range(2100):
+    os.makedirs(os.path.join(WIDE, 'd%04d' % k))
+started = time.time()
+r = run('rm -rf ' + ' '.join(['wide', './wide', 'wide/', 'wide/../wide'] * 1000), SESSION_TMP)
+took = time.time() - started
+if took > dg.DEADLINE * 0.75 or decision(r):
+    failures.append('wide folder: 4,000 targets must pass in under %.1f s (took %.1f s; %s)'
+                    % (dg.DEADLINE * 0.75, took, decision(r)))
 
 # the contract: "ask" with a reason or nothing, never "deny", exit 0, for any input
 outputs = [run(c, w) for c, w in ASK + PASS]
@@ -246,8 +302,11 @@ event = {'tool_name': 'Bash', 'cwd': REPO, 'tool_input': {'command': ['rm', '-rf
 if not decision(run('', REPO, raw=json.dumps(event))):
     failures.append('contract: a command given as a list must be judged')
 got = decision(run('rm -rf ~/Library', REPO))
-if got and ('Approve only if the user' not in got[1] or 'trash' not in got[1]):
-    failures.append('contract: the reason must say who approves and the safe form')
+if not got or not all(text in got[1] for text in (
+        "Outside a repository, delete with the system's trash, not `rm -rf`",
+        'Approve only if the user', '`gio trash` on Linux', 'the Recycle Bin on Windows')):
+    failures.append('contract: the reason must quote the rule, say who approves and give the '
+                    'safe form')
 if decision(run('rm -rf ~/Library', REPO, tool='mcp__terminal__run_in_terminal')) is None:
     failures.append('contract: run_in_terminal is judged as Bash')
 

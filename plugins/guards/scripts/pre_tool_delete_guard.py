@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """PreToolUse hook (Claude Code): the user approves a destructive delete before it runs.
 
-Enforces the core rule "Delete outside a repository with `trash`, not `rm -rf`": a guarded
-delete asks the user and runs on the user's approval; nothing is denied outright, because a
-deny would make a needed delete impossible. The occasion was an agent that built paths with
-`xargs -n1 dirname`: `xargs` split `~/Library/Application Support/…` on its space, `dirname`
-returned `~/Library`, and `rm -rf` ran on it.
+Enforces the core rule (rules/core.md §Git) "Outside a repository, delete with the system's
+trash, not `rm -rf`": a guarded delete asks the user and runs on the user's approval; nothing
+is denied outright, because a deny would make a needed delete impossible. The safe form its
+message names: the system's trash (`trash` on macOS, `gio trash` on Linux, the Recycle Bin on
+Windows) with literal, quoted, absolute paths that were listed and checked first. The occasion
+was an agent that built paths with `xargs -n1 dirname`: `xargs` split
+`~/Library/Application Support/…` on its space, `dirname` returned `~/Library`, and `rm -rf`
+ran on it.
 
 It answers `permissionDecision: "ask"` with a plain reason, never "deny", so the permission
 prompt says what the delete would hit. A hook's "ask" also prompts in auto mode, and an allow
@@ -26,22 +29,32 @@ command (or a `run_in_terminal` call) that:
   `$HOME`, `$PWD`, the temporary folder's variable (`$TMPDIR`, `$TEMP`, `$TMP`, when it names
   a usable temporary folder), one assigned a literal earlier in the same command or one
   assigned `$(mktemp -d)`; a `$(…)` or backtick substitution; a relative path after a `cd` to
-  a computed folder. A computed part in double quotes after a literal folder inside a git
-  worktree or a temporary folder passes (`rm -rf "$S/package-$C"`): the path is judged with
-  that part empty, and the guard assumes it holds no `..`. An unquoted one asks, because it
-  splits on spaces;
+  a computed folder or after a `cd` that may have failed (only `cd x && …` and `cd x || exit`
+  are trusted; a subshell's `cd` ends at its `)`; `env -C <folder>` counts as a `cd`). A
+  computed part in double quotes after a literal folder inside a git worktree or a temporary
+  folder passes (`rm -rf "$S/package-$C"`): the path is judged with that part empty, and the
+  guard assumes it holds no `..`. An unquoted one asks, because it splits on spaces. A known
+  variable used unquoted is split at white space and its `*?[` expand
+  (`D="$HOME/Documents backup"; rm -rf $D` deletes `~/Documents`). `${NAME:-word}` is NAME's
+  value when NAME is known, else word when NAME is set neither in the command nor in the
+  client's environment (an empty word stays unknown);
 - deletes recursively a repository or worktree root (a folder holding `.git`, or one directly
   holding such folders) or a `.git` folder; worktrees go through the cleanup-merged skill;
-- deletes what `xargs` or GNU `parallel` hands over, also through a wrapper or a shell
-  (`… | xargs rm`, `xargs -n1 dirname | xargs rm -rf`, `xargs -I{} sh -c 'rm -rf "{}"'`);
+- deletes what `xargs` or GNU `parallel` hands over, or hands it to a shell: any word after
+  `xargs` that names a delete program or a shell asks (`… | xargs rm`,
+  `xargs -n1 dirname | xargs rm -rf`, `xargs -i rm -rf {}`, `xargs -I{} sh -c '…'`);
 - runs `find … -delete` or `find … -exec rm` (also `-exec sh -c '…rm…'`, `-exec sudo rm`) from a
   folder outside a git worktree and the temporary folders;
 - starts a shell that reads its commands from a pipe (`echo … | sh`) while the command names a
-  delete; runs a computed command name with a flag cluster holding both `r` and `f`
-  (`$R -rf x`; `-r` alone would also catch `pytest -rA`); nests commands deeper than
-  pre_tool_git_guard.MAX_DEPTH levels, or is longer than its MAX_INPUT characters, while it
-  names a delete; holds a `$'…'` string the guard cannot decode while it names a delete; or
-  names more than MAX_PATHS paths to delete (brace expansions counted).
+  delete; runs a computed command name, a shell's computed `-c` script or an `eval` of
+  computed text while the text names a delete (`$(echo rm -rf x)`, `` `…` ``,
+  `eval $(…)`, `sh -c "$(printf …)"`), or a computed command name with a flag cluster holding
+  both `r` and `f` (`$R -rf x`; `-r` alone would also catch `pytest -rA`); nests commands
+  deeper than pre_tool_git_guard.MAX_DEPTH levels, or is longer than its MAX_INPUT characters,
+  while it names a delete; holds a `$'…'` string the guard cannot decode while it names a
+  delete; names more than MAX_PATHS paths to delete, or a brace expansion of more than
+  MAX_BRACES; or takes longer than DEADLINE seconds to judge (the hook's timeout in hooks.json
+  is 10 s) while it names a delete.
 The temporary folders: `/tmp`, `/private/tmp`, `/var/tmp`, `/var/folders`, `/private/var/folders`
 and the folder that `TMPDIR`, `TEMP` or `TMP` names, unless that is a root or holds a home
 folder; a path inside a home folder counts only when the temporary folder lies inside that home
@@ -49,32 +62,36 @@ too (Windows' `AppData/Local/Temp`).
 
 It reads the command as the shell would: behind `sh -c`, `bash -c --`, `su … -c`, `csh`,
 `fish`, `eval`, `$(…)`, a here-document or here-string a shell reads, wrappers (`sudo`, `env`,
-`nice`, `timeout`, `arch`, `script`, `command`, `builtin`), quoting and escapes in the command
+`nice`, `timeout`, `arch`, `script`, `command`, `builtin`, `busybox`, `pkexec`, `runuser`),
+quoting and escapes in the command
 name (`\\rm`, `"r"m`, `$'rm'`, zsh's `=rm`, `rm.exe`, `C:\\…\\rm.exe`), a variable that holds the
-command (`R=rm; $R -rf x`), `~user` and `~+`, brace expansion, `cd` (also inside `if` and
-`{ }`), command names in any case. Literal paths inside a git worktree or a temporary folder
+command (`R=rm; $R -rf x`), `~user` and `~+`, brace expansion (also `{a..c}`), `cd` (also
+inside `if` and `{ }`), find's `-O3` and `-D <flags>` before its folders, command names in any
+case. Literal paths inside a git worktree or a temporary folder
 pass, and `trash` always passes. Paths are compared without regard to case, as the macOS and
 Windows file systems do (on Linux that only asks more), both as written and with links
 resolved. On Windows, Git Bash paths (`/c/Users/…`, `/cygdrive/c/…`) and `C:\\…` or `C:/…`
-are read as the same drive paths.
+are read as the same drive paths; on every system WSL's `/mnt/<letter>/…` is also judged as
+that Windows drive.
 
 Not seen: deletes by a script file or program the command starts (`python3 x.py`,
 `shutil.rmtree` in `python -c`), `rsync --delete`, `mv` over a folder, `dd`, `diskutil`, a
 remote command run through `ssh`, text written into a running shell, a link the same command
-creates before deleting through it, a computed command name without an `-rf`-style flag
-(`$(which rm) -r x`), a non-recursive delete of a computed target (`for f in ~/.ssh/*; do
-rm "$f"; done`), lines after a here-document marker that stands inside quotes or a comment
-(read as a body, so a `)` in a commit message cannot end a substitution), brace expansion of the
-command word, wrappers it does not know (`watch`, `tmux`, `env -S`, `osascript`), GNU `grm` and
+creates before deleting through it, a computed command name whose text names no delete and
+has no `-rf`-style flag (`$PROG -r x` with PROG set outside the command), a non-recursive
+delete of a computed target (`for f in ~/.ssh/*; do rm "$f"; done`), lines after a
+here-document marker that stands inside quotes or a comment (read as a body, so a `)` in a
+commit message cannot end a substitution), brace expansion of the command word, wrappers it does not know (`watch`, `tmux`, `env -S`, `osascript`), GNU `grm` and
 `gfind`, `fd -X rm`, `rmdir -p`, encoded commands piped into a shell, and PowerShell
 (`Remove-Item -Recurse`, `rd /s` in `cmd`). A quoted variable after a safe folder is assumed to
 hold no `..`. Deliberate evasion is the job of a sandbox, not of this hook.
 
 Not for Codex: Codex accepts only "deny" from a PreToolUse hook, and a deny would make a
-guarded delete impossible, so the installer does not wire it there. Codex's own
-`workspace-write` sandbox asks before a command writes outside the workspace, which covers the
-protected folders when Codex runs in that mode; a computed delete inside the workspace is not
-covered there. The written rule binds Codex.
+guarded delete impossible, so the installer does not wire it there. Codex gets its own layers
+instead: its sandbox (`workspace-write` asks before a command writes outside the workspace),
+its built-in check of `rm -f`, and the prompt rules in policy/delete-guard.rules (recursive
+deletes without `-f`, `xargs … rm`), which the installer copies into ~/.codex/rules/. The
+written rule binds Codex where those do not reach.
 
 An input it cannot parse is asked about when it names a delete program, and passes otherwise;
 a fault in the guard itself asks in the same case. Any other input, a malformed event
@@ -86,7 +103,7 @@ Usage as a hook: reads the PreToolUse JSON on stdin, prints the "ask" decision o
 nothing, and exits 0. For tests: `pre_tool_delete_guard.py --check '<command>' [cwd]` prints the
 reason and exits 1, or exits 0. Test: `python3 tests/delete_guard.py`.
 """
-import bisect, importlib.util, json, os, posixpath, re, sys
+import bisect, functools, importlib.util, json, os, posixpath, re, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 _spec = importlib.util.spec_from_file_location('pre_tool_git_guard',
@@ -99,13 +116,15 @@ DELETERS = {'rm', 'rmdir', 'unlink'}
 SHELLS = set(gg.SHELLS) | {'csh', 'tcsh', 'fish'}
 WRAPPERS = {'env', 'command', 'builtin', 'exec', 'nohup', 'time', 'sudo', 'doas', 'timeout',
             'gtimeout', 'nice', 'ionice', 'caffeinate', 'stdbuf', 'noglob', 'export', 'arch',
-            'script', 'xcrun', 'setsid', 'unbuffer', 'flock', 'chrt', 'taskset'}
+            'script', 'xcrun', 'setsid', 'unbuffer', 'flock', 'chrt', 'taskset', 'busybox',
+            'pkexec', 'runuser'}
 RUNS = DELETERS | WRAPPERS | SHELLS | {'find', 'xargs', 'eval', 'su'}
 FIND_EXEC = {'-exec', '-execdir', '-ok', '-okdir'}
-XARGS_VALUE_OPTS = {'-n', '-I', '-i', '-L', '-l', '-P', '-s', '-d', '-E', '-e', '-J', '-R', '-S',
-                    '-a'}
-XARGS_LONG_VALUE = {'--max-args', '--max-lines', '--max-procs', '--max-chars', '--delimiter',
-                    '--arg-file', '--eof', '--replace', '--process-slot-var'}
+# xargs options that take the next word as their value; `-i`, `-l`, `-e`, `--replace`,
+# `--max-lines` and `--eof` take theirs only attached (`-i{}`, `--eof=x`), never the next word
+XARGS_VALUE_OPTS = {'-n', '-I', '-L', '-P', '-s', '-d', '-E', '-J', '-R', '-S', '-a'}
+XARGS_LONG_VALUE = {'--max-args', '--max-procs', '--max-chars', '--delimiter', '--arg-file',
+                    '--process-slot-var'}
 TEMP_FOLDERS = ('/tmp', '/private/tmp', '/var/tmp', '/private/var/tmp', '/var/folders',
                 '/private/var/folders')
 TEMP_VARIABLES = ('TMPDIR', 'TEMP', 'TMP')
@@ -121,8 +140,18 @@ MKTEMP = re.compile(r'\$\(\s*mktemp(\s+-[dqtu]+)*\s*(\s[^/)\s]+)?\s*\)')
 DELETE_WORD = re.compile(r'(^|[\s;&|(`$/{])(rm|rmdir|unlink|xargs)\b|-delete\b', re.I)
 NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
 DRIVE = re.compile(r'[A-Za-z]:(/|$)')
+WSL_DRIVE = re.compile(r'/mnt/([A-Za-z])(/|$)')  # WSL's view of a Windows drive
 UNKNOWN = None  # the value of a variable this hook cannot know
 MAX_PATHS = 4096  # paths judged per command, brace expansions included; more asks
+MAX_BRACES = 64   # texts one brace expansion may make; more asks
+DEADLINE = 4.0    # seconds of judging (hooks.json allows 10); past it, a delete asks
+RULE = "Outside a repository, delete with the system's trash, not `rm -rf`"
+SAFE_FORM = ("the system's trash (`trash` on macOS, `gio trash` on Linux, the Recycle Bin on "
+             "Windows)")
+
+
+class Overtime(Exception):
+    """Judging took longer than DEADLINE."""
 
 
 # --- words ---------------------------------------------------------------------------------
@@ -143,8 +172,10 @@ class Word:
 
 
 def lex(text):
-    """(simple commands as lists of Words, the texts of command substitutions in them); a
-    here-document body is removed before."""
+    """(commands, the texts of command substitutions in them); a here-document body is removed
+    before. commands holds (Words of a simple command, the operator after it: `&&`, `||`, `;`,
+    `|`, `&`, a newline, `(`, `)` or '' at the end); a `(` or `)` comes with no Words of its
+    own when nothing stands before it."""
     commands, words, word, i, n, subs = [], [], None, 0, len(text), []
     redirect_next = herestring_next = False
 
@@ -193,10 +224,11 @@ def lex(text):
             continue
         if c in ';&|()\n':
             close()
-            if words:
-                commands.append(words)
+            op = text[i:i + 2] if text.startswith(('&&', '||', ';;'), i) else c
+            if words or op in '()':
+                commands.append((words, op))
             words = []
-            i += 1
+            i += len(op)
             continue
         if c in '<>':
             if word is not None and re.fullmatch(r'\d+', word.raw() or 'x'):
@@ -287,7 +319,7 @@ def lex(text):
             i = j
     close()
     if words:
-        commands.append(words)
+        commands.append((words, ''))
     return commands, subs
 
 
@@ -297,12 +329,37 @@ VAR = re.compile(r'\$(\{[^}]*\}|[A-Za-z_][A-Za-z0-9_]*|[0-9@*#?!$-])')
 class Value:
     """A word's value. text has unknown parts left empty; prefix is the known text before the
     first unknown part (None when nothing is unknown); quoted says every unknown part was in
-    double quotes, so it cannot split into several words."""
+    double quotes, so it cannot split into several words; split says an unquoted variable put
+    white space into it, so the shell splits it into several words."""
 
-    def __init__(self, text, why, glob, prefix, quoted):
+    def __init__(self, text, why, glob, prefix, quoted, split=False):
         self.text, self.why, self.glob = text, why, glob
-        self.prefix, self.quoted = prefix, quoted
+        self.prefix, self.quoted, self.split = prefix, quoted, split
         self.computed = prefix is not None
+
+    def fields(self):
+        """(text, glob) for each word the shell makes of this value."""
+        if not self.split:
+            return [(self.text, self.glob)]
+        return [(f, self.glob and any(ch in f for ch in '*?[')) for f in self.text.split()]
+
+
+DEFAULT = re.compile(r'([A-Za-z_][A-Za-z0-9_]*)(:?)-([^}$`]*)')
+
+
+def variable(name, env):
+    """The value of `$name` or `${name}`: a string, a Partial or UNKNOWN. `${NAME:-word}` and
+    `${NAME-word}` give NAME's value when it is known, and word when NAME is neither assigned in
+    the command nor set in the client's environment (which the hook inherits). An empty word
+    (`${NAME:-}`, a spelling for `set -u`) stays unknown: NAME may come from a shell profile."""
+    default = DEFAULT.fullmatch(name)
+    if default:
+        var, colon, word = default.groups()
+        if var in env:
+            value = env[var]
+            return word if isinstance(value, str) and colon and not value else value
+        return UNKNOWN if var in os.environ or not word else word
+    return env.get(name) if NAME.fullmatch(name) else UNKNOWN
 
 
 class Partial:
@@ -314,7 +371,7 @@ class Partial:
 
 
 def evaluate(word, env):
-    out, why, glob, prefix, quoted = [], '', False, None, True
+    out, why, glob, prefix, quoted, split = [], '', False, None, True, False
 
     def unknown(reason, known='', in_quotes=False):
         nonlocal why, prefix, quoted
@@ -364,9 +421,12 @@ def evaluate(word, env):
             m = VAR.match(text, pos)
             if m:
                 name = m.group(1).strip('{}')
-                value = env.get(name) if NAME.fullmatch(name) else UNKNOWN
+                value = variable(name, env)
                 if isinstance(value, str):
                     out.append(value)
+                    if quote == '':  # unquoted: the shell splits it and expands its globs
+                        split = split or bool(re.search(r'\s', value))
+                        glob = glob or any(ch in value for ch in '*?[')
                 elif isinstance(value, Partial):
                     unknown('uses the variable $%s, whose value is partly computed' % name,
                             value.prefix, quote == '"')
@@ -381,11 +441,12 @@ def evaluate(word, env):
                 glob = True
             out.append(ch)
             pos += 1
-    return Value(''.join(out), why, glob, prefix, quoted)
+    return Value(''.join(out), why, glob, prefix, quoted, split)
 
 
 # --- paths ---------------------------------------------------------------------------------
-# A path is a string with forward slashes: `/…` on every system, `c:/…` on Windows too.
+# A path is a string with forward slashes: `/…` on every system, `c:/…` on Windows too; a
+# variant for comparison may also be a drive path elsewhere (WSL's `/mnt/c/…` as `c:/…`).
 
 def canon(path):
     """The path with forward slashes; on Windows Git Bash's `/c/…` and `/cygdrive/c/…` become
@@ -402,7 +463,7 @@ def canon(path):
 
 
 def split_drive(path):
-    if WINDOWS and DRIVE.match(path):
+    if DRIVE.match(path):
         return path[:2], path[2:] or '/'
     return '', path
 
@@ -435,8 +496,10 @@ def under(path, root):
     return path == root or path.startswith(root.rstrip('/') + '/')
 
 
+@functools.lru_cache(maxsize=None)
 def variants(path):
-    """The path as written and with links resolved, both case-folded."""
+    """The path as written and with links resolved, both case-folded, and WSL's `/mnt/<drive>/…`
+    also as the Windows drive path it is."""
     found = {path.casefold()}
     resolvable = DRIVE.match(path) if WINDOWS else path.startswith('/')
     if resolvable and os.path.isabs(path):
@@ -444,7 +507,11 @@ def variants(path):
             found.add(canon(os.path.realpath(path)).casefold())
         except (OSError, ValueError):
             pass
-    return found
+    for v in list(found):
+        m = WSL_DRIVE.match(v)
+        if m:
+            found.add(m.group(1) + ':/' + v[m.end():])
+    return frozenset(found)
 
 
 def protected(path, homes):
@@ -480,6 +547,7 @@ def protected(path, homes):
     return None
 
 
+@functools.lru_cache(maxsize=None)
 def git_root(path):
     """The folder holding `.git` at or above path, or None."""
     p = path
@@ -506,6 +574,7 @@ def in_safe_area(path, state):
     return True
 
 
+@functools.lru_cache(maxsize=None)
 def holds_repository(path):
     """True for a repository or worktree root, a `.git` folder, or a folder that directly holds
     repositories (a folder of worktrees)."""
@@ -544,6 +613,11 @@ class State:
         self.env = dict(env)
         self.text = text        # the whole command, for a shell that reads it from a pipe
         self.budget = [MAX_PATHS]  # paths left to judge, shared with the child states
+        self.deadline = time.monotonic() + DEADLINE
+
+    def check_time(self):
+        if time.monotonic() > self.deadline:
+            raise Overtime()
 
     @classmethod
     def start(cls, cwd, home, text):
@@ -579,7 +653,7 @@ class State:
 
     def child(self, text=''):
         state = State(self.cwd, self.home, self.homes, self.temp, self.env, text or self.text)
-        state.mktemp, state.budget = self.mktemp, self.budget
+        state.mktemp, state.budget, state.deadline = self.mktemp, self.budget, self.deadline
         return state
 
 
@@ -596,11 +670,12 @@ def safe_prefix(value, state):
 
 
 def braces(word, text):
-    """The texts brace expansion makes of an unquoted `{a,b}` or `{1..3}` (at most 64)."""
+    """The texts brace expansion makes of an unquoted `{a,b}`, `{1..3}` or `{a..c}`, or None when
+    it makes more than MAX_BRACES."""
     if not any(q == '' and '{' in t for q, t in word.parts):
         return [text]
     out, todo = [], [text]
-    while todo and len(out) < 64:
+    while todo:
         t = todo.pop()
         m = re.search(r'\{([^{}]*)\}', t)
         if not m or (',' not in m.group(1) and '..' not in m.group(1)):
@@ -611,15 +686,27 @@ def braces(word, text):
             choices = inner.split(',')
         else:
             a, _, b = inner.partition('..')
-            if a.isdigit() and b.isdigit():
+            if re.fullmatch(r'-?\d+', a) and re.fullmatch(r'-?\d+', b):
                 a, b = int(a), int(b)
-                step = 1 if b >= a else -1
-                choices = [str(x) for x in range(a, b + step, step)][:64] if abs(b - a) < 64 \
-                    else [str(x) for x in range(a, a + 64 * step, step)]
+            elif len(a) == len(b) == 1 and a.isalpha() and b.isalpha():
+                a, b = ord(a), ord(b)
             else:
-                choices = [a, b]
+                a = b = None
+            if a is None:
+                choices = [inner.partition('..')[0], inner.partition('..')[2]]
+            elif abs(b - a) >= MAX_BRACES:
+                return None
+            else:
+                step = 1 if b >= a else -1
+                letters = not re.fullmatch(r'-?\d+', inner.partition('..')[0])
+                choices = [chr(x) if letters else str(x) for x in range(a, b + step, step)]
         todo += [t[:m.start()] + c + t[m.end():] for c in choices]
-    return out + todo
+        if len(out) + len(todo) > MAX_BRACES:
+            return None
+    return out
+
+
+TOO_MANY_BRACES = 'uses a brace expansion of more than %d paths (%%s)' % MAX_BRACES
 
 
 def judge_targets(targets, recursive, state, program):
@@ -627,28 +714,33 @@ def judge_targets(targets, recursive, state, program):
         value = evaluate(word, state.values())
         if value.computed and recursive and not safe_prefix(value, state):
             return 'deletes recursively a target that %s (%s)' % (value.why, word.raw())
-        for text in braces(word, value.text):
-            reason = judge_path(text, value, word, recursive, state, program)
-            if reason:
-                return reason
+        for field, glob in value.fields():
+            texts = braces(word, field)
+            if texts is None:
+                return 'deletes and ' + TOO_MANY_BRACES % word.raw()
+            for text in texts:
+                reason = judge_path(text, glob, word, recursive, state, program)
+                if reason:
+                    return reason
     return None
 
 
-def judge_path(text, value, word, recursive, state, program):
+def judge_path(text, glob, word, recursive, state, program):
+    state.check_time()
     state.budget[0] -= 1
     if state.budget[0] < 0:
         return 'names more paths than the delete guard reads (%d)' % MAX_PATHS
-    if value.glob:
+    if glob:
         text = glob_base(text)
     if not text:
         return None  # `rm "$f"` with f unknown: a plain file, empty or not
     path = norm(text, state.cwd)
     if path is None:
         if recursive:
-            return ('deletes recursively a relative path (%s) after a `cd` to a computed '
-                    'folder' % word.raw())
+            return ('deletes recursively a relative path (%s) after a `cd` that may not have '
+                    'happened or went to a computed folder' % word.raw())
         return None
-    if value.glob:
+    if glob:
         # what the glob reaches: `~/*` deletes what is directly in the home folder;
         # `~/Documents/*` empties a protected folder; `/tmp/x.*` stays inside /tmp
         reason = protected(path.rstrip('/') + '/x', state.homes) or (
@@ -724,8 +816,11 @@ def judge_find(words, state):
         return None
     k, starts = 0, []
     while k < len(words):
-        if raws[k] in ('-H', '-L', '-P', '-E', '-X', '-s', '-x', '-d', '--'):
+        if raws[k] in ('-H', '-L', '-P', '-E', '-X', '-s', '-x', '-d', '--') or re.fullmatch(
+                r'-O\d*', raws[k]):
             k += 1
+        elif raws[k] == '-D' and k + 1 < len(words):  # GNU find's debug option and its value
+            k += 2
         elif raws[k] == '-f' and k + 1 < len(words):
             starts.append(words[k + 1])
             k += 2
@@ -741,20 +836,33 @@ def judge_find(words, state):
         value = evaluate(word, state.values())
         if value.computed and not safe_prefix(value, state):
             return 'runs find with a delete from a folder that %s (%s)' % (value.why, word.raw())
-        for text in braces(word, value.text):
-            path = norm(text, state.cwd)
-            if path is None:
-                return 'runs find with a delete from a relative folder after a computed `cd`'
-            reason = protected(path, state.homes)
-            if reason:
-                return 'runs find with a delete in %s (%s)' % (reason, word.raw())
-            if not in_safe_area(path, state):
-                return ('runs find with a delete outside a git worktree and the temporary '
-                        'folders (%s)' % word.raw())
+        for field, glob in value.fields():
+            texts = braces(word, glob_base(field) if glob else field)
+            if texts is None:
+                return 'runs find with a delete and ' + TOO_MANY_BRACES % word.raw()
+            for text in texts:
+                state.check_time()
+                path = norm(text, state.cwd)
+                if path is None:
+                    return ('runs find with a delete from a relative folder after a `cd` that '
+                            'may not have happened or went to a computed folder')
+                reason = protected(path, state.homes)
+                if reason:
+                    return 'runs find with a delete in %s (%s)' % (reason, word.raw())
+                if not in_safe_area(path, state):
+                    return ('runs find with a delete outside a git worktree and the temporary '
+                            'folders (%s)' % word.raw())
     return None
 
 
 def judge_xargs(args, state, depth):
+    named = [name_of(w) for w in args]
+    if DELETERS & set(named):
+        return ('deletes what xargs hands over (%s): xargs splits paths on spaces, so the '
+                'targets are not the paths that were listed' % ' '.join(w.raw() for w in args))
+    if SHELLS & set(named):
+        return ('hands what xargs reads to a shell (%s), which may run it as commands'
+                % ' '.join(w.raw() for w in args))
     k = 0
     while k < len(args) and args[k].raw().startswith('-'):
         raw = args[k].raw()
@@ -772,21 +880,25 @@ def judge_xargs(args, state, depth):
 
 
 def shell_script(args, state):
-    """(script text, reads stdin) for `sh -c '…'`, `bash -lc -- '…'`, `su user -c '…'`."""
+    """(script text, reads stdin, computed) for `sh -c '…'`, `bash -lc -- '…'`,
+    `su user -c '…'`, `bash <<< '…'`; computed when the script is built at run time."""
+    script = None
     for k, w in enumerate(args):
         raw = w.raw()
         if re.fullmatch(r'-[A-Za-z]*c[A-Za-z]*', raw) or raw == '--command':
             rest = [x for x in args[k + 1:] if x.raw() != '--']
-            if rest:
-                value = evaluate(rest[0], state.values())
-                return (rest[0].raw() if value.computed else value.text), False
-            return '', False
-    herestrings = [w for w in args if w.herestring]
-    if herestrings:
-        value = evaluate(herestrings[0], state.values())
-        return (herestrings[0].raw() if value.computed else value.text), False
+            if not rest:
+                return '', False, False
+            script = rest[0]
+            break
+    if script is None:
+        herestrings = [w for w in args if w.herestring]
+        script = herestrings[0] if herestrings else None
+    if script is not None:
+        value = evaluate(script, state.values())
+        return (script.raw() if value.computed else value.text), False, value.computed
     plain = [w for w in args if not w.redirect and not w.raw().startswith('-')]
-    return '', not plain  # no script file: the shell reads its commands from stdin
+    return '', not plain, False  # no script file: the shell reads its commands from stdin
 
 
 def too_deep(text):
@@ -798,6 +910,7 @@ def judge_command(words, state, depth):
     raws = ' '.join(w.raw() for w in words)
     if depth > gg.MAX_DEPTH:
         return too_deep(raws)
+    state.check_time()
     herestrings = [w for w in words if w.herestring]
     words = [w for w in words if not w.redirect]
     while words and (gg.ASSIGN.fullmatch(words[0].raw()) or words[0].raw() in gg.KEYWORDS
@@ -806,8 +919,11 @@ def judge_command(words, state, depth):
     if not words:
         return None
     head = evaluate(words[0], state.values())
-    if any(q != "'" and '$' in t for q, t in words[0].parts):
+    if any(q != "'" and ('$' in t or '`' in t) for q, t in words[0].parts):
         if head.computed:
+            if has_delete_word(raws):
+                return ('runs a command whose name is computed, and the command names a delete '
+                        '(%s)' % raws[:80])
             if any(re.fullmatch(r'-[A-Za-z]*[rR][A-Za-z]*', w.raw()) and 'f' in w.raw()
                    for w in words[1:]):
                 return 'runs a computed command name with a recursive flag (%s)' % raws[:80]
@@ -831,7 +947,10 @@ def judge_command(words, state, depth):
     if name == 'parallel' and has_delete_word(raws):
         return 'hands what GNU parallel reads to a delete (%s)' % raws[:80]
     if name in SHELLS or name == 'su':
-        script, reads_stdin = shell_script(args, state)
+        script, reads_stdin, computed = shell_script(args, state)
+        if computed and has_delete_word(script):
+            return ('starts a shell whose script is computed, and the script names a delete '
+                    '(%s)' % script[:80])
         if script:
             return judge(script, state.child(script), depth + 1)
         if reads_stdin and name != 'su' and has_delete_word(state.text):
@@ -839,19 +958,49 @@ def judge_command(words, state, depth):
                     'a delete')
         return None
     if name == 'eval':
-        parts = []
+        parts, computed = [], False
         for w in words[1:]:
             value = evaluate(w, state.values())
+            computed = computed or value.computed
             parts.append(w.raw() if value.computed else value.text)
+        if computed and has_delete_word(' '.join(parts)):
+            return 'evaluates computed text that names a delete (%s)' % raws[:80]
         return judge(' '.join(parts), state.child(), depth + 1)
     if name in WRAPPERS:
+        if name == 'env':
+            folder = env_chdir(words[1:])
+            if folder is not None:  # `env -C <folder> …` runs the command in that folder
+                value = evaluate(folder, state.values())
+                state = state.child()
+                state.cwd = None if value.computed else norm(value.text, state.cwd)
         inner = unwrap(words)
         return judge_command(inner, state, depth + 1) if inner else None
     return None
 
 
-def track(words, state):
-    """Follow `cd` and literal assignments, so later commands resolve against them."""
+def env_chdir(args):
+    """The folder word of `env -C <folder>`, `-C<folder>`, `--chdir <folder>` or
+    `--chdir=<folder>` before the command env runs, or None."""
+    for k, w in enumerate(args):
+        raw = w.raw()
+        if raw in ('-C', '--chdir'):
+            return args[k + 1] if k + 1 < len(args) else None
+        for flag in ('--chdir=', '-C'):
+            if raw.startswith(flag) and w.parts and w.parts[0][1].startswith(flag):
+                rest = Word()
+                rest.add(w.parts[0][0], w.parts[0][1][len(flag):])
+                for part in w.parts[1:]:
+                    rest.add(*part)
+                return rest
+        if not raw.startswith('-') and not gg.ASSIGN.fullmatch(raw):
+            return None
+    return None
+
+
+def track(words, state, trusted=True):
+    """Follow `cd` and literal assignments, so later commands resolve against them. A `cd` is
+    trusted only when what follows runs on its success alone (`cd x && …`, `cd x || exit`);
+    after any other `cd` the working folder is unknown, since the `cd` may have failed."""
     words = [w for w in words if not w.redirect]
     while words and (words[0].raw() in gg.KEYWORDS or words[0].raw() in ('{', '}', 'if')
                      or name_of(words[0]) in ('builtin', 'command')):
@@ -862,10 +1011,11 @@ def track(words, state):
     if first in ('cd', 'pushd', 'chdir'):
         target = [w for w in words[1:] if not w.raw().startswith('-') or w.raw() == '-']
         if not target:
-            state.cwd = state.home
+            state.cwd = state.home if trusted else None
             return
         value = evaluate(target[0], state.values())
-        state.cwd = None if value.computed or value.text == '-' else norm(value.text, state.cwd)
+        state.cwd = None if (value.computed or value.text == '-' or not trusted) else norm(
+            value.text, state.cwd)
         return
     if first in ('export', 'local', 'declare', 'readonly', 'typeset'):
         words = [w for w in words[1:] if not w.raw().startswith('-')]
@@ -931,11 +1081,19 @@ def judge(text, state, depth=0):
         reason = judge(inner, state.child(), depth + 1)
         if reason:
             return reason
-    for words in commands:
-        reason = judge_command(words, state, depth)
-        if reason:
-            return reason
-        track(words, state)
+    saved = []  # (working folder, variables) at each `(`, restored at its `)`
+    for k, (words, op) in enumerate(commands):
+        if words:
+            reason = judge_command(words, state, depth)
+            if reason:
+                return reason
+            following = commands[k + 1][0] if k + 1 < len(commands) else []
+            track(words, state, op == '&&' or (op == '||' and bool(following) and
+                                                following[0].raw() in ('exit', 'return')))
+        if op == '(':
+            saved.append((state.cwd, dict(state.env)))
+        elif op == ')' and saved:
+            state.cwd, state.env = saved.pop()
     return None
 
 
@@ -963,6 +1121,11 @@ def decide(command, cwd, home=None):
                 % gg.MAX_INPUT if has_delete_word(command) else None)
     try:
         return judge(command, State.start(cwd, home, command))
+    except Overtime:
+        if has_delete_word(command):
+            return ('took the delete guard longer than %.0f seconds to read, and names a delete'
+                    % DEADLINE)
+        return None
     except Exception:
         # Deliberate: a fault, or a command it cannot parse, asks rather than passes when the
         # command names a delete, and never denies.
@@ -972,9 +1135,9 @@ def decide(command, cwd, home=None):
 
 
 def reason_text(reason):
-    return ('Delete guard (agentic-github-flow rules, §Git): this command %s. Approve only if '
-            'the user confirms this delete. The safe form: `trash` with literal, quoted, '
-            'absolute paths that were listed and checked first.' % reason)
+    return ('Delete guard (agentic-github-flow rules, §Git: "%s."): this command %s. Approve '
+            'only if the user confirms this delete. The safe form: %s, with literal, quoted, '
+            'absolute paths that were listed and checked first.' % (RULE, reason, SAFE_FORM))
 
 
 def hook():

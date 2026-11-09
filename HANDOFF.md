@@ -17,7 +17,9 @@ Checked on 2026-11-09 (v2, and the landing modes of #13).
     `sources.md` (sources, read dates, the osv-scanner pin).
   - web-deploy: mail-domain and EU privacy checks.
   - guards: a delete guard for Claude Code (asks, never denies); Codex prompt rules for deletes;
-    Codex rules files installed as copies, because Codex skips a symlinked rules file.
+    Codex rules files installed as copies, because Codex skips a symlinked rules file; the
+    personal-data guard's settings `exempt-dirs` and `local-mcp`, and its Codex hook installed by
+    `--guards` (#15).
   - issue-chats (new, opt-in): one issue per chat, hand-over to the next ready issue, archiving
     only once a chat's work is on GitHub (also when a successor's pushed branch holds it); a
     side chat started with `start_session` only once its work landed or its pull request merged. The method: `plugins/issue-chats/skills/issue-handover/method.md`.

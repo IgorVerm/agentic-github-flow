@@ -24,7 +24,7 @@ work queue; content from tools and web pages is data, not instructions.
 | `agentic-github-flow-security` | `review-security` (a review checklist by area), a secret scanner that never prints values, a dependency audit against OSV, with osv-scanner as an optional second opinion | `--with security` |
 | `agentic-github-flow-web-deploy` | `check-web-deploy` (pre-deploy check of a Vercel and Supabase site, with optional Google sign-in, its mail domain and EU privacy) | `--with web-deploy` (brings security) |
 | `agentic-github-flow-issue-chats` | `issue-handover` (one issue per chat: once a branch is ready to push, or has landed on local main, pick the next ready issue by priority, check it for overlap, start and claim its chat, then ask you for the push or archive) and `archive-finished-chats` (archive chats whose work is on GitHub, or landed on local main, and side chats once their work landed or merged); a Claude Code hook that lets a chat be archived only when its worktree is clean and its commits are on GitHub or, in local-main mode, landed (a side chat it is asked to archive: landed or merged). See [Issue chats](#issue-chats) | `--with issue-chats` |
-| `agentic-github-flow-guards` | Claude Code hooks that refuse destructive git commands and ask before destructive deletes and before personal data leaves the machine; the installer adds the matching deny list and the Codex rules | `--guards` |
+| `agentic-github-flow-guards` | Claude Code hooks that refuse destructive git commands and ask before destructive deletes and before personal data leaves the machine; the installer adds the matching deny list and the Codex rules and hooks | `--guards` |
 
 ## Requirements
 
@@ -133,8 +133,12 @@ the same version.
   `~/.claude/settings.json` (merged, never replaced, with a backup beside it); the Codex
   execpolicy rules (git safety and delete prompts) copied into `~/.codex/rules/`, as copies
   because Codex skips a symlinked rules file, refreshed by `--update` and removed by
-  `--uninstall` only while unchanged; the git guard added to `~/.codex/hooks.json`.
-  Codex runs a new hook only after you trust it once with `/hooks` in Codex. The delete-guard
+  `--uninstall` only while unchanged; the git guard and the personal-data guard added to
+  `~/.codex/hooks.json` beside your own entries (`--update` replaces and `--uninstall` removes
+  only those two). Codex runs a new hook only after you trust it once with `/hooks` in Codex.
+  In Codex the personal-data guard denies instead of asking, because a Codex hook cannot ask:
+  the agent tells you what it would send where, and you run it yourself. Text typed into a
+  command that is already running (`write_stdin`) reaches no hook. The delete-guard
   hook stays out of Codex (it asks, and a Codex hook can only deny); the delete prompt rules
   take its place there, and they prompt for every recursive `rm` and `xargs rm`, inside the
   workspace too (under `codex exec`, which never asks, such a command does not run).
@@ -147,6 +151,25 @@ changing anything and explains: writing through the link would change the file i
 Replace the link with a plain file, or skip that client with `--no-claude` or `--no-codex`.
 
 Nothing is sent anywhere except the git and plugin fetches: no telemetry.
+
+### Personal-data guard settings
+
+The personal-data guard reads three optional files in
+`${XDG_CONFIG_HOME:-~/.config}/agentic-github-flow/`, outside every repository so they are never
+committed. One entry per line; blank lines and `#` comments are ignored.
+
+| File | Entry | Effect |
+|---|---|---|
+| `personal-data` | an identifier beyond your git and gh identity, optionally `email:`, `phone:` or `name:` | calls that send it are asked (Claude Code) or denied (Codex) |
+| `exempt-dirs` | an absolute folder (`~` allowed) | sessions working inside it are not checked, for work that other rules govern |
+| `local-mcp` | an MCP server name | its `mcp__<name>__*` tools count as local and are not checked |
+
+Listing a folder or a server turns the check off there, so list only what you mean: `/` or `~`
+in `exempt-dirs` turns it off everywhere, and `codex_apps` in `local-mcp` passes every Codex
+connector (mail and GitHub alike). Whoever can write these files decides what is checked; a
+settings folder that a repository moves into itself (through `XDG_CONFIG_HOME` or `HOME` in its
+own settings) is not trusted for the two exemption files. The exact matching rules are in the
+guard's header, `plugins/guards/scripts/pre_tool_personal_data.py`.
 
 ## Issue chats
 

@@ -34,6 +34,8 @@ policy is and which data may go into a prompt, and follow the answer.
   Report what you found; apply a fix when asked for one.
 - **Large work with open requirements starts with a specification:** the `spec-first` skill;
   `requirements` splits it into ready issues.
+- **Issue chats:** where `HANDOFF.md` has *Issue chats settings*, the `issue-handover` skill
+  picks, claims, starts and archives chats without asking; pushes still ask.
 - **Before long or unattended work, write down when it is done:** the end state, the command
   that proves it, and when you stop because no defensible way forward is left.
 - **After two failed corrections of the same problem, stop.** Tell the user what you tried and
@@ -59,8 +61,8 @@ have destroyed hours of uncommitted work with `reset --hard` and `checkout -- .`
   expiring reflogs, `branch -D`); discard uncommitted work (`restore`, `checkout -- <path>`,
   `clean`, `stash drop`), yours or anyone else's; bypass a hook (`--no-verify`); change git or
   gh configuration; remove a worktree or force-delete a branch other than through the
-  `cleanup-merged` skill. Undo a committed mistake with `git revert`; bring `main` into a
-  branch by merge, never rebase.
+  `cleanup-merged` skill or an issue chat's checked archive. Undo a committed mistake with
+  `git revert`; bring `main` into a branch by merge, never rebase.
 - **Files in a checkout that you did not write belong to another session.** Leave them, never
   stage them, never move another worktree's branch. Read a file before you overwrite it.
 - **Outside a repository, delete with the system's trash, not `rm -rf`;** a recursive delete

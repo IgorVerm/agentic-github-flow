@@ -23,7 +23,8 @@ What it does, per client (Claude Code, Codex):
   prompts) copied into ~/.codex/rules/ and the git guard added to ~/.codex/hooks.json. The rules
   are copies, never links, because Codex skips a symlinked .rules file without a warning;
   --update refreshes a copy and --uninstall removes it only while it is unchanged since the
-  installer wrote it (a link or copy recorded by 0.1 counts as unchanged and is replaced). An
+  installer wrote it (a link recorded by 0.1, or a copy holding the rules 0.1 shipped, counts
+  as unchanged and is replaced). An
   edited copy is left, with a note, and recorded in .state/codex-rules-left.json so that a
   later --guards keeps it instead of refusing it. Copies under an earlier CODEX_HOME are
   removed by the next install or --update while unchanged.
@@ -394,6 +395,9 @@ def rules_targets():
 
 
 LEGACY = 'legacy'  # a rules file recorded by its path alone (0.1: a link, a copy on Windows)
+# sha256 of git-safety.rules as 0.1.0 to 0.1.2 shipped it (d0edd54), with LF and CRLF endings
+LEGACY_HASHES = {'629d996685e78035d47a801b7903e6df273d6a62f113b1f8a0e06db22a722903',
+                 '735d3d6a1ffb5cb69708e6228d65f0b54cad4ebd7919505f21c167a21cd184ce'}
 
 
 def left_path():
@@ -417,14 +421,14 @@ def rules_record(state):
 
 
 def own_rules_file(target, source, digest):
-    """True when the installer may replace or remove target: its own link or copy from 0.1
-    (recorded by path alone), or a copy unchanged since it was written (or equal to the
-    source)."""
+    """True when the installer may replace or remove target: its own link from 0.1, a copy
+    recorded by 0.1 by its path alone that still holds the rules 0.1 shipped, or a copy
+    unchanged since it was written; a copy equal to the current source counts too."""
     if os.path.islink(target):
         return os.path.realpath(target) == os.path.realpath(source)
-    if digest == LEGACY:
-        return os.path.isfile(target)
     current = file_hash(target)
+    if digest == LEGACY:
+        return current is not None and current in LEGACY_HASHES | {file_hash(source)}
     return current is not None and current in (digest, file_hash(source))
 
 

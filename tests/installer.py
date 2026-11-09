@@ -412,12 +412,13 @@ class InstallerTests(unittest.TestCase):
             self.assertIn(b'a line the user added', f.read())
         self.assertTrue(os.path.isfile(delete_copy))
 
-    def test_rules_copy_recorded_by_path_alone_is_refreshed_and_removed(self):
-        # 0.1 recorded the git rules by path and copied them on Windows: still ours
+    def legacy_install(self, content):
+        """An install whose record names the git rules by path alone, as 0.1 wrote it, with
+        content in that copy (0.1 copied the file on Windows) and no delete rules yet."""
         os.makedirs(self.path('.codex'))
         code, out = self.install('--guards')
         self.assertEqual(code, 0, out)
-        (git_copy, git_source), (delete_copy, _) = self.rules_copies()
+        (git_copy, _), (delete_copy, _) = self.rules_copies()
         record = self.path('.agentic-github-flow', '.state', 'install.json')
         with open(record, encoding='utf-8') as f:
             state = json.load(f)
@@ -425,8 +426,22 @@ class InstallerTests(unittest.TestCase):
         with open(record, 'w', encoding='utf-8') as f:
             json.dump(state, f)
         with open(git_copy, 'wb') as f:
-            f.write(b'# the git rules as 0.1 copied them\n')
+            f.write(content)
         os.remove(delete_copy)
+
+    def rules_of_0_1(self):
+        r = subprocess.run(['git', '-C', ROOT, 'show',
+                            'd0edd54:plugins/guards/policy/git-safety.rules'],
+                           capture_output=True)
+        if r.returncode != 0:
+            self.skipTest('the 0.1 rules need the history (commit d0edd54)')
+        return r.stdout
+
+    def test_rules_copy_recorded_by_path_alone_is_refreshed_and_removed(self):
+        # 0.1 recorded the git rules by path and copied them on Windows: a copy that still
+        # holds the 0.1 rules is the installer's own
+        self.legacy_install(self.rules_of_0_1())
+        (git_copy, git_source), (delete_copy, _) = self.rules_copies()
         code, out = self.install('--update')
         self.assertEqual(code, 0, out)
         with open(git_copy, 'rb') as a, open(git_source, 'rb') as b:
@@ -435,6 +450,22 @@ class InstallerTests(unittest.TestCase):
         code, out = self.install('--uninstall')
         self.assertEqual(code, 0, out)
         self.assertFalse(os.path.lexists(git_copy))
+        self.assertFalse(os.path.lexists(delete_copy))
+
+    def test_edited_rules_copy_recorded_by_path_alone_survives(self):
+        edited = self.rules_of_0_1() + b'# a line the user added\n'
+        self.legacy_install(edited)
+        (git_copy, _), (delete_copy, _) = self.rules_copies()
+        code, out = self.install('--update')
+        self.assertEqual(code, 0, out)
+        self.assertIn('changed since the install', out)
+        with open(git_copy, 'rb') as f:
+            self.assertEqual(f.read(), edited)
+        self.assertTrue(os.path.isfile(delete_copy))
+        code, out = self.install('--uninstall')
+        self.assertEqual(code, 0, out)
+        with open(git_copy, 'rb') as f:
+            self.assertEqual(f.read(), edited)
         self.assertFalse(os.path.lexists(delete_copy))
 
     @unittest.skipIf(WINDOWS, 'creating a symlink needs extra rights on Windows')

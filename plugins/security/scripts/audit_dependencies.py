@@ -699,6 +699,9 @@ OSV_SCANNER_ARGS = ['scan', 'source', '-r', '--no-resolve', '--all-packages', '-
                     '--format', 'json']
 
 
+PLATFORM = sys.platform  # read here, so a test can change it without changing shutil.which
+
+
 def run_osv_scanner(repo, reachability):
     """osv-scanner's answer for `repo`, compacted and with lockfile paths relative to it:
     {'version', 'args', 'exit', 'notes', 'output'}, or {'problem': ...} when it is absent or fails."""
@@ -707,11 +710,11 @@ def run_osv_scanner(repo, reachability):
         return {'problem': 'not installed; second opinion skipped (to install it: review-security sources.md, osv-scanner)'}
     args, notes = list(OSV_SCANNER_ARGS), []
     if reachability:
-        if sys.platform.startswith('linux'):
+        if PLATFORM.startswith('linux'):
             args.append('--call-analysis=rust')
         else:
             notes.append('osv-scanner reachability: skipped, its Rust call analysis reads ELF binaries '
-                         'only, so it runs on Linux, not on %s' % sys.platform)
+                         'only, so it runs on Linux, not on %s' % PLATFORM)
     try:
         v = subprocess.run([exe, '--version'], capture_output=True, text=True, errors='replace', timeout=30)
         m = re.search(r'version:?\s*v?(\d+(?:\.\d+)+)', v.stdout + v.stderr)

@@ -1,6 +1,6 @@
 {
   "name": "agentic-github-flow-core",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Core skills for a pull-request workflow with Claude Code and Codex: spec-first, repo-docs, ship-change and cleanup-merged.",
   "author": {
     "name": "MAI-Tech",

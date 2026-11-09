@@ -27,21 +27,27 @@ fails it, and stays.
    `parentSessionId` and `detached` false, as after a card), call `detach_session "self"`: a
    chat still nested under its predecessor would be archived with it. If it is refused, say so.
    A chat that `issue-handover` started from the CLI has no parent: nothing to do.
-1. **List** the sessions (`list_sessions`, limit 50). Issue chats carry the title form
-   (`<title prefix>#<issue> · <topic>`) or one of the older forms the settings list, and a
-   working directory in this repository or its worktrees. Requirements chats
-   (`<title prefix>Requirements · …`) and every chat of another form (a chat the user types in)
-   are left alone.
+1. **List** the sessions (`list_sessions`, limit 50; it gives each one's `startedBy`). Issue
+   chats carry the title form (`<title prefix>#<issue> · <topic>`), requirements chats
+   `<title prefix>Requirements · …` (method.md §2), or one of the older forms the settings list,
+   and a working directory in this repository or its worktrees. Requirements chats are checked
+   like any other issue chat. Every chat of another form (a chat the user types in) is left
+   alone.
 2. **Keep** this chat, every chat that is running (`isRunning`), any chat pinned or open on
-   screen, and the newest chat of each issue that is still open (it may wait for the user's
-   push or hold the issue's last report).
-3. **Check each other chat:** `get_session` gives its `worktreePath`; run the worktree check on
-   it. Archive only on `ok`, because archiving removes an app-made worktree. A chat without
-   `worktreePath` removes no worktree when archived: it passes. A worktree made with the
-   worktree tool stays on disk until `cleanup-merged` removes it after the merge.
-   **Never archive a chat from which another unarchived session descends** (`startedBy` is that
-   chat, or a session it started, at any depth): the app archives the chain with it, a running
-   chat included. Keep it until its descendants have detached (step 0). Keep, too, a chat
+   screen, and the newest chat of each issue that is still open, a requirements chat's parent
+   issue included (it may wait for the user's push or hold the issue's last report).
+3. **Check each other chat:** `get_session` gives its `worktreePath` and `parentSessionId`;
+   run the worktree check on the `worktreePath`. A chat without one is checked on the worktree
+   its working directory lies in (`originCwd`, else `cwd`, of `get_session`), when that is a
+   linked worktree (`git rev-parse --git-dir` differs from `--git-common-dir`): work there may
+   be only on this machine even though archiving does not remove it. Only a chat that worked in
+   the primary checkout, or in a folder that is gone, passes unchecked. Archive only on `ok`. A
+   worktree made with the worktree tool stays on disk until `cleanup-merged` removes it after
+   the merge.
+   **Never archive a chat from which another unarchived session descends** (the `startedBy` of
+   `list_sessions` is that chat, or a session it started, at any depth; the `parentSessionId` of
+   `get_session` gives the same link from the child's side): the app archives the chain with
+   it, a running chat included. Keep it until its descendants have detached (step 0). Keep, too, a chat
    whose worktree another unarchived chat is working in (a branch in flight it took over):
    archiving would remove that chat's working folder.
 4. **Archive** with `archive_session` and `reason`: `finished issue chat #<issue>; worktree

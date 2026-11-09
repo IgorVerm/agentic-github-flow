@@ -95,7 +95,9 @@ chat `<title prefix>#<issue> · <topic>`; a requirements chat
 with `set_session_title`. `<issue>` is the issue the chat works on; work without an issue gets
 one first (skill `open-issue`). `start_issue_chat.py` refuses a title of any other form
 (`--prefix` carries the title prefix). A chat the user types in, for an overview or to start
-chains, is not an issue chat and needs no form.
+chains, is not an issue chat and needs no form. `archive-finished-chats` checks requirements
+chats like any other issue chat: the newest chat of each open issue stays, and any other one
+goes once its worktree passes the worktree check.
 
 ## 3. One issue, one chat
 
@@ -126,9 +128,12 @@ chains, is not an issue chat and needs no form.
 9. **Work in flight stays in its worktree.** A chat that takes over a branch in flight, named in
    the issue's newest state comment, works in that branch's worktree; its own new worktree stays
    unused until the `cleanup-merged` skill removes it.
-10. **Review comments on an open pull request** are work on the same branch: the user asks the
-    chat that opened it (unarchived from the Archived list if needed), or opens a chat on the
-    issue that takes the branch over as work in flight.
+10. **Review comments on an open pull request** are work on the same branch, done by a chat
+    that takes the branch over as work in flight (item 9): the user opens a chat on the issue,
+    or a running chat starts one, with the branch and its worktree named in a state comment
+    (when that worktree is gone, a new one on the branch from `origin/<branch>`).
+    The chat that opened the pull request has archived itself and may have no checkout left;
+    it is not unarchived for this.
 
 ## 4. The chat lifecycle
 

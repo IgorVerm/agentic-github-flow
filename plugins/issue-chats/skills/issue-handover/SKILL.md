@@ -25,9 +25,9 @@ for the push runs in the foreground of the turn of the task's work.
 chat and archive itself without asking; it never covers a push, a merge or marking a pull
 request ready. This chat pushes only after the user's yes for this push, typed in this chat.
 
-**Never archive this chat** while any of these holds: its worktree fails the worktree check
-(`python3 <plugin>/scripts/chat_archivable.py <worktree>` says `keep:`, as it does while a
-commit of this chat is not on GitHub); a run, subagent or background job of it is still
+**Never archive this chat** while any of these holds: its worktree, or a task worktree it
+worked in, fails the worktree check (`python3 <plugin>/scripts/chat_archivable.py <worktree>`
+says `keep:`, as it does while a commit of this chat is not on GitHub); a run, subagent or background job of it is still
 running; another session it started is not detached and is running or fails the worktree check,
 because archiving takes its finished side sessions along and removes their worktrees; a
 question to the user is unanswered and the next step needs its answer (any other question waits
@@ -68,8 +68,9 @@ worktree check reads HEAD. Deleting that branch later is the user's call.
    the ready label and a comment on what is open, and you pick the next. No ready issue: start
    nothing, go to step 6.
 4. **Check before you start anything:** no run of yours is still going and no half-made chat of
-   an earlier attempt exists. The worktree check of your own worktree is expected to say `keep:`
-   while your branch waits for the push: that stops only the archive, never the start.
+   an earlier attempt exists. The worktree check of your own worktree (the `worktreePath` of
+   `get_session "self"`, or, for a chat with none, the worktree it worked in) is expected to say
+   `keep:` while your branch waits for the push: that stops only the archive, never the start.
 5. **Start the next chat and claim its issue.** Each numbered call stands alone, in the
    foreground of this turn; any failure goes to the fallback below.
    1. **Its worktree:** always a new one, made with the settings' worktree tool from the

@@ -323,9 +323,11 @@ class SweepBranchesTests(Repos):
             return [line for line in f.read().splitlines() if line.startswith(kind)]
 
     def scratch(self, name, base='main'):
-        """A local branch whose tip nothing else holds; returns the tip."""
+        """A local branch whose tip nothing else holds, a commit of its own (the name is its
+        message, so two made in the same second differ); returns the tip."""
         tree = self.tip(base + '^{tree}')
-        tip = self.git(self.repo, 'commit-tree', tree, '-p', base, '-m', 'probe').stdout.strip()
+        tip = self.git(self.repo, 'commit-tree', tree, '-p', base, '-m',
+                       'probe ' + name).stdout.strip()
         self.git(self.repo, 'branch', name, tip)
         return tip
 

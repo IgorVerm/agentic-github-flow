@@ -32,7 +32,8 @@ policy is and which data may go into a prompt, and follow the answer.
   - changes to these rules, to permission or security settings, to hooks.
 - **When the user describes a problem or asks a question, the deliverable is your assessment.**
   Report what you found; apply a fix when asked for one.
-- **Large work with open requirements starts with a specification:** the `spec-first` skill.
+- **Large work with open requirements starts with a specification:** the `spec-first` skill;
+  `requirements` splits it into ready issues.
 - **Before long or unattended work, write down when it is done:** the end state, the command
   that proves it, and when you stop because no defensible way forward is left.
 - **After two failed corrections of the same problem, stop.** Tell the user what you tried and

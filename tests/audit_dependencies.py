@@ -112,6 +112,33 @@ flask>=2.0
 -e ./local
 """
 
+REQUIREMENTS_MIXED = """--index-url https://pypi.org/simple
+-r requirements-base.txt
+-r base.txt
+-c constraints.txt
+numpy==1.26.0 \\
+    --hash=sha256:aaaa \\
+    --hash=sha256:bbbb
+django == 5.2.1  # spaced pin
+flask>=3
+fastapi~=0.115
+uvicorn
+pydantic==2.*
+starlette===0.48.0
+mylib @ https://example.com/mylib-1.0.tar.gz
+git+https://github.com/org/tool.git#egg=tool
+./vendor/pkg
+-e ./local
+--frobnicate
+-rbase.txt
+-r https://example.com/requirements.txt
+-r ../outside/requirements-shared.txt
+-r requirements/base.txt
+scipy==1.14.1 --hash sha256:cccc
+vendor/pkg
+tool-1.0-py3-none-any.whl
+"""
+
 
 def ghsa(vid, severity, name, ecosystem, fixed, aliases=(), summary='s', cvss=None):
     rec = {'id': vid, 'summary': summary, 'aliases': list(aliases),
@@ -223,13 +250,53 @@ class ParserTests(unittest.TestCase):
         got = self.parse('requirements.txt', REQUIREMENTS)
         self.assertEqual(sorted(got), [('numpy', '1.26.0'), ('requests', '2.19.0')])
 
+    def test_requirements_name_every_line_they_cannot_audit(self):
+        path = write(self.dir, 'requirements.txt', REQUIREMENTS_MIXED)
+        read = {os.path.realpath(write(self.dir, 'requirements-base.txt', 'numpy==1.26.0\n')),
+                os.path.realpath(write(self.dir, 'requirements/base.txt', 'numpy==1.26.0\n')),
+                os.path.realpath(path)}
+        write(self.dir, 'base.txt', 'numpy==1.26.0\n')  # exists, but this run does not read it
+        unaudited = []
+        got = audit.parse_requirements(path, 'requirements.txt', unaudited, read)
+        self.assertEqual([(p.name, p.version) for p in got],
+                         [('numpy', '1.26.0'), ('django', '5.2.1'), ('scipy', '1.14.1')])
+        rows = [(u['line'], u['requirement'], u['reason'].split(':')[0]) for u in unaudited]
+        self.assertEqual(rows, [
+            (3, '-r base.txt', 'included file not read'),
+            (4, '-c constraints.txt', 'included file not read'),
+            (9, 'flask>=3', 'not pinned with =='),
+            (10, 'fastapi~=0.115', 'not pinned with =='),
+            (11, 'uvicorn', 'no version'),
+            (12, 'pydantic==2.*', 'not pinned with =='),
+            (13, 'starlette===0.48.0', 'not pinned with =='),
+            (14, 'mylib', 'direct URL'),
+            (15, 'git+https://github.com/org/tool.git#egg=tool', 'URL or path'),
+            (16, './vendor/pkg', 'URL or path'),
+            (17, '-e ./local', 'editable or local requirement'),
+            (18, '--frobnicate', 'unknown option'),
+            (19, '-rbase.txt', 'included file not read'),
+            (20, '-r https://example.com/requirements.txt', 'remote include'),
+            (21, '-r ../outside/requirements-shared.txt', 'included file not read'),
+            (24, 'vendor/pkg', 'URL or path'),
+            (25, 'tool-1.0-py3-none-any.whl', 'URL or path'),
+        ])
+        self.assertTrue(all(u['lockfile'] == 'requirements.txt' for u in unaudited))
+        # Without a list to fill, the parser still returns the pins (the other callers' contract).
+        self.assertEqual(len(audit.parse_requirements(path, 'requirements.txt')), 3)
+        # Without the set of files read, no include counts as audited.
+        unaudited = []
+        audit.parse_requirements(path, 'requirements.txt', unaudited)
+        self.assertIn('-r requirements-base.txt', [u['requirement'] for u in unaudited])
+
     def test_find_lockfiles_skips_dependency_folders(self):
         write(self.dir, 'web/package-lock.json', PACKAGE_LOCK_V1)
         write(self.dir, 'web/node_modules/x/package-lock.json', PACKAGE_LOCK_V1)
         write(self.dir, 'tools/requirements-dev.txt', REQUIREMENTS)
         write(self.dir, '.venv/lib/requirements.txt', REQUIREMENTS)
+        write(self.dir, 'api/requirements/base.txt', REQUIREMENTS)
+        write(self.dir, 'api/notes.txt', 'not a requirements file')
         rels = [os.path.relpath(p, self.dir).replace(os.sep, '/') for p in audit.find_lockfiles(self.dir)]
-        self.assertEqual(rels, ['tools/requirements-dev.txt', 'web/package-lock.json'])
+        self.assertEqual(rels, ['api/requirements/base.txt', 'tools/requirements-dev.txt', 'web/package-lock.json'])
 
 
 class SeverityTests(unittest.TestCase):
@@ -364,6 +431,30 @@ class RunTests(unittest.TestCase):
             audit.npm_audit('.')
         self.assertIn('--registry=https://registry.npmjs.org/', run.call_args.args[0])
 
+    def test_unaudited_requirements_in_output_json_and_exit_code(self):
+        write(self.repo, 'api/requirements.txt', 'numpy==1.26.0\nflask>=3\n')
+        code, out, err = self.run_tool()
+        self.assertEqual(code, 0, out + err)  # moderate is below the default level high
+        self.assertIn('unaudited\tflask>=3\tnot pinned with ==: the installed version is unknown\t'
+                      'api/requirements.txt:2', out)
+        self.assertIn('1 package(s) in 1 lockfile(s); 0 finding(s); 1 requirement(s) not audited', out)
+        self.assertEqual(self.run_tool('--level', 'moderate')[0], 1)
+        code, out, _ = self.run_tool('--json')
+        data = json.loads(out)
+        self.assertEqual(data['unaudited'], [{'lockfile': 'api/requirements.txt', 'line': 2,
+                                              'requirement': 'flask>=3', 'reason':
+                                              'not pinned with ==: the installed version is unknown'}])
+        write(self.repo, 'api/requirements.txt', 'numpy==1.26.0\n-r requirements/base.txt\n')
+        write(self.repo, 'api/requirements/base.txt', 'numpy==1.26.0\n')
+        code, out, _ = self.run_tool('--level', 'moderate')
+        self.assertEqual(code, 0, out)  # the include is read by this run, so nothing is unaudited
+        self.assertNotIn('not audited', out)
+        write(self.repo, 'api/requirements.txt', 'numpy==1.26.0\n-r ../.config/requirements-x.txt\n')
+        write(self.repo, '.config/requirements-x.txt', 'flask>=3\n')
+        code, out, _ = self.run_tool('--level', 'moderate')
+        self.assertEqual(code, 1, out)  # dot-folders are not read, so the include is named
+        self.assertIn('unaudited\t-r ../.config/requirements-x.txt\tincluded file not read', out)
+
     def test_this_repository_has_no_lockfile(self):
         code, out, _ = self.run_tool(repo=ROOT)
         self.assertEqual(code, 0)
@@ -472,6 +563,243 @@ class NpmComparisonTests(unittest.TestCase):
                                'only npm: GHSA-c; only OSV: GHSA-b')
         with unittest.mock.patch.object(audit, 'npm_audit', return_value=(None, 'npm not on PATH')):
             self.assertIn('skipped, npm not on PATH', audit.compare_with_npm(findings, '.', 'package-lock.json'))
+
+
+FAKE_OSV_SCANNER = """import json, os, sys
+with open(os.environ['FAKE_OSV_ARGV'], 'a') as f:
+    f.write(json.dumps(sys.argv[1:]) + '\\n')
+if sys.argv[1:] == ['--version']:
+    print('osv-scanner version: ' + os.environ.get('FAKE_OSV_VERSION', '2.7.0'))
+    print('commit: n/a')
+    sys.exit(0)
+sys.stderr.write('Scanning dir ...\\n' + os.environ.get('FAKE_OSV_STDERR', ''))
+if os.environ.get('FAKE_OSV_JSON'):
+    with open(os.environ['FAKE_OSV_JSON']) as f:
+        sys.stdout.write(f.read())
+sys.exit(int(os.environ.get('FAKE_OSV_EXIT', '0')))
+"""
+
+
+def scanner_output(repo):
+    """An answer shaped like osv-scanner v2.7.0's `--format json` (pkg/models/results.go): paths
+    absolute, full OSV records under `vulnerabilities`, alias groups with `max_severity`."""
+    def pkg(eco, name, version, groups=()):
+        return {'package': {'name': name, 'version': version, 'ecosystem': eco, 'purl': 'pkg:x/' + name},
+                'vulnerabilities': [{'id': i, 'summary': 'full record', 'affected': []} for g in groups for i in g['ids']],
+                'groups': list(groups)}
+    return {'results': [
+        {'source': {'path': os.path.join(repo, 'web', 'package-lock.json'), 'type': 'lockfile'}, 'packages': [
+            pkg('npm', 'next', '16.2.10', [
+                {'ids': ['CVE-2026-9'], 'aliases': ['CVE-2026-9', 'GHSA-next-1'], 'max_severity': '9.8'},
+                {'ids': ['GHSA-next-2'], 'aliases': ['GHSA-next-2'], 'max_severity': '5.3'}]),
+            pkg('npm', 'left-pad', '1.3.0', [{'ids': ['GHSA-leftpad'], 'aliases': ['GHSA-leftpad'], 'max_severity': '7.5'}]),
+            pkg('npm', 'eslint', '9.0.0'),
+            pkg('npm', 'minimatch', '3.0.4', [{'ids': ['GHSA-minimatch'], 'aliases': ['GHSA-minimatch'], 'max_severity': '7.5'}]),
+        ]},
+        {'source': {'path': os.path.join(repo, 'Cargo.lock'), 'type': 'lockfile'}, 'packages': [
+            pkg('crates.io', 'quick-xml', '0.39.4', [
+                {'ids': ['RUSTSEC-2026-0194'], 'aliases': ['RUSTSEC-2026-0194'], 'max_severity': '7.5',
+                 'experimental_analysis': {'RUSTSEC-2026-0194': {'called': False, 'unimportant': False}}},
+                {'ids': ['RUSTSEC-2026-0001'], 'aliases': ['RUSTSEC-2026-0001'], 'max_severity': ''}]),
+        ]},
+        {'source': {'path': os.path.join(repo, 'tools', 'go.mod'), 'type': 'lockfile'}, 'packages': [
+            pkg('Go', 'github.com/x/y', '1.0.0'),
+        ]},
+    ], 'experimental_config': {'licenses': {'summary': False, 'allowlist': None}}}
+
+
+class NetworkErrorTests(unittest.TestCase):
+    def test_a_reply_cut_off_is_a_network_error_not_a_crash(self):
+        # Measured 2026-11-08 through the sandbox proxy: IncompleteRead escaped and exited 1 like a finding.
+        import http.client
+        client = audit.Online()
+        with unittest.mock.patch.object(audit.urllib.request, 'urlopen',
+                                        side_effect=http.client.IncompleteRead(b'x', 10)):
+            with self.assertRaises(RuntimeError):
+                client.vuln('GHSA-x')
+
+
+# A PATH with the system folders the fake's wrapper needs and none where a user installs tools,
+# so an osv-scanner installed on the machine does not change the result.
+NO_OSV_SCANNER_PATH = (os.path.join(os.environ.get('SystemRoot', r'C:\\Windows'), 'System32')
+                       if os.name == 'nt' else os.pathsep.join(['/usr/bin', '/bin']))
+
+
+class OsvScannerTests(unittest.TestCase):
+    """The second opinion, against a fake osv-scanner and recorded answers."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix='audit-osv-')
+        self.repo = os.path.join(self.dir, 'repo')
+        write(self.repo, 'web/package-lock.json', PACKAGE_LOCK_V3)
+        write(self.repo, 'Cargo.lock', CARGO_LOCK)
+        self.bin = os.path.join(self.dir, 'bin')
+        script = write(self.dir, 'fake_osv_scanner.py', FAKE_OSV_SCANNER)
+        if os.name == 'nt':  # shutil.which finds a .cmd through PATHEXT
+            write(self.bin, 'osv-scanner.cmd', '@"%s" "%s" %%*\n' % (sys.executable, script))
+        else:
+            fake = write(self.bin, 'osv-scanner', '#!/bin/sh\nexec "%s" "%s" "$@"\n' % (sys.executable, script))
+            os.chmod(fake, 0o755)
+        self.argv_log = os.path.join(self.dir, 'argv.log')
+        self.env = {'PATH': os.pathsep.join([self.bin, NO_OSV_SCANNER_PATH]), 'FAKE_OSV_ARGV': self.argv_log,
+                    'FAKE_OSV_JSON': write(self.dir, 'scanner.json', scanner_output(self.repo)),
+                    'FAKE_OSV_EXIT': '1'}
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def fake(self, **env):
+        return unittest.mock.patch.dict(os.environ, dict(self.env, **env))
+
+    def calls(self):
+        with open(self.argv_log) as f:
+            return [json.loads(l) for l in f]
+
+    def recorded(self, answer):
+        return write(self.dir, 'answers-osv.json', dict(ANSWERS, osv_scanner=answer))
+
+    def test_run_compacts_the_answer_and_makes_paths_relative(self):
+        with self.fake():
+            answer = audit.run_osv_scanner(self.repo, False)
+        self.assertEqual(self.calls()[1], ['scan', 'source', '-r', '--no-resolve', '--all-packages',
+                                           '--x-disable-plugins=directory', '--format', 'json', self.repo])
+        self.assertEqual((answer['version'], answer['exit'], answer['notes']), ('2.7.0', 1, []))
+        paths = [r['source']['path'] for r in answer['output']['results']]
+        self.assertEqual(paths, ['web/package-lock.json', 'Cargo.lock', 'tools/go.mod'])  # '/' on every system
+        first = answer['output']['results'][0]['packages'][0]
+        self.assertEqual(sorted(first), ['groups', 'package'])  # the full records are not kept
+        self.assertEqual(first['package'], {'ecosystem': 'npm', 'name': 'next', 'version': '16.2.10'})
+
+    def test_absent_failing_and_empty(self):
+        with unittest.mock.patch.dict(os.environ, {'PATH': NO_OSV_SCANNER_PATH}):
+            answer = audit.run_osv_scanner(self.repo, False)
+        self.assertIn('not installed; second opinion skipped', answer['problem'])
+        lines, summary = audit.compare_with_osv_scanner([], [], answer)
+        self.assertEqual(len(lines), 1)
+        self.assertTrue(lines[0].startswith('osv-scanner: not installed'), lines)
+        with self.fake(FAKE_OSV_EXIT='127', FAKE_OSV_JSON='', FAKE_OSV_STDERR='cannot reach api.osv.dev\n'):
+            answer = audit.run_osv_scanner(self.repo, False)
+        self.assertEqual(answer['problem'], 'failed (exit 127: cannot reach api.osv.dev); second opinion skipped')
+        with self.fake(FAKE_OSV_EXIT='1', FAKE_OSV_JSON=write(self.dir, 'bad.json', '{not json')):
+            self.assertIn('gave no JSON (exit 1)', audit.run_osv_scanner(self.repo, False)['problem'])
+        with self.fake(FAKE_OSV_EXIT='128', FAKE_OSV_JSON=''):
+            self.assertEqual(audit.run_osv_scanner(self.repo, False)['output'], {'results': []})
+
+    def test_an_answer_in_an_unexpected_shape_skips_the_second_opinion_not_the_audit(self):
+        odd = write(self.dir, 'odd.json', {'results': [{'packages': [{'groups': ['not a group']}]}]})
+        with self.fake(FAKE_OSV_EXIT='1', FAKE_OSV_JSON=odd):
+            self.assertIn('unexpected shape (exit 1)', audit.run_osv_scanner(self.repo, False)['problem'])
+        recorded = self.recorded({'version': '2.7.0', 'exit': 1, 'notes': [], 'output': {'results': ['x']}})
+        r = subprocess.run([sys.executable, TOOL, self.repo, '--offline', recorded], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)  # our critical finding, not a crash
+        self.assertIn('osv-scanner: answer in an unexpected shape (TypeError); second opinion skipped', r.stdout)
+        self.assertNotIn('Traceback', r.stderr)
+
+    def test_reachability_runs_on_linux_only(self):
+        with self.fake(), unittest.mock.patch.object(audit.sys, 'platform', 'darwin'):
+            answer = audit.run_osv_scanner(self.repo, True)
+        self.assertNotIn('--call-analysis=rust', self.calls()[-1])
+        self.assertIn('reads ELF binaries only', answer['notes'][0])
+        with self.fake(), unittest.mock.patch.object(audit.sys, 'platform', 'linux'):
+            answer = audit.run_osv_scanner(self.repo, True)
+        self.assertIn('--call-analysis=rust', self.calls()[-1])
+        self.assertEqual(answer['notes'], [])
+
+    def test_comparison_per_package_and_advisory(self):
+        with self.fake():
+            answer = audit.run_osv_scanner(self.repo, False)
+        r = subprocess.run([sys.executable, TOOL, self.repo, '--offline', self.recorded(answer)],
+                           capture_output=True, text=True)
+        out = r.stdout
+        self.assertIn('osv-scanner 2.7.0: 6 package(s), 6 advisory(ies); ours: 6 package(s), 6 finding(s); '
+                      'in both: 5; only ours: 1; only osv-scanner: 1', out)
+        self.assertIn('osv-scanner packages: only ours: 1 (npm:postcss@8.4.31); '
+                      'only osv-scanner: 1 (Go:github.com/x/y@1.0.0)', out)
+        self.assertIn('only-ours\tGHSA-postcss\tnpm:postcss@8.4.31\tweb/package-lock.json', out)
+        self.assertIn('only-osv-scanner\tGHSA-leftpad\tnpm:left-pad@1.3.0\t7.5\tweb/package-lock.json', out)
+        self.assertIn('not-reachable\tRUSTSEC-2026-0194\tcrates.io:quick-xml@0.39.4\t(osv-scanner call analysis; '
+                      'information only)', out)
+        self.assertNotIn('not the pinned', out)
+        self.assertIn('critical\tGHSA-next-1', out)  # matched through the alias, reported once, by us
+        self.assertEqual(r.returncode, 1)
+        data = json.loads(subprocess.run([sys.executable, TOOL, self.repo, '--offline', self.recorded(answer), '--json'],
+                                         capture_output=True, text=True).stdout)
+        osv = data['osv_scanner']
+        self.assertEqual([o['id'] for o in osv['only_osv_scanner']], ['GHSA-leftpad'])
+        self.assertEqual([o['id'] for o in osv['only_ours']], ['GHSA-postcss'])
+        self.assertEqual(osv['reachability'], [{'id': 'RUSTSEC-2026-0194', 'package': 'crates.io:quick-xml@0.39.4',
+                                                'state': 'not-reachable'}])
+
+    def test_its_findings_never_change_the_exit_code(self):
+        # Only a moderate of ours stands; osv-scanner adds a critical: the exit follows our audit alone.
+        os.remove(os.path.join(self.repo, 'Cargo.lock'))
+        write(self.repo, 'web/package-lock.json', {'lockfileVersion': 3, 'packages': {
+            '': {'dependencies': {'next': '16.2.10'}}, 'node_modules/next': {'version': '16.2.10'}}})
+        answers = dict(ANSWERS, queries={'npm:next@16.2.10': ['GHSA-next-2']})
+        answer = {'version': '2.7.0', 'exit': 1, 'notes': [], 'output': {'results': [
+            {'source': {'path': 'web/package-lock.json'}, 'packages': [
+                {'package': {'ecosystem': 'npm', 'name': 'next', 'version': '16.2.10'},
+                 'groups': [{'ids': ['GHSA-crit'], 'aliases': ['GHSA-crit'], 'max_severity': '10.0'},
+                            {'ids': ['GHSA-next-2'], 'aliases': ['GHSA-next-2']}]}]}]}}
+        path = write(self.dir, 'exit.json', dict(answers, osv_scanner=answer))
+        r = subprocess.run([sys.executable, TOOL, self.repo, '--offline', path], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn('only-osv-scanner\tGHSA-crit\tnpm:next@16.2.10\t10.0', r.stdout)
+
+    def test_pin_names_and_switches(self):
+        self.assertEqual(audit.package_key('PyPI', 'Typing_Extensions', '4.0'), 'PyPI:typing-extensions@4.0')
+        self.assertEqual(audit.package_key('npm', 'Foo_Bar', '1'), 'npm:Foo_Bar@1')
+        with self.fake(FAKE_OSV_VERSION='2.5.1'):
+            answer = audit.run_osv_scanner(self.repo, False)
+        lines, _ = audit.compare_with_osv_scanner([], [], answer)
+        self.assertEqual(lines[0], 'osv-scanner: version 2.5.1, not the pinned 2.7.0; compared anyway')
+        path = self.recorded(answer)
+        out = subprocess.run([sys.executable, TOOL, self.repo, '--offline', path, '--no-osv-scanner'],
+                             capture_output=True, text=True).stdout
+        self.assertNotIn('osv-scanner', out)
+        out = subprocess.run([sys.executable, TOOL, self.repo, '--offline', write(self.dir, 'plain.json', ANSWERS)],
+                             capture_output=True, text=True).stdout
+        self.assertIn('osv-scanner: not in the recorded answers', out)
+
+    def test_packagist_v_versions_and_a_package_in_two_lockfiles(self):
+        # composer.lock keeps `v2.0.0`; this audit strips it, osv-scanner 2.7.0 keeps it (measured
+        # 2026-11-08 by the review: `Monolog/Monolog@v2.1.0`). The same advisory on the same package in
+        # two lockfiles is one advisory on each side.
+        write(self.repo, 'api/composer.lock', COMPOSER_LOCK)
+        write(self.repo, 'admin/composer.lock', COMPOSER_LOCK)
+        os.remove(os.path.join(self.repo, 'Cargo.lock'))
+        os.remove(os.path.join(self.repo, 'web', 'package-lock.json'))
+        monolog = {'package': {'ecosystem': 'Packagist', 'name': 'Monolog/Monolog', 'version': 'v2.0.0'},
+                   'groups': [{'ids': ['GHSA-monolog'], 'aliases': ['GHSA-monolog'], 'max_severity': '7.5'}]}
+        phpunit = {'package': {'ecosystem': 'Packagist', 'name': 'phpunit/phpunit', 'version': '9.0.0'}, 'groups': []}
+        answer = {'version': '2.7.0', 'exit': 1, 'notes': [], 'output': {'results': [
+            {'source': {'path': 'api/composer.lock'}, 'packages': [monolog, phpunit]},
+            {'source': {'path': 'admin/composer.lock'}, 'packages': [monolog, phpunit]}]}}
+        r = subprocess.run([sys.executable, TOOL, self.repo, '--offline', self.recorded(answer)],
+                           capture_output=True, text=True)
+        self.assertIn('osv-scanner 2.7.0: 2 package(s), 1 advisory(ies); ours: 2 package(s), 1 finding(s); '
+                      'in both: 1; only ours: 0; only osv-scanner: 0', r.stdout)
+        self.assertIn('osv-scanner packages: only ours: 0 (none); only osv-scanner: 0 (none)', r.stdout)
+
+    def test_record_and_replay(self):
+        record = os.path.join(self.dir, 'recorded.json')
+        client = audit.Online(record)
+        with self.fake():
+            client.osv_scanner(self.repo, False)
+        client.close()
+        replayed = audit.Offline(record).osv_scanner('/elsewhere', False)
+        self.assertEqual(replayed['output']['results'][1]['source']['path'], 'Cargo.lock')
+
+    def test_without_a_lockfile_it_still_names_what_osv_scanner_found(self):
+        empty = os.path.join(self.dir, 'empty')
+        os.makedirs(empty)
+        answer = {'version': '2.7.0', 'exit': 0, 'notes': [], 'output': {'results': [
+            {'source': {'path': 'go.mod'}, 'packages': [
+                {'package': {'ecosystem': 'Go', 'name': 'github.com/x/y', 'version': '1.0.0'}, 'groups': []}]}]}}
+        r = subprocess.run([sys.executable, TOOL, empty, '--offline', self.recorded(answer)], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0)
+        self.assertIn('no lockfile found', r.stdout)
+        self.assertIn('only osv-scanner: 1 (Go:github.com/x/y@1.0.0)', r.stdout)
 
 
 if __name__ == '__main__':

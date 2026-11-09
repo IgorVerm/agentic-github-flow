@@ -5,7 +5,7 @@ Run it through install.sh (macOS, Linux) or install.ps1 (Windows): they find Pyt
 the clone exists in ~/.agentic-github-flow and start this file from it.
 
 Usage:
-  installer.py [--with security,web-deploy] [--guards] [--overlay <git-url-or-path>]...
+  installer.py [--with security,web-deploy,issue-chats] [--guards] [--overlay <git-url-or-path>]...
                [--no-claude] [--no-codex] [--claude-bin <path>] [--codex-bin <path>]
   installer.py --update      pull the clone, then repeat the recorded install
   installer.py --uninstall   undo what the record says this installer added
@@ -16,7 +16,8 @@ What it does, per client (Claude Code, Codex):
   imports there: measured with `codex debug prompt-input`, codex-cli 0.164). Lines outside the
   block are never touched. A symlinked file is refused, before anything changes.
 - Plugins: registers this clone as the `agentic-github-flow` marketplace and installs the core
-  plugin, plus those named with --with (web-deploy brings security).
+  plugin, plus those named with --with (web-deploy brings security; issue-chats builds on core,
+  which is always installed, and brings a Claude Code hook that guards archiving a chat).
 - Guards (--guards): the guards plugin (Claude hooks), the ask and deny lists merged into
   ~/.claude/settings.json (a backup is kept), the Codex execpolicy rules linked into
   ~/.codex/rules/ and the git guard added to ~/.codex/hooks.json.
@@ -43,7 +44,8 @@ import sys
 CLONE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MARKET = 'agentic-github-flow'
 PLUGINS = {'core': 'agentic-github-flow-core', 'security': 'agentic-github-flow-security',
-           'web-deploy': 'agentic-github-flow-web-deploy', 'guards': 'agentic-github-flow-guards'}
+           'web-deploy': 'agentic-github-flow-web-deploy',
+           'issue-chats': 'agentic-github-flow-issue-chats', 'guards': 'agentic-github-flow-guards'}
 NEEDS = {'web-deploy': ['security']}
 BEGIN = '<!-- >>> agentic-github-flow >>> -->'
 END = '<!-- <<< agentic-github-flow <<< -->'
@@ -618,7 +620,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         prog='install', description='Install agentic-github-flow for Claude Code and Codex.')
     parser.add_argument('--with', dest='with_plugins', default='',
-                        help='extra plugins, comma-separated: security, web-deploy')
+                        help='extra plugins, comma-separated: security, web-deploy, issue-chats')
     parser.add_argument('--guards', action='store_true',
                         help='also install the git and personal-data guards')
     parser.add_argument('--overlay', action='append', default=[], metavar='GIT-URL-OR-PATH',
@@ -634,7 +636,8 @@ def main(argv=None):
     args.with_plugins = [w.strip() for w in args.with_plugins.split(',') if w.strip()]
     unknown = [w for w in args.with_plugins if w not in PLUGINS or w == 'guards']
     if unknown:
-        parser.error('unknown plugin(s) for --with: %s (choose from security, web-deploy; '
+        parser.error('unknown plugin(s) for --with: %s (choose from security, web-deploy, '
+                     'issue-chats; '
                      'guards come with --guards)' % ', '.join(unknown))
     if sum(map(bool, (args.update, args.uninstall))) > 1:
         parser.error('--update and --uninstall do not combine')

@@ -11,7 +11,8 @@ point at them), still in the temporary homes, and checks the plugins they report
 Cases: install over existing files, an idempotent second run, --update after a change in the
 source, --uninstall leaving CLAUDE.md and AGENTS.md byte-identical (or absent when they were),
 a symlinked ~/.codex/AGENTS.md refused before any change, a missing client skipped, --guards
-merging and removing the settings, rules and hook, and an overlay in both blocks.
+merging and removing the settings, rules and hook, --with issue-chats installed beside core in
+both clients and kept on a plain rerun, an unknown plugin refused, and an overlay in both blocks.
 """
 import json
 import os
@@ -276,6 +277,32 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIsNone(self.read('.claude', 'CLAUDE.md'))
         self.assertIsNone(self.read('.codex', 'AGENTS.md'))
+
+    def test_issue_chats_with_core_kept_on_a_plain_rerun_and_removed(self):
+        code, out = self.install('--with', 'issue-chats')
+        self.assertEqual(code, 0, out)
+        wanted = {'agentic-github-flow-core', 'agentic-github-flow-issue-chats'}
+        for client in ('claude', 'codex'):
+            self.assertLessEqual(wanted, set(self.plugins(client)), out)
+            self.assertNotIn('agentic-github-flow-guards', self.plugins(client))
+        code, out = self.install()  # a plain second run keeps what the first installed
+        self.assertEqual(code, 0, out)
+        for client in ('claude', 'codex'):
+            self.assertLessEqual(wanted, set(self.plugins(client)), out)
+        settings = self.read('.claude', 'settings.json')
+        if settings:  # the installer adds no permission rule for the plugin's scripts
+            self.assertNotIn(b'start_issue_chat', settings)
+        code, out = self.install('--uninstall')
+        self.assertEqual(code, 0, out)
+        for client in ('claude', 'codex'):
+            self.assertEqual({k for k in self.plugins(client) if k.startswith('agentic-github-flow')},
+                             set())
+
+    def test_unknown_plugin_is_refused(self):
+        code, out = self.install('--with', 'issue-chat')
+        self.assertEqual(code, 2, out)
+        self.assertIn('issue-chats', out)
+        self.assertIsNone(self.read('.claude', 'CLAUDE.md'))
 
     @unittest.skipIf(WINDOWS, 'creating a symlink needs extra rights on Windows')
     def test_symlinked_codex_agents_md_is_refused_before_any_change(self):

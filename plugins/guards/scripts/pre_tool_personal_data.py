@@ -67,7 +67,11 @@ The user's settings, beside `personal-data` in `${XDG_CONFIG_HOME:-~/.config}/ag
   `mcp__<name>__*` tools pass like LOCAL_MCP. Listing a server is the user's statement that it is
   local: the hook cannot check it.
 These files, like `personal-data`, turn the check off where they say so: whoever can write them
-(the user, or an agent the user lets write outside its workspace) decides what is judged.
+(the user, or an agent the user lets write outside its workspace) decides what is judged. When
+the settings folder lies inside a session folder other than the home folder itself (a repository
+that points XDG_CONFIG_HOME or HOME into itself through its own settings), `exempt-dirs` and
+`local-mcp` are ignored. A line
+that cannot be read (a NUL byte, bytes that are not UTF-8) is dropped; the rest still counts.
 
 An input it cannot read passes, as with the git guard: a fault must not stop all work.
 
@@ -154,29 +158,73 @@ def _run(args):
         return ''
 
 
+def settings_dir():
+    return os.path.join(os.environ.get('XDG_CONFIG_HOME') or os.path.expanduser('~/.config'),
+                        'agentic-github-flow')
+
+
 def config_lines(name):
     """The entries of the user's settings file `name`: stripped lines, without blanks and `#`
-    comments; [] when the file is missing or unreadable."""
-    base = os.environ.get('XDG_CONFIG_HOME') or os.path.expanduser('~/.config')
+    comments; [] when the file is missing or unreadable. Bytes that are not UTF-8 spoil only
+    their own line."""
     try:
-        with open(os.path.join(base, 'agentic-github-flow', name), encoding='utf-8') as f:
+        with open(os.path.join(settings_dir(), name), encoding='utf-8', errors='replace') as f:
             lines = f.read().splitlines()
-    except (OSError, UnicodeDecodeError):
+    except OSError:
         return []
     return [line.strip() for line in lines if line.strip() and not line.strip().startswith('#')]
 
 
-def local_mcp():
+def session_places(cwd):
+    """The event's cwd and, when Claude Code names it, the session's project folder."""
+    return [cwd] + [p for p in (os.environ.get('CLAUDE_PROJECT_DIR'),) if p]
+
+
+def _real_home():
+    """The account's home folder from the system's user record, which no environment variable
+    moves; HOME (USERPROFILE) where there is no such record."""
+    try:
+        import pwd
+        return pwd.getpwuid(os.getuid()).pw_dir
+    except (ImportError, KeyError, AttributeError):
+        return os.path.expanduser('~')
+
+
+def exemptions_apply(cwd):
+    """False when the settings folder lies inside one of the session's folders other than the
+    home folder itself: a repository that points XDG_CONFIG_HOME (or HOME) into itself through
+    its own settings brings no exemption, while a session started in the home folder keeps its
+    settings."""
+    home = _real(_real_home())
+    places = [_real(p) for p in session_places(cwd) if p and os.path.isabs(p)]
+    return not _inside(settings_dir(), [p for p in places if p and p != home])
+
+
+def local_mcp(cwd):
     """LOCAL_MCP and the `mcp__<name>__` prefixes of the servers listed in `local-mcp`."""
+    if not exemptions_apply(cwd):
+        return LOCAL_MCP
     return LOCAL_MCP + tuple('mcp__%s__' % name for name in config_lines('local-mcp')
                              if MCP_NAME.fullmatch(name))
+
+
+def _real(path):
+    """The resolved, case-normalised path; '' when it cannot be resolved (a NUL byte)."""
+    try:
+        return os.path.normcase(os.path.realpath(path))
+    except (ValueError, OSError):
+        return ''
 
 
 def _inside(path, folders):
     if not path or not os.path.isabs(path):
         return False
-    path = os.path.normcase(os.path.realpath(path))
+    path = _real(path)
+    if not path:
+        return False
     for folder in folders:
+        if not folder:
+            continue
         try:
             if os.path.commonpath([path, folder]) == folder:
                 return True
@@ -187,13 +235,12 @@ def _inside(path, folders):
 
 def exempt_session(cwd):
     """True when the session's folder lies inside a folder listed in `exempt-dirs`."""
-    folders = [os.path.normcase(os.path.realpath(p)) for p in
-               (os.path.expanduser(line) for line in config_lines('exempt-dirs'))
+    folders = [_real(p) for p in (os.path.expanduser(line) for line in config_lines('exempt-dirs'))
                if os.path.isabs(p)]
-    if not folders:
+    folders = [f for f in folders if f]
+    if not folders or not exemptions_apply(cwd):
         return False
-    places = [cwd] + [p for p in (os.environ.get('CLAUDE_PROJECT_DIR'),) if p]
-    return all(_inside(p, folders) for p in places)
+    return all(_inside(p, folders) for p in session_places(cwd))
 
 
 def gh_config_dir():
@@ -488,7 +535,7 @@ def outbound(tool, tool_input, cwd):
                     pass
         return 'this Artifact publish', [(set(), t) for t in texts]
     if tool in ARTIFACT_TOOLS or tool in CODEX_WEB or (tool.startswith('mcp__') and (
-            tool.startswith(CLOUD_CCD) or not tool.startswith(local_mcp()))):
+            tool.startswith(CLOUD_CCD) or not tool.startswith(local_mcp(cwd)))):
         programs = {'github-connector'} if tool.startswith(GITHUB_MCP) else set()
         return 'this %s call' % tool, [(programs, t) for t in strings(tool_input)]
     return None

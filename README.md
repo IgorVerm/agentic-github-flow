@@ -121,9 +121,12 @@ committed. One entry per line; blank lines and `#` comments are ignored.
 | `exempt-dirs` | an absolute folder (`~` allowed) | sessions working inside it are not checked, for work that other rules govern |
 | `local-mcp` | an MCP server name | its `mcp__<name>__*` tools count as local and are not checked |
 
-Listing a folder or a server turns the check off there, so list only what you mean; whoever can
-write these files decides what is checked. The exact matching rules are in the guard's header,
-`plugins/guards/scripts/pre_tool_personal_data.py`.
+Listing a folder or a server turns the check off there, so list only what you mean: `/` or `~`
+in `exempt-dirs` turns it off everywhere, and `codex_apps` in `local-mcp` passes every Codex
+connector (mail and GitHub alike). Whoever can write these files decides what is checked; a
+settings folder that a repository moves into itself (through `XDG_CONFIG_HOME` or `HOME` in its
+own settings) is not trusted for the two exemption files. The exact matching rules are in the
+guard's header, `plugins/guards/scripts/pre_tool_personal_data.py`.
 
 ## Issue chats
 

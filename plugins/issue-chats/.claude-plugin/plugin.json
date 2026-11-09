@@ -1,6 +1,6 @@
 {
   "name": "agentic-github-flow-issue-chats",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Issue chats for Claude Code and Codex: each chat takes one ready GitHub issue, prepares its branch for a pull request, then starts the chat for the next issue and archives itself once its work is on GitHub.",
   "author": {
     "name": "MAI-Tech",

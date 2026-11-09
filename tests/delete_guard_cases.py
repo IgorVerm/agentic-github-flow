@@ -204,6 +204,49 @@ ASK = [
     ('ls | xargs -Z find . -delete', REPO), ('ls | xargs --max-a 1 find . -delete', REPO),
     ('ls | xargs --foo find . -delete', REPO), ('ls | xargs -Z find ~ -delete', REPO),
     ('ls | xargs -Z env find . -delete', REPO),
+    # issue #4: a cd chain's other branch, popd, eval's cd, ~+ in a default word, trap forms,
+    # ~ in braces, one-line functions, a loop after a keyword, a cd after the delete in a loop,
+    # a function body called from another folder
+    ('cd /tmp/gone && true || rm -rf *', HOME), ('pushd /tmp/x && popd && rm -rf *', HOME),
+    ('eval "cd ~"; rm -rf Documents', REPO), ('rm -rf ${CLEAN:-~+}', REPO),
+    ("trap -- 'rm -rf ~/Library' EXIT", REPO), ("builtin trap 'rm -rf ~/Library' EXIT", REPO),
+    ('rm -rf {~,a}', REPO), ('function f { rm -rf ~/Library; }; f', REPO),
+    ('if true; then for i in 1 2 3 4 5 6; do cd ..; done; fi; rm -rf Documents', SCRIPTS),
+    ('for i in 1 2 3 4 5 6; do rm -rf Documents; cd ..; done', SCRIPTS),
+    ('do_it() { rm -rf Documents; }; cd ~ && do_it', REPO),
+    # their neighbours that also pass on main: a cd that may be skipped or runs in a pipeline,
+    # a negated cd, a cd behind time, a variable or a computed eval, the folder stack's ~ forms,
+    # ~ in braces over the cap and in find, trap behind command, functions behind keywords,
+    # loops in braces or after ! and time
+    ('true || cd /tmp/x && rm -rf *', HOME), ('true | cd /tmp/x && rm -rf *', HOME),
+    ('! cd /tmp/gone && rm -rf *', HOME), ('time cd ~; rm -rf Documents', REPO),
+    ('C="cd ~"; $C; rm -rf Documents', REPO), ('eval "$(echo cd ~)"; rm -rf Documents', REPO),
+    ('eval "c\\d ~"; rm -rf Documents', REPO), ('cd ~ && rm -rf ~+0/Library', REPO),
+    ('rm -rf ~+0', REPO), ('rm -rf {~,%s}' % ','.join('a%d' % n for n in range(70)), REPO),
+    ('find {~,a} -delete', REPO), ("trap -- '-x; rm -rf ~/Library' EXIT", REPO),
+    ("command trap 'rm -rf ~/Library' EXIT", REPO), ('function { rm -rf ~/Library; }', REPO),
+    ('if true; then f() { rm -rf Documents; }; fi; cd ~ && f', REPO),
+    ('{ for i in 1 2 3 4 5 6; do cd ..; done; }; rm -rf Documents', SCRIPTS),
+    ('! for i in 1 2 3 4 5 6; do cd ..; done; rm -rf Documents', SCRIPTS),
+    ('time for i in 1 2 3 4 5 6; do cd ..; done; rm -rf Documents', SCRIPTS),
+    # the first attempt's reviews, where main passes too: ~ after braces, a function with a
+    # computed delete, a trap that runs after a cd, a computed or wrapped cd, zsh's precommand
+    # modifiers, repeat and foreach, two-word cd, CDPATH, a prefix assignment, a case pattern's
+    # `)` in a loop, zsh's cd -N, wrappers before trap, a trap set in eval
+    ('rm ~{/.zshrc,/.bashrc}', REPO), ('function f { $DEL -rf ~/Library; }; f', REPO),
+    ("trap 'rm -rf Documents' EXIT; cd ~", REPO), ('$(echo cd) ~; rm -rf Documents', REPO),
+    ('`echo cd` ~ && rm -rf Documents', REPO), ('noglob cd ~ && rm -rf Documents', REPO),
+    ('nocorrect cd ~ && rm -rf Documents', REPO), ('- cd ~ && rm -rf Documents', REPO),
+    ('repeat 5 cd ..; rm -rf Documents', SCRIPTS),
+    ('foreach i (1 2 3 4 5) cd ..; end; rm -rf Documents', SCRIPTS),
+    ('cd a/b/deep Documents && rm -rf *', DEEP), ('CDPATH=~ cd Documents && rm -rf *', REPO),
+    ('CDPATH=~; cd Documents && rm -rf *', REPO), ('FOO=1 cd ~ && rm -rf Documents', REPO),
+    ('for i in 1 2 3 4 5 6; do rm -rf Documents; case $i in *) cd ..;; esac; done', SCRIPTS),
+    ('pushd ~/Library; pushd /tmp/x; cd -1 && rm -rf "Application Support/Foo"', REPO),
+    ("time trap 'rm -rf ~/Library' EXIT", REPO), ("noglob trap 'rm -rf ~/Library' EXIT", REPO),
+    ("nocorrect trap 'rm -rf ~/Library' EXIT", REPO), ('repeat 1 rm -rf ~/Library', REPO),
+    ('repeat 2 do rm -rf ~/Library; done', REPO),
+    ("eval \"trap 'rm -rf Documents' EXIT\"; cd ~", REPO),
 ]
 if LINK:
     ASK.append(('rm -rf "%s/liblink/"' % R, REPO))
@@ -254,4 +297,18 @@ PASS = [
     ('xargs -a list.txt grep -l rm', REPO), ('xargs grep -l bash < list.txt', REPO),
     ('rm -f out/file{1..100}.txt', REPO), ('rm -rf /tmp/build{1..80}', REPO),
     ("trap 'rm -rf \"$TMPDIR/x\"' EXIT", REPO), ('env -u FOO -C /tmp/session-1 rm -rf x', HOME),
+    # issue #4's fixes leave alone: loops without a cd, trap's signal names, an eval without a
+    # cd, a cd in a subshell inside a loop, a signal named TERM, a trap in the folder it was
+    # set in, the folder stack in the folders the command was in
+    ('for f in a b; do echo $f; done; rm -rf build', REPO),
+    ("trap -- 'rm -rf \"$TMPDIR/x\"' EXIT INT", REPO), ('eval "$(ssh-agent -s)"; rm -f x.o', REPO),
+    ('if true; then for f in a b; do echo $f; done; fi && rm -rf build', REPO),
+    ('for d in a b; do (cd $d && make); done; rm -rf build', REPO),
+    ('while read -r d; do (cd "$d" && git pull); done < list.txt; rm -rf build', REPO),
+    ('eval "$(ssh-agent -s)"; rm -rf build', REPO),
+    ('eval "$(brew shellenv)" && rm -rf node_modules', REPO),
+    ('timeout -s TERM 5 rm -rf build', REPO), ("trap 'rm -rf build' EXIT; make", REPO),
+    ("trap 'rm -rf node_modules/.cache' EXIT; npm test", REPO),
+    ('pushd build && make && popd; rm -rf out', REPO),
+    ('pushd /tmp/x >/dev/null; make; popd >/dev/null; rm -rf dist', REPO),
 ]

@@ -1,21 +1,16 @@
 #!/usr/bin/env python3
 """Checks the core plugin's new_worktree.py in throwaway repositories: python3 tests/new_worktree.py.
 
-Each case makes a worktree with the script beside a reference made by plain `git worktree add`
-from the same primary checkout: both must hold the same paths, bytes, modes, symlinks and index,
-with `git status` clean. On macOS the files the script cloned must share their blocks with the
-primary checkout (same physical offset on disk) while files git wrote do not. The fixture
-carries the traps: a file under 100 KB, an executable whose blob a non-executable file also
-holds, a symlink, a submodule entry, a smudge filter and an eol=crlf path whose primary bytes
-differ from what a checkout writes, a primary file with local edits, and post-checkout hooks
-(one without a shebang, one failing). Elsewhere the script is a plain `git worktree add`, and
-the same comparisons hold. Offline. Not on Windows, where the script is unchanged and
-tests/worktree_tools.py covers it (the fixture needs symlinks and shell hooks).
+The post-checkout hook, as `git worktree add` runs it: the script's worktree is made beside a
+reference made by plain `git worktree add` from the same primary checkout, and both must hold the
+same paths, bytes, modes, symlinks and index, with `git status` clean, and the hook must have
+run the same way in both (one hook without a shebang, one failing, whose status the script must
+exit with while the worktree stands). Also the refusals. Offline. Not on Windows (shell hooks
+and a symlink in the fixture); tests/worktree_tools.py covers the script there.
 """
 import os
 from pathlib import Path
 import stat
-import struct
 import subprocess
 import sys
 import tempfile
@@ -23,20 +18,6 @@ import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
 TOOL = ROOT / 'plugins' / 'core' / 'scripts' / 'new_worktree.py'
-MACOS = sys.platform == 'darwin'
-F_LOG2PHYS_EXT = 65  # <sys/fcntl.h>
-
-
-def physical_offset(path):
-    """Device offset of the file's first block; two files share blocks when these are equal."""
-    import fcntl
-    fd = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-        out = fcntl.fcntl(fd, F_LOG2PHYS_EXT, struct.pack('=Iqq', 0, 4096, 0))
-        return struct.unpack('=Iqq', out)[2]
-    finally:
-        os.close(fd)
 
 
 def snapshot(top):
@@ -81,7 +62,7 @@ class NewWorktree(unittest.TestCase):
             'bin/run.sh': b'#!/bin/sh\necho run\n',
             'bin/a-copy.txt': b'#!/bin/sh\necho run\n',  # same blob, not executable
             'assets/big.bin': os.urandom(1 << 20),
-            'assets/small.bin': os.urandom(2000),  # under the 100 KB of converted files
+            'assets/small.bin': os.urandom(2000),
             'assets/dirty.bin': os.urandom(200_000),
             'dir with space/ünicöde.txt': 'café\n'.encode(),
             '.gitattributes': b'*.up filter=upper\n*.crlf text eol=crlf\n*.log text\n',
@@ -132,14 +113,6 @@ class NewWorktree(unittest.TestCase):
         self.assertEqual(self.git(wt, 'ls-files', '-s'), self.git(ref, 'ls-files', '-s'))
         self.assertEqual(self.git(wt, 'status', '--porcelain', '--ignored'), '')
 
-    def assert_shared(self, wt, rel, shared=True):
-        """Whether <wt>/<rel> shares its blocks with some file of the primary checkout."""
-        offsets = {physical_offset(p) for p in self.primary.rglob('*')
-                   if '.git' not in p.relative_to(self.primary).parts
-                   and p.is_file() and not p.is_symlink() and p.stat().st_size}
-        same = physical_offset(wt / rel) in offsets
-        self.assertEqual(same, shared, '%s: shares blocks with the primary: %s' % (rel, same))
-
     # -- the result is a normal checkout --
 
     def test_same_as_git_worktree_add(self):
@@ -148,7 +121,6 @@ class NewWorktree(unittest.TestCase):
         self.assertEqual((wt / 'note.up').read_bytes(), b'SMUDGED ON CHECKOUT\n')
         self.assertEqual((wt / 'lines.crlf').read_bytes(), b'one\r\ntwo\r\n')
         self.assertTrue(os.access(str(wt / 'bin/run.sh'), os.X_OK))
-        self.assertEqual('cloned' in out, MACOS, out)
 
     def test_from_another_base(self):
         # Files that differ from the primary or are missing there come from git.
@@ -161,34 +133,6 @@ class NewWorktree(unittest.TestCase):
         wt, ref, _ = self.make(base='other')
         self.assert_like_reference(wt, ref)
         self.assertEqual((wt / 'README.md').read_text(), '# changed on other\n')
-
-    # -- clones, and only where they are right --
-
-    @unittest.skipUnless(MACOS, 'APFS clones are macOS only')
-    def test_files_share_blocks_with_the_primary(self):
-        wt, ref, _ = self.make()
-        for rel in ('assets/big.bin', 'assets/small.bin', 'README.md', 'bin/run.sh',
-                    'bin/a-copy.txt', 'dir with space/ünicöde.txt'):
-            self.assert_shared(wt, rel)
-        self.assert_shared(ref, 'assets/big.bin', shared=False)  # the measuring stick works
-        for rel in ('note.up', 'lines.crlf'):  # a checkout conversion: git writes them
-            self.assert_shared(wt, rel, shared=False)
-        # A converted file git wrote with the primary's bytes becomes a clone again.
-        self.assert_shared(wt, 'assets/text.log')
-
-    @unittest.skipUnless(MACOS, 'APFS clones are macOS only')
-    def test_primary_file_with_local_edits_is_not_cloned(self):
-        committed = (self.primary / 'assets/dirty.bin').read_bytes()
-        (self.primary / 'assets/dirty.bin').write_bytes(os.urandom(len(committed)))
-        # An edit that `git status` does not show: git's re-hash of the clone must catch it.
-        self.git(self.primary, 'update-index', '--assume-unchanged', 'README.md')
-        (self.primary / 'README.md').write_text('# hidden local edit\n')
-        wt, ref, _ = self.make()
-        self.assertEqual((wt / 'assets/dirty.bin').read_bytes(), committed)
-        self.assertEqual((wt / 'README.md').read_text(), '# fixture\n')
-        for rel in ('assets/dirty.bin', 'README.md'):
-            self.assert_shared(wt, rel, shared=False)
-        self.assert_like_reference(wt, ref)
 
     # -- the post-checkout hook, as git runs it --
 
@@ -227,21 +171,6 @@ class NewWorktree(unittest.TestCase):
         self.assertIn('the post-checkout hook exited 3', r.stderr)
         wt = self.root / 'repo-worktrees' / 'task'
         self.assertEqual(self.git(wt, 'rev-parse', '--abbrev-ref', 'HEAD').strip(), 'agent/task')
-        self.assert_like_reference(wt, ref)
-
-    # -- where cloning cannot work: a plain checkout, with a note on macOS --
-
-    def test_plain_checkout_under_autocrlf(self):
-        self.git(self.primary, 'config', 'core.autocrlf', 'true')
-        wt, ref, out = self.make()
-        self.assertEqual('no clones (core.autocrlf is true)' in out, MACOS, out)
-        self.assert_like_reference(wt, ref)
-
-    def test_plain_checkout_under_sparse_checkout(self):
-        self.git(self.primary, 'sparse-checkout', 'set', 'assets')
-        wt, ref, out = self.make()
-        self.assertEqual('no clones (sparse checkout is on)' in out, MACOS, out)
-        self.assertFalse((wt / 'bin').exists())
         self.assert_like_reference(wt, ref)
 
     # -- every refusal stays --

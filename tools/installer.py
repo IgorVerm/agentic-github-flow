@@ -20,7 +20,9 @@ What it does, per client (Claude Code, Codex):
   which is always installed, and brings a Claude Code hook that guards archiving a chat).
 - Guards (--guards): the guards plugin (Claude hooks), the ask and deny lists merged into
   ~/.claude/settings.json (a backup is kept), the Codex execpolicy rules (git safety and delete
-  prompts) copied into ~/.codex/rules/ and the git guard added to ~/.codex/hooks.json. The rules
+  prompts) copied into ~/.codex/rules/, and the git guard and the personal-data guard (`--codex`:
+  it denies, because a Codex hook cannot ask) added to ~/.codex/hooks.json beside the user's own
+  entries; --update replaces and --uninstall removes only the recorded entries. The rules
   are copies, never links, because Codex skips a symlinked .rules file without a warning;
   --update refreshes a copy and --uninstall removes it only while it is unchanged since the
   installer wrote it (a link recorded by 0.1, or a copy holding the rules 0.1 shipped, counts
@@ -370,9 +372,23 @@ def unmerge_permissions(state):
     say('ok', 'claude: %d rules removed from %s' % (removed, path))
 
 
-def guard_command():
-    script = os.path.join(CLONE, 'plugins', 'guards', 'scripts', 'pre_tool_git_guard.py')
-    return '"%s" "%s"' % (sys.executable, script)
+def guard_command(name='pre_tool_git_guard.py', *args):
+    script = os.path.join(CLONE, 'plugins', 'guards', 'scripts', name)
+    return ' '.join(['"%s" "%s"' % (sys.executable, script)] + list(args))
+
+
+def codex_hooks():
+    """(state key, ~/.codex/hooks.json entry, what it is) for each Codex guard hook. The delete
+    guard stays out: it can only ask, which a Codex hook cannot."""
+    return (
+        ('codex_hook', {'matcher': 'Bash', 'hooks': [
+            {'type': 'command', 'command': guard_command(), 'timeout': 10,
+             'statusMessage': 'Checking git command'}]}, 'git guard'),
+        ('codex_personal_data_hook', {'matcher': r'^(Bash|webrun|web\.run|mcp__.*)$', 'hooks': [
+            {'type': 'command', 'command': guard_command('pre_tool_personal_data.py', '--codex'),
+             'timeout': 10, 'statusMessage': 'Checking for personal data'}]},
+         'personal-data guard'),
+    )
 
 
 CODEX_RULES = (('git-safety.rules', 'agentic-github-flow-git-safety.rules'),
@@ -475,21 +491,24 @@ def codex_guards(state):
     created = data is None
     data = data if data is not None else {}
     entries = data.setdefault('hooks', {}).setdefault('PreToolUse', [])
-    command = guard_command()
-    entry = {'matcher': 'Bash', 'hooks': [{'type': 'command', 'command': command, 'timeout': 10,
-                                           'statusMessage': 'Checking git command'}]}
-    old = state.get('codex_hook', {}).get('entry')
-    if old in entries and old != entry:
-        entries.remove(old)
-    if entry not in entries:
+    # an install recorded before a hook existed: the file was created then if it was for the first
+    created = next((state[key]['created'] for key, _, _ in codex_hooks() if key in state), created)
+    added = []
+    for key, entry, what in codex_hooks():
+        old = state.get(key, {}).get('entry')
+        if old in entries and old != entry:
+            entries.remove(old)
+        if entry not in entries:
+            entries.append(entry)
+            added.append(what)
+        else:
+            say('ok', 'codex: %s already in %s' % (what, path))
+        state[key] = {'entry': entry, 'created': state.get(key, {}).get('created', created)}
+    if added:
         backup(path)
-        entries.append(entry)
         dump_json(path, data)
-        say('ok', 'codex: git guard added to %s; trust it once in Codex with /hooks' % path)
-    else:
-        say('ok', 'codex: git guard already in %s' % path)
-    state['codex_hook'] = {'entry': entry,
-                           'created': state.get('codex_hook', {}).get('created', created)}
+        say('ok', 'codex: %s added to %s; trust %s once in Codex with /hooks' % (
+            ' and '.join(added), path, 'it' if len(added) == 1 else 'them'))
 
 
 def remove_codex_guards(state):
@@ -508,24 +527,28 @@ def remove_codex_guards(state):
         os.makedirs(os.path.dirname(left_path()), exist_ok=True)
         with open(left_path(), 'w', encoding='utf-8') as f:
             json.dump(left, f, indent=2, sort_keys=True)
-    hook = state.get('codex_hook')
+    hooks = [(state[key], what) for key, _, what in codex_hooks() if state.get(key)]
     path = os.path.join(codex_dir(), 'hooks.json')
-    if not hook or linked(path, 'the git guard entry'):
+    if not hooks or linked(path, 'the guard entries'):
         return
     data = load_json(path) or {}
     entries = data.get('hooks', {}).get('PreToolUse', [])
-    if hook['entry'] in entries:
-        entries.remove(hook['entry'])
+    removed = []
+    for hook, what in hooks:
+        if hook['entry'] in entries:
+            entries.remove(hook['entry'])
+            removed.append(what)
+    if removed:
         if not entries:
             del data['hooks']['PreToolUse']
         if not data.get('hooks'):
             data.pop('hooks', None)
         backup(path)
-        if hook.get('created') and not data:
+        if any(hook.get('created') for hook, _ in hooks) and not data:
             os.remove(path)
         else:
             dump_json(path, data)
-        say('ok', 'codex: git guard removed from %s' % path)
+        say('ok', 'codex: %s removed from %s' % (' and '.join(removed), path))
 
 
 # ---- overlays ---------------------------------------------------------------------------------

@@ -16,6 +16,8 @@ merging and removing the settings, rules and hook, the Codex rules as regular co
 issue-chats installed beside core in both clients and kept on a plain rerun, an unknown plugin
 refused, and an overlay in both blocks.
 """
+import hashlib
+import importlib.util
 import json
 import os
 import shutil
@@ -430,12 +432,22 @@ class InstallerTests(unittest.TestCase):
         os.remove(delete_copy)
 
     def rules_of_0_1(self):
-        r = subprocess.run(['git', '-C', ROOT, 'show',
-                            'd0edd54:plugins/guards/policy/git-safety.rules'],
-                           capture_output=True)
-        if r.returncode != 0:
-            self.skipTest('the 0.1 rules need the history (commit d0edd54)')
-        return r.stdout
+        # git-safety.rules as 0.1 shipped it (commit d0edd54), kept as a fixture so a shallow
+        # clone runs these cases too
+        with open(os.path.join(HERE, 'fixtures', 'git-safety-0.1.rules'), 'rb') as f:
+            return f.read()
+
+    def test_legacy_hashes_are_the_0_1_rules(self):
+        # the installer knows the 0.1 rules by these hashes, with LF and with CRLF endings
+        spec = importlib.util.spec_from_file_location(
+            'installer_module', os.path.join(ROOT, 'tools', 'installer.py'))
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        rules = self.rules_of_0_1()
+        self.assertNotIn(b'\r', rules)
+        self.assertEqual({hashlib.sha256(rules).hexdigest(),
+                          hashlib.sha256(rules.replace(b'\n', b'\r\n')).hexdigest()},
+                         installer.LEGACY_HASHES)
 
     def test_rules_copy_recorded_by_path_alone_is_refreshed_and_removed(self):
         # 0.1 recorded the git rules by path and copied them on Windows: a copy that still

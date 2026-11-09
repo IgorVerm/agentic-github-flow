@@ -98,9 +98,9 @@ with `~` (`{~,a}`, `~{/.zshrc,/.bashrc}`), and the folder stack's `~-`, `~N`, `~
 as every folder the command was in and an unknown one. Literal paths inside a git worktree or
 a temporary folder pass, and `trash` always passes. Paths are compared without regard to case,
 as the macOS and Windows file systems do (on Linux that only asks more), both as written and
-with links resolved. On Windows, Git Bash paths (`/c/Users/…`, `/cygdrive/c/…`) and `C:\\…` or `C:/…`
-are read as the same drive paths; on every system WSL's `/mnt/<letter>/…` is also judged as
-that Windows drive.
+with links resolved. On Windows, Git Bash paths (`/c/Users/…`, `/cygdrive/c/…`) and `C:\\…`
+or `C:/…` are read as the same drive paths; on every system WSL's `/mnt/<letter>/…` is also
+judged as that Windows drive.
 
 Not seen: deletes by a script file or program the command starts (`python3 x.py`,
 `shutil.rmtree` in `python -c`), `rsync --delete`, `mv` over a folder, `dd`, `diskutil`, a

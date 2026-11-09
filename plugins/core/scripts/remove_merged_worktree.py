@@ -51,7 +51,8 @@ is missing or no longer runs unbroken from the `branch: Created from` entry to t
 created directly under its scratch name stays deletable: that leaves its source branch standing.
 When the default branch cannot be established, or a removal in this sweep failed, all of them
 stay. Remote scratch branches are outside this. The deletion is `git branch -D`, because a
-scratch branch is never merged; this pass is the one route the cleanup gives it.
+scratch branch is never merged, once its tip is read again and is still the one checked; this
+pass is the one route the cleanup gives it.
 
 Last, --sweep deletes every other local branch that has been merged, whoever left it and whether
 or not a worktree ever had it: left by a `git switch` in a living worktree, or by a worktree
@@ -74,12 +75,15 @@ compares a branch without upstream against HEAD, and after a merge on GitHub the
 branch is usually behind, so it would refuse nearly every merged branch and every squash-merged
 one. -D still refuses a branch a worktree has checked out, is rebasing or bisecting; a refusal
 is KEPT and no failure. Each deletion prints the name, the head SHA, `git branch <name> <sha>`
-to restore it until git prunes the commit, and `remote copy: origin/<name>` when origin has
-one, which the cleanup-merged skill then handles. A merged branch that stays is KEPT with the
-reason; one that is not merged is only counted. The pass deletes nothing when the default
-branch cannot be established, a removal in this sweep failed, or under --no-fetch. With
---dry-run it runs too and deletes nothing; a branch of a worktree that the same run would
-remove shows as KEPT there, and the removal takes it.
+to restore it until git prunes the commit, and, when origin has the branch, either `remote
+copy: origin/<name> (pull request #<n>)` when a pull request of origin merged into the default
+branch has that tip as its head, which the cleanup-merged skill then offers to delete, or
+`remote copy kept: origin/<name> (no merged pull request)`: a long-lived branch such as
+`develop` whose tip merely sits in the default branch keeps its remote copy. A merged branch
+that stays is KEPT with the reason; one that is not merged is only counted. The pass deletes
+nothing when the default branch cannot be established, a removal in this sweep failed, or under
+--no-fetch. With --dry-run it runs too and deletes nothing; a branch of a worktree that the
+same run would remove shows as KEPT there, and the removal takes it.
 
 Proof that an ignored entry is regenerable. Default deny: nothing lists known data, so a file
 type added to .gitignore later is protected without any change here.
@@ -445,13 +449,19 @@ def gh_command():
 
 
 def merged_pull_request(primary, branch, tip, base=None):
-    """(number, problem): a pull request merged into `base` whose head commit is exactly `tip`.
-    A pull request merged into another branch (a stacked one) proves nothing about `base`."""
+    """(number, problem): a pull request of origin merged into `base` whose head commit is
+    exactly `tip`. A pull request merged into another branch (a stacked one) proves nothing
+    about `base`."""
     gh = gh_command()
     if not gh:
         return None, 'gh is not installed, so a squash or rebase merge cannot be proven'
+    # the repository named outright: gh alone would prefer a remote `upstream`
+    origin = git(primary, 'remote', 'get-url', 'origin')
+    if origin.returncode:
+        return None, 'no remote origin, so no pull request can be read'
     try:
-        result = subprocess.run(gh + ['pr', 'list', '--head', branch, '--state', 'merged',
+        result = subprocess.run(gh + ['pr', 'list', '-R', origin.stdout.strip(), '--head', branch,
+                                      '--state', 'merged',
                                       '--json', 'number,headRefOid,baseRefName',
                                       '--limit', '50'],
                                 cwd=primary, capture_output=True, text=True, timeout=60)
@@ -765,9 +775,10 @@ def sweep_scratch(primary, blocked, dry_run):
 
     Runs after the worktrees: a scratch branch may be what still holds a removed worktree's
     commits. `git branch -D`, because a scratch branch never merges, so `-d` would always refuse;
-    -D still refuses a branch a worktree has checked out, is rebasing or bisecting (HEAD
-    detached, so `worktrees` does not show it), and clears the branch's configuration. `blocked`
-    is why nothing may go in this sweep, or None.
+    the tip is read again right before it and must still be the one checked. -D still refuses
+    a branch a worktree has checked out, is rebasing or bisecting (HEAD detached, so
+    `worktrees` does not show it), and clears the branch's configuration. `blocked` is why
+    nothing may go in this sweep, or None.
     """
     listed = git(primary, 'for-each-ref', '--format=%(objectname) %(refname)',
                  'refs/heads/scratch/')
@@ -792,10 +803,14 @@ def sweep_scratch(primary, blocked, dry_run):
             reason = (not_its_own(primary, branch, sha, found.group(1))
                       or not_closed(primary, found.group(1)))
         if not reason and not dry_run:
-            result = git(primary, 'branch', '-D', branch)
-            if result.returncode:
-                failed += 1
-                reason = f'git branch -D refused: {result.stderr.strip()}'
+            if git(primary, 'rev-parse', '-q', '--verify',
+                   f'refs/heads/{branch}').stdout.strip() != sha:
+                reason = 'it moved since the check'
+            else:
+                result = git(primary, 'branch', '-D', branch)
+                if result.returncode:
+                    failed += 1
+                    reason = f'git branch -D refused: {result.stderr.strip()}'
         if reason:
             kept += 1
             print(f'KEPT {branch} at {sha}: {reason}')
@@ -895,9 +910,8 @@ def sweep_merged(primary, ref, blocked, dry_run):
         branch = full[len('refs/heads/'):]
         if branch in protected or branch.startswith('scratch/'):
             continue
-        merged_head, how = None, f'in {ref}'
+        merged_head, number, how = None, None, f'in {ref}'
         if git(primary, 'merge-base', '--is-ancestor', sha, ref).returncode:
-            number = None
             if gh_problem is None:
                 number, gh_problem = merged_pull_request(primary, branch, sha, base)
             if number is None:
@@ -929,7 +943,17 @@ def sweep_merged(primary, ref, blocked, dry_run):
             print(f'KEPT {branch} at {sha}: {reason}')
             continue
         deleted += 1
-        copy = f'; remote copy: origin/{branch}' if remote and branch in remote else ''
+        copy = ''
+        if remote and branch in remote:
+            # only a branch a pull request merged is offered for remote deletion: a long-lived
+            # branch (develop) whose tip merely sits in the default branch keeps its remote copy
+            problem = None
+            if number is None:
+                number, problem = merged_pull_request(primary, branch, sha, base)
+            copy = (f'; remote copy: origin/{branch} (pull request #{number})'
+                    if number is not None else
+                    f'; remote copy kept: origin/{branch} (no merged pull request'
+                    + (f' known: {problem})' if problem else ')'))
         if dry_run:
             print(f'WOULD DELETE {branch} at {sha} ({how}){copy}')
         else:

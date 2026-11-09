@@ -33,6 +33,9 @@ WINDOWS = os.name == 'nt'
 
 FAKE_GH = r'''import json, os, sys
 args = sys.argv[1:]
+if os.environ.get('FAKE_GH_LOG'):
+    with open(os.environ['FAKE_GH_LOG'], 'a') as log:
+        log.write(' '.join(args) + '\n')
 pulls = json.loads(os.environ.get('FAKE_GH_PRS', '[]'))
 if args[:2] == ['pr', 'list']:
     head = args[args.index('--head') + 1] if '--head' in args else None
@@ -46,9 +49,6 @@ if args[:2] == ['pr', 'list']:
                            'baseRefName': p.get('base', 'main')} for p in found]))
     sys.exit(0)
 if args[:2] == ['issue', 'view']:
-    if os.environ.get('FAKE_GH_LOG'):
-        with open(os.environ['FAKE_GH_LOG'], 'a') as log:
-            log.write(' '.join(args) + '\n')
     answer = json.loads(os.environ.get('FAKE_GH_ISSUES', '{}')).get(args[2])
     if answer is None:
         sys.stderr.write('no such issue\n')
@@ -316,11 +316,11 @@ class SweepBranchesTests(Repos):
                 {'state': answer, 'url': 'https://example.invalid/o/r/issues/' + number}))
         self.env['FAKE_GH_ISSUES'] = json.dumps(known)
 
-    def gh_calls(self):
+    def gh_calls(self, kind='issue view'):
         if not os.path.exists(self.gh_log):
             return []
         with open(self.gh_log) as f:
-            return f.read().splitlines()
+            return [line for line in f.read().splitlines() if line.startswith(kind)]
 
     def scratch(self, name, base='main'):
         """A local branch whose tip nothing else holds; returns the tip."""
@@ -523,6 +523,34 @@ class SweepBranchesTests(Repos):
         self.assertTrue(self.has_branch('scratch/119-probe'))
         self.assertEqual(self.tip('agent/119-merged'), merged)
 
+    @unittest.skipIf(WINDOWS, 'the moving git is a shell script')
+    def test_a_branch_that_moves_after_its_check_stays(self):
+        """Both passes read the tip again right before `git branch -D`; a stand-in git moves the
+        branch exactly then."""
+        self.issues(issue190='CLOSED')
+        scratch = self.scratch('scratch/190-moved')
+        merged = self.merged_branch('agent/191-moved')
+        other = self.scratch('agent/elsewhere')
+        real = shutil.which('git', path=self.env['PATH'])
+        bindir = os.path.join(self.dir, 'movegit')
+        os.makedirs(bindir)
+        # the script's call is `git -C <dir> rev-parse -q --verify <ref>`: $6 is the ref
+        with open(os.path.join(bindir, 'git'), 'w') as f:
+            f.write('#!/bin/sh\ncase "$*" in\n'
+                    '  *"--verify refs/heads/scratch/190-moved"|'
+                    '*"--verify refs/heads/agent/191-moved")'
+                    ' "%s" -C "%s" update-ref "$6" %s ;;\n'
+                    'esac\nexec "%s" "$@"\n' % (real, self.repo, other, real))
+        os.chmod(os.path.join(bindir, 'git'), 0o755)
+        path = self.env['PATH']
+        self.env['PATH'] = bindir + os.pathsep + path
+        out = self.sweep()
+        self.env['PATH'] = path
+        self.assertIn('KEPT scratch/190-moved at %s: it moved since the check' % scratch, out)
+        self.assertIn('KEPT agent/191-moved at %s: it moved since the check' % merged, out)
+        self.assertEqual(self.tip('scratch/190-moved'), other)
+        self.assertEqual(self.tip('agent/191-moved'), other)
+
     def renamed(self, *names):
         """A branch made under the first name and renamed through the others; returns the tip."""
         tip = self.scratch(names[0])
@@ -647,14 +675,32 @@ class SweepBranchesTests(Repos):
         wt = self.new_task('left')
         tip = self.tip('agent/left')
         self.github_merge('agent/left')
+        self.env['FAKE_GH_PRS'] = json.dumps([{'number': 11, 'head': 'agent/left',
+                                               'headRefOid': tip}])
         self.git(self.repo, 'fetch', '-q', 'origin')
         self.git(wt, 'switch', '-q', '-c', 'agent/next', 'origin/main')  # the worktree lives on
         out = self.sweep()
         self.assertIn('DELETED agent/left at %s (in refs/remotes/origin/main); back: git branch '
-                      'agent/left %s; remote copy: origin/agent/left' % (tip, tip), out)
+                      'agent/left %s; remote copy: origin/agent/left (pull request #11)\n'
+                      % (tip, tip), out)
         self.assertFalse(self.has_branch('agent/left'))
         self.assertTrue(os.path.isdir(wt))
         self.assertIn('KEPT agent/next at ', out)
+        self.assertIn('pr list -R %s --head agent/left ' % self.origin,
+                      '\n'.join(self.gh_calls('pr list')))
+
+    def test_a_long_lived_branch_in_main_keeps_its_remote_copy(self):
+        """develop's tip sits in the default branch, but no pull request merged it: the local
+        branch goes (origin still has it), the remote copy is not offered for deletion."""
+        tip = self.merged_branch('develop', push=True)
+        out = self.sweep()
+        self.assertIn('DELETED develop at %s (in refs/remotes/origin/main); back: git branch '
+                      'develop %s; remote copy kept: origin/develop (no merged pull request)\n'
+                      % (tip, tip), out)
+        self.env['AGENTIC_GITHUB_FLOW_GH'] = '[]'
+        self.git(self.repo, 'branch', 'develop', tip)
+        self.assertIn('remote copy kept: origin/develop (no merged pull request known: gh is not '
+                      'installed', self.sweep())
 
     def test_deletes_the_merged_branch_of_a_removed_worktree_while_local_main_is_behind(self):
         tip = self.merged_branch('agent/170-gone')
@@ -822,8 +868,8 @@ class SweepBranchesTests(Repos):
         unproven = self.squashed('sq-unknown', None)
         out = self.sweep()
         self.assertIn('DELETED agent/sq-proven at %s (the head of merged pull request #21); '
-                      'back: git branch agent/sq-proven %s; remote copy: origin/agent/sq-proven'
-                      % (tip, tip), out)
+                      'back: git branch agent/sq-proven %s; remote copy: origin/agent/sq-proven '
+                      '(pull request #21)\n' % (tip, tip), out)
         self.assertFalse(self.has_branch('agent/sq-proven'))
         self.assertEqual(self.tip('agent/sq-unknown'), unproven)
         self.assertIn('not merged, left alone: 1\n', out)

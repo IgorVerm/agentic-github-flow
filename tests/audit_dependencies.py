@@ -460,6 +460,18 @@ class RunTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn('no lockfile found', out)
 
+    def test_json_without_a_lockfile_is_still_a_json_object(self):
+        os.makedirs(self.repo, exist_ok=True)
+        code, out, err = self.run_tool('--json')
+        self.assertEqual(code, 0, out + err)
+        data = json.loads(out)
+        self.assertEqual((data['packages'], data['lockfiles'], data['findings'], data['unaudited'],
+                          data['upgrades']), (0, [], [], [], []))
+        self.assertIn('no lockfile found', data['notes'][0])
+        self.assertEqual(data['osv_scanner'], {'problem': 'not in the recorded answers'})
+        data = json.loads(self.run_tool('--json', '--no-osv-scanner')[1])
+        self.assertIsNone(data['osv_scanner'])
+
 
 class UpgradeTests(unittest.TestCase):
     TODAY = '2026-10-25'

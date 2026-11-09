@@ -64,13 +64,15 @@ this audit lists as unaudited, so its advisories there are for a version nobody 
 lists Rust workspace members, which this audit skips, as packages only it saw. Absent, failing,
 an answer in an unexpected shape, or a release other than the pinned one: one line says so, and
 this audit works as without it. Its answer never changes the exit code: this audit stays the
-primary. `--reachability` adds `--call-analysis=rust`, on Linux only: what that builds and why it
-needs Linux is in the review-security skill's `sources.md` (the osv-scanner row); it overwrites
-the repository's `target/release`. Per advisory that names functions it reports whether one is
+primary. `--reachability` adds `--call-analysis=rust`, on Linux only: osv-scanner then runs
+`cargo build` on <repo>, which executes the repository's build scripts and procedural macros,
+fetches crates from crates.io and overwrites <repo>'s `target/release`. It runs the audited
+code, so it is asked for first and best pointed at an exported copy, not a checkout; why it
+needs Linux is in the review-security skill's `sources.md` (the osv-scanner row). Per advisory that names functions it reports whether one is
 called: information, never a reason to suppress. `--no-osv-scanner` skips the second opinion.
 
 `--record` saves the answers (osv-scanner's included) so a test can replay them with
-`--offline`; `--json` prints the findings as JSON for other tools.
+`--offline`; `--json` prints the findings as JSON for other tools, also when no lockfile is found.
 """
 from __future__ import annotations
 
@@ -869,13 +871,19 @@ def main(argv):
     repo = os.path.abspath(repo)
     lockfiles = find_lockfiles(repo)
     if not lockfiles:
-        print('audit_dependencies: no lockfile found under %s' % repo)
+        notes, osv_summary = ['audit_dependencies: no lockfile found under %s' % repo], None
         if use_osv_scanner:  # it reads lockfiles this audit has no parser for
             client = Offline(offline) if offline else Online(record)
             try:
-                print('\n'.join(second_opinion([], [], client.osv_scanner(repo, reachability))[0]))
+                osv_lines, osv_summary = second_opinion([], [], client.osv_scanner(repo, reachability))
+                notes += osv_lines
             finally:
                 client.close()
+        if as_json:  # the same object as with lockfiles, so a caller comparing two runs can parse both
+            print(json.dumps({'packages': 0, 'lockfiles': [], 'findings': [], 'unaudited': [], 'upgrades': [],
+                              'notes': notes, 'osv_scanner': osv_summary}, indent=1))
+        else:
+            print('\n'.join(notes))
         return 0
     packages, unaudited = [], []
     audited = {os.path.realpath(p) for p in lockfiles}

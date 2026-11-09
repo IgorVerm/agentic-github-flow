@@ -1,17 +1,17 @@
 # agentic-github-flow: rules for every session
 
-These rules apply to every AI coding agent (Claude Code, Codex) on this machine. Procedures that
-matter at one moment are skills: your client lists them and loads one when the task matches.
+Every AI coding agent (Claude Code, Codex) on this machine follows these rules. Procedures are
+skills, loaded when a task matches.
 
 **Precedence.** A company overlay's binding rules (its AI policy, its data classes) are never
 relaxed in a conversation, by anyone. Below that, the user's word in the conversation beats these
-rules. A repository's `AGENTS.md` wins where it is stricter or says it deviates, and an overlay
-wins over these rules where it says it deviates.
+rules. A repository's `AGENTS.md` wins where it is stricter or says it deviates; an overlay wins
+where it says it deviates.
 
 **Work for an employer or a client** follows that organisation's AI policy first. It reaches
-these rules through the organisation's overlay (`templates/company-overlay/AGENTS.md` is the
-starting point). Without an overlay, before working on an organisation's code or data, ask the
-user where its AI policy is and which data may go into a prompt, and follow the answer.
+these rules through the organisation's overlay (template: `templates/company-overlay/AGENTS.md`).
+Without an overlay, before working on an organisation's code or data, ask the user where its AI
+policy is and which data may go into a prompt, and follow the answer.
 
 ## How to work
 
@@ -38,7 +38,7 @@ user where its AI policy is and which data may go into a prompt, and follow the 
 - **After two failed corrections of the same problem, stop.** Tell the user what you tried and
   give a better statement of the task for a fresh session.
 - **Measure instead of guessing.** A claim about performance, counts or behaviour comes from a
-  measurement when one is cheap; report the number and how you got it, and label estimates.
+  measurement when one is cheap; report the number and its source, and label estimates.
 - **Code and git are the current state; documents explain why.** Before you rely on a path,
   command or count a document names, check that it exists, and correct the document if not.
 - **Fix the cause** with the smallest change that is correct at the layer where it lives.
@@ -61,17 +61,19 @@ have destroyed hours of uncommitted work with `reset --hard` and `checkout -- .`
   committed mistake with `git revert`; bring `main` into a branch by merge, never rebase.
 - **Files in a checkout that you did not write belong to another session.** Leave them, never
   stage them, never move another worktree's branch. Read a file before you overwrite it.
-- **Work on a branch in a worktree, never on `main`:**
-  `git worktree add -b agent/<task> ../<repo>-worktrees/<task> origin/main`.
+- **Outside a repository, delete with the system's trash, not `rm -rf`;** a recursive delete
+  takes only literal, quoted, absolute paths you listed and checked, never paths built from
+  command output.
+- **Work on a branch in a worktree, never on `main`** (the `ship-change` skill makes it).
 - **Commit freely:** small commits of verified work, staged by explicit path
   (`git commit -m "…" -- <paths>`, never `add -A`, `add .`, `add -f` or `commit -a`), the
   subject ending in the issue reference `(#n)`, with a `Co-Authored-By` trailer naming the
-  agent. Ask before committing a file over 10 MB; never commit one over 50 MB.
+  agent. Never commit a file over 50 MB.
 - **Ask before every push.** Prepare the branch, the checks and the pull request text, then ask.
   On a yes, push your own task branch and open the pull request (the `ship-change` skill). Never
   push `main` and never merge; mark a draft ready, or merge, only when the user says so for that
   pull request.
-- **After the merge,** the `cleanup-merged` skill removes the worktree and the branch and makes
+- **After the merge,** the `cleanup-merged` skill removes the worktree and branch and makes
   sure the issue is closed.
 - **Never commit, print or log a secret.** Real configuration lives in ignored `.env` files;
   read key names, not values. If a secret was committed, stop and tell the user the file and the
@@ -92,11 +94,11 @@ have destroyed hours of uncommitted work with `reset --hard` and `checkout -- .`
 - **Agents post under the user's account, so sign every comment** and every issue or pull
   request body with `🤖 <agent> (<role>):`. An unsigned comment is the human's.
 - **Read what the task needs:** the repository's `AGENTS.md` and `HANDOFF.md`, the issue, and
-  the documents `HANDOFF.md` names for that kind of work.
+  what `HANDOFF.md` names for that work.
 - **Each repository keeps the same few documents:** `AGENTS.md` (its own rules), `HANDOFF.md`
   (what is true now; how to build, test and run), `ROADMAP.md`, `DESIGN_DECISIONS.md` and
   `archive_implementations.md`. A change that makes one untrue updates it in the same change.
-  The `repo-docs` skill has the layout.
+  The `repo-docs` skill has the layout and the standard for writing a skill.
 - **The user, or the maintainers the repository names, decides.** Record a ruling in
   `DESIGN_DECISIONS.md` with their words.
 

@@ -34,8 +34,8 @@ issue and its sub-issues. The chat changes a file in the repository only where a
 own the fact: the user's rulings in `DESIGN_DECISIONS.md` (or where the repository keeps its
 decisions), a design document only when the design outlives the work, a short pointer from an
 existing document to the issue. Such edits stay minimal, are made on a branch in a worktree of
-their own and go to a pull request by the `ship-change` skill, with the user's yes before the
-push.
+their own and land by the `ship-change` skill (a pull request, or local main where that is the
+repository's landing mode), with the user's yes before any push.
 
 1. **Read before asking.** Read the code of the area, the open issues (overlapping ones and the
    requirements label's queue), the repository's decisions and the design sections that bear
@@ -80,8 +80,8 @@ push.
    this chat made and on the `worktreePath` that result names, if any. When every check says
    `ok`, archive this chat (`archive_session` with `"self"` and a short `reason`), telling the
    user first; on `keep:`, or when the archive is refused, stop with the reason. A rulings
-   branch that waits for the push keeps the chat; after the user's yes and the push it
-   archives the same way.
+   branch the check does not pass yet (it waits for its push, or for its landing on local
+   main) keeps the chat; once it passes, the chat archives the same way.
 
 ## Definition of ready
 

@@ -57,8 +57,9 @@ have destroyed hours of uncommitted work with `reset --hard` and `checkout -- .`
   rewrite or discard history (`reset --hard`, rebase, amending a pushed commit, `filter-repo`,
   expiring reflogs, `branch -D`); discard uncommitted work (`restore`, `checkout -- <path>`,
   `clean`, `stash drop`), yours or anyone else's; bypass a hook (`--no-verify`); change git or
-  gh configuration; remove a worktree other than through the `cleanup-merged` skill. Undo a
-  committed mistake with `git revert`; bring `main` into a branch by merge, never rebase.
+  gh configuration; remove a worktree or force-delete a branch other than through the
+  `cleanup-merged` skill. Undo a committed mistake with `git revert`; bring `main` into a
+  branch by merge, never rebase.
 - **Files in a checkout that you did not write belong to another session.** Leave them, never
   stage them, never move another worktree's branch. Read a file before you overwrite it.
 - **Outside a repository, delete with the system's trash, not `rm -rf`;** a recursive delete

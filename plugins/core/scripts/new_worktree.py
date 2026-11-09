@@ -7,8 +7,10 @@ Run it from the primary checkout of a repository. It fetches origin (unless --no
 creates `../<repo>-worktrees/<task>` on a new branch (default `agent/<task>`) from <base>
 (default: origin's default branch as fetched, else local main or master). It refuses a task that
 is not a plain name, an existing path or branch, a linked worktree as the starting point, and a
-checkout inside a cloud-synced folder (iCloud Drive, OneDrive, Dropbox, Google Drive), where sync clients
-corrupt git's files.
+checkout inside a cloud-synced folder (iCloud Drive, OneDrive, Dropbox, Google Drive), where
+sync clients corrupt git's files. When the repository's post-checkout hook fails, git still
+makes the worktree and its branch and exits with the hook's status; so does this script, and it
+says that the worktree stands.
 """
 from __future__ import annotations
 
@@ -107,6 +109,13 @@ def main(argv: list[str]) -> int:
 
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     added = git('worktree', 'add', '-q', '--no-track', '-b', branch, dest, base, cwd=primary)
+    if added.returncode != 0 and os.path.exists(os.path.join(dest, '.git')):
+        # git made the worktree and the branch, then its post-checkout hook failed
+        print(f'new_worktree: {dest} on {branch} from {base}')
+        print(f'new_worktree: the post-checkout hook exited {added.returncode}; the worktree '
+              'and its branch stand complete, as `git worktree add` leaves them: '
+              + added.stderr.strip(), file=sys.stderr)
+        return added.returncode
     if added.returncode != 0:
         print('new_worktree: ' + added.stderr.strip(), file=sys.stderr)
         return 1

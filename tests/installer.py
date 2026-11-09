@@ -11,7 +11,9 @@ point at them), still in the temporary homes, and checks the plugins they report
 Cases: install over existing files, an idempotent second run, --update after a change in the
 source, --uninstall leaving CLAUDE.md and AGENTS.md byte-identical (or absent when they were),
 a symlinked ~/.codex/AGENTS.md refused before any change, a missing client skipped, --guards
-merging and removing the settings, rules and hook, the Codex rules as regular copies (refreshed by
+merging and removing the settings, rules and hooks (the git guard and the personal-data hook in
+~/.codex/hooks.json beside the user's own entries, the latter added by --update to an older
+install), the Codex rules as regular copies (refreshed by
 --update, a link of an earlier version replaced, a changed copy left by --uninstall), --with
 issue-chats installed beside core in both clients and kept on a plain rerun, an unknown plugin
 refused, and an overlay in both blocks.
@@ -35,6 +37,7 @@ if REAL:
     sys.argv.remove('--real')
 BEGIN = '<!-- >>> agentic-github-flow >>> -->'
 CORE_TITLE = '# agentic-github-flow: rules for every session'
+PD_MATCHER = r'^(Bash|webrun|web\.run|mcp__.*)$'  # what the personal-data hook judges in Codex
 BUNDLED_CODEX = '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex'
 
 FAKE = r'''import json, os, sys
@@ -350,6 +353,7 @@ class InstallerTests(unittest.TestCase):
         hooks = json.loads(self.read('.codex', 'hooks.json'))
         command = hooks['hooks']['PreToolUse'][0]['hooks'][0]['command']
         self.assertIn('pre_tool_git_guard.py', command)
+        self.assertEqual(self.codex_personal_data_entries(), [PD_MATCHER])
         # the delete guard can only ask, which Codex hooks cannot: it stays out of Codex
         self.assertNotIn(b'pre_tool_delete_guard.py', self.read('.codex', 'hooks.json'))
         rules = self.path('.codex', 'rules', 'agentic-github-flow-git-safety.rules')
@@ -365,6 +369,52 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(after, settings)
         self.assertIsNone(self.read('.codex', 'hooks.json'))
         self.assertFalse(os.path.lexists(rules))
+
+    def codex_personal_data_entries(self):
+        """The matchers of the ~/.codex/hooks.json entries that run the personal-data hook."""
+        data = json.loads(self.read('.codex', 'hooks.json') or b'{}')
+        found = []
+        for entry in data.get('hooks', {}).get('PreToolUse', []):
+            for hook in entry['hooks']:
+                if 'pre_tool_personal_data.py' in hook['command']:
+                    self.assertTrue(hook['command'].endswith('pre_tool_personal_data.py" --codex'),
+                                    hook['command'])
+                    self.assertEqual(hook['timeout'], 10)
+                    found.append(entry['matcher'])
+        return found
+
+    def test_codex_personal_data_hook_beside_the_users_own_hooks(self):
+        own = {'hooks': {'PreToolUse': [{'matcher': 'Bash', 'hooks': [
+            {'type': 'command', 'command': 'my-own-hook', 'timeout': 5}]}]}, 'other': 1}
+        self.write(json.dumps(own).encode(), '.codex', 'hooks.json')
+        code, out = self.install('--guards')
+        self.assertEqual(code, 0, out)
+        entries = json.loads(self.read('.codex', 'hooks.json'))['hooks']['PreToolUse']
+        self.assertEqual(entries[0], own['hooks']['PreToolUse'][0])
+        self.assertEqual(len(entries), 3, entries)
+        self.assertEqual(self.codex_personal_data_entries(), [PD_MATCHER])
+        self.assertIn('personal-data guard added', out)
+        # an install recorded before the personal-data hook existed gets it on --update, once
+        state_file = self.path('.agentic-github-flow', '.state', 'install.json')
+        with open(state_file, encoding='utf-8') as f:
+            state = json.load(f)
+        state.pop('codex_personal_data_hook')
+        with open(state_file, 'w', encoding='utf-8') as f:
+            json.dump(state, f)
+        data = json.loads(self.read('.codex', 'hooks.json'))
+        data['hooks']['PreToolUse'] = [e for e in data['hooks']['PreToolUse']
+                                       if 'pre_tool_personal_data.py' not in json.dumps(e)]
+        self.write(json.dumps(data).encode(), '.codex', 'hooks.json')
+        code, out = self.install('--update')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.codex_personal_data_entries(), [PD_MATCHER])
+        code, out = self.install('--update')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(len(json.loads(self.read('.codex', 'hooks.json'))['hooks']['PreToolUse']),
+                         3)
+        code, out = self.install('--uninstall')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(json.loads(self.read('.codex', 'hooks.json')), own)
 
     def rules_copies(self):
         folder = self.path('.codex', 'rules')

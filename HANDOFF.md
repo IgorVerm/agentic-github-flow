@@ -1,6 +1,6 @@
 # agentic-github-flow: current state
 
-Checked on 2026-11-09 (v2).
+Checked on 2026-11-09 (v2, and the landing modes of #13).
 
 ## State
 
@@ -17,11 +17,22 @@ Checked on 2026-11-09 (v2).
     `sources.md` (sources, read dates, the osv-scanner pin).
   - web-deploy: mail-domain and EU privacy checks.
   - guards: a delete guard for Claude Code (asks, never denies); Codex prompt rules for deletes;
-    Codex rules files installed as copies, because Codex skips a symlinked rules file.
+    Codex rules files installed as copies, because Codex skips a symlinked rules file; the
+    personal-data guard's settings `exempt-dirs` and `local-mcp`, and its Codex hook installed by
+    `--guards` (#15).
   - issue-chats (new, opt-in): one issue per chat, hand-over to the next ready issue, archiving
     only once a chat's work is on GitHub. The method: `plugins/issue-chats/skills/issue-handover/method.md`.
     The automatic start of the next chat needs the Claude Code CLI and desktop app (measured on
     macOS only); Codex uses its own thread tools; elsewhere the chat hands over a brief to paste.
+- Landing modes (#13): finished work lands through a pull request or on local main, detected
+  per repository at every landing by `plugins/core/scripts/landing.py` (its header owns the
+  rule; a copy in the issue-chats plugin). Local main lands with `promote_main.py` and pushes
+  the landing branch on the user's word (`plugins/core/skills/ship-change/local-main.md`). The
+  setting `## Landing settings` can fix the mode and name a landing branch; the worktree,
+  overlap and cleanup scripts and `templates/pre-push` follow that branch.
+- Automatic merging (#13, `DESIGN_DECISIONS.md`): under a standing grant, `merge_pr.py` merges
+  an agent's own pull request when its checks, review, overlap line and paths allow it. This
+  repository grants nothing (Standing permissions below).
 - Not run yet: the live skill-choice probe for the new and changed descriptions, an end-to-end
   issue-chat chain in the desktop app or in Codex.
 
@@ -43,9 +54,20 @@ Checked on 2026-11-09 (v2).
 | a skill | its `SKILL.md`, `plugins/core/skills/repo-docs/skill-standard.md`, `tests/skills_format.py` |
 | the installer | `tools/installer.py` (its docstring owns the behaviour), `tests/installer.py` |
 | the guards | `plugins/guards/scripts/*.py` headers, `plugins/guards/policy/*.rules`, `tests/git_guard.py`, `tests/delete_guard.py` (cases in `tests/delete_guard_cases.py`; `tests/delete_guard_differential.py` checks it never asks less than before issue 4), `tests/personal_data_guard.py`, `tests/codex_policy.py` |
+| automatic merging | `plugins/core/scripts/merge_pr.py` header, `DESIGN_DECISIONS.md`, `tests/merge_pr.py` |
+| landing modes | `plugins/core/scripts/landing.py` and `promote_main.py` headers, `plugins/core/skills/ship-change/` (`SKILL.md`, `local-main.md`), `tests/landing.py`, `tests/promote_main.py` |
 | worktrees and cleanup | `plugins/core/scripts/*.py` headers, `plugins/core/skills/cleanup-merged/SKILL.md`, `tests/worktree_tools.py`, `tests/new_worktree.py`, `tests/overlap_check.py` |
 | the security scanners | `plugins/security/scripts/*.py` headers, `plugins/security/skills/review-security/sources.md`, `tests/scan_secrets.py`, `tests/audit_dependencies.py` |
 | issue chats | `plugins/issue-chats/skills/issue-handover/method.md`, `plugins/issue-chats/scripts/*.py` headers, `tests/next_issue.py`, `tests/start_issue_chat.py`, `tests/chat_archivable.py`, `tests/archive_guard.py` |
+
+## Landing settings
+
+This repository is the team edition others install, and its changes are reviewed as pull
+requests, whatever the detection would say about its one writer.
+
+| Setting | Value |
+|---|---|
+| landing | `pull request` |
 
 ## Standing permissions
 

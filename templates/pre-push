@@ -9,12 +9,24 @@
 # merged`, when gh is installed and the remote has a URL; gh alone would prefer a remote
 # `upstream`): a merged task branch, as the cleanup-merged skill deletes it. main and master are
 # refused by name even when the default branch is another one.
+# The landing branch: when HANDOFF.md on the default branch has a row `landing branch` in its
+# `## Landing settings` section (the core plugin's landing.py owns the setting; this hook reads
+# the same row, as last fetched), that branch is refused by name too, and "merged" means merged
+# into it: in its tip as last fetched, or the head of a pull request merged into it. A value
+# that is no branch name refuses every deletion.
 # Install per repository (worktrees share it): cp pre-push "$(git rev-parse --git-path hooks)/pre-push"
 # and chmod +x it; an existing pre-push hook is chained by hand, never overwritten. On Windows,
 # Git for Windows runs it with its own sh.
 remote="$1"
 default=$(git symbolic-ref -q "refs/remotes/$remote/HEAD" 2>/dev/null) ||
   default="refs/remotes/$remote/main"
+landing=$(git show "$default:HANDOFF.md" 2>/dev/null | awk '
+  /^## / { on = ($0 ~ /^## Landing settings[ \t]*$/); next }
+  on && /^[ \t]*[|]/ {
+    line = $0; sub(/^[ \t]*[|]/, "", line); split(line, cell, "|")
+    key = tolower(cell[1]); gsub(/^[ \t]+|[ \t]+$/, "", key)
+    if (key == "landing branch") { v = cell[2]; gsub(/[` \t]/, "", v); print v; exit }
+  }')
 while read lref lsha rref rsha; do
   case "$lsha" in *[!0]*) ;; *)
     case "$rref" in
@@ -23,17 +35,29 @@ while read lref lsha rref rsha; do
       refs/heads/*) ;;
       *) echo "pre-push: refusing to DELETE $rref (ask the user)" >&2; exit 1 ;;
     esac
-    if git merge-base --is-ancestor "$rsha" "$default" 2>/dev/null; then
+    landed="$default"
+    if [ -n "$landing" ]; then
+      case "$landing" in -*) landing="-" ;; esac
+      if ! git check-ref-format --branch "$landing" >/dev/null 2>&1; then
+        echo "pre-push: refusing to DELETE $rref: \`landing branch\` in HANDOFF.md is no branch name" >&2
+        exit 1
+      fi
+      if [ "$rref" = "refs/heads/$landing" ]; then
+        echo "pre-push: refusing to DELETE the landing branch $rref" >&2; exit 1
+      fi
+      landed="refs/remotes/$remote/$landing"
+    fi
+    if git merge-base --is-ancestor "$rsha" "$landed" 2>/dev/null; then
       continue
     fi
     branch=${rref#refs/heads/}
     url=$(git remote get-url "$remote" 2>/dev/null)
     if [ -n "$url" ] && command -v gh >/dev/null 2>&1 &&
-       gh pr list -R "$url" --head "$branch" --base "${default#"refs/remotes/$remote/"}" \
+       gh pr list -R "$url" --head "$branch" --base "${landed#"refs/remotes/$remote/"}" \
          --state merged --json headRefOid --jq '.[].headRefOid' 2>/dev/null | grep -qx "$rsha"; then
       continue
     fi
-    echo "pre-push: refusing to DELETE $rref: its tip is not in $default and is not the head" >&2
+    echo "pre-push: refusing to DELETE $rref: its tip is not in $landed and is not the head" >&2
     echo "  of a merged pull request (fetch first; unmerged work: ask the user)" >&2
     exit 1 ;;
   esac

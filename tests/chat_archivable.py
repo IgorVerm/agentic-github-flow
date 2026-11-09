@@ -102,6 +102,42 @@ class ChatArchivable(unittest.TestCase):
             f.write('new\n')
         self.assertKeep(wt, 'new.txt')
 
+    def test_untracked_files_hidden_by_configuration_keep(self):
+        # status.showUntrackedFiles=no would hide them from a plain `git status --porcelain`
+        wt = self.worktree('hidden-untracked')
+        self.git(wt, 'config', 'status.showUntrackedFiles', 'no')
+        try:
+            os.makedirs(os.path.join(wt, 'deep', 'er'))
+            with open(os.path.join(wt, 'deep', 'er', 'new.txt'), 'w') as f:
+                f.write('new\n')
+            self.assertKeep(wt, 'deep/er/new.txt')
+        finally:
+            self.git(wt, 'config', '--unset', 'status.showUntrackedFiles')
+
+    def test_assume_unchanged_and_skip_worktree_keep(self):
+        for flag, name in (('--assume-unchanged', 'assumed'), ('--skip-worktree', 'skipped')):
+            wt = self.worktree(name)
+            self.git(wt, 'update-index', flag, 'f.txt')
+            with open(os.path.join(wt, 'f.txt'), 'a') as f:
+                f.write('a change git status does not show\n')
+            self.assertEqual(self.git(wt, 'status', '--porcelain'), '', flag)
+            self.assertKeep(wt, 'hidden from git status')
+
+    def test_a_folder_without_its_git_link_is_not_judged_by_the_enclosing_checkout(self):
+        # a worktree made inside the primary checkout loses its .git link: git would answer for
+        # the enclosing checkout, which is clean and on GitHub, and the work inside would go
+        inner = os.path.join(self.repo, 'inner-wt')
+        self.git(self.repo, 'worktree', 'add', '-q', '-b', 'agent/inner', inner, 'origin/main')
+        os.remove(os.path.join(inner, '.git'))
+        with open(os.path.join(self.repo, '.git', 'info', 'exclude'), 'a') as f:
+            f.write('inner-wt/\n')  # so the enclosing checkout itself stays clean
+        self.assertKeep(inner, 'not the top of its own git worktree')
+        # outside any checkout, the same folder is no worktree at all
+        wt = self.worktree('lost-link')
+        os.remove(os.path.join(wt, '.git'))
+        code, line = self.check(wt)
+        self.assertEqual(code, 1, line)
+
     def test_commit_not_pushed_keeps_until_the_branch_is_pushed(self):
         wt = self.worktree('ahead')
         self.commit(wt)

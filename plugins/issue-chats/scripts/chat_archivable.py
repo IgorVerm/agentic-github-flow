@@ -7,13 +7,17 @@ Archiving a chat in the Claude Code desktop app removes the worktree the app mad
 chat whose work is only on this machine must not leave the sidebar, so the answer is "ok" only
 when nothing in the worktree can be lost and every commit of it is on GitHub:
 
-  ok        the worktree is gone already; or it is clean (no tracked change, no untracked file,
-            no git operation in progress; ignored files are build output) and its HEAD is in a
-            remote-tracking branch of origin after a fetch: the default branch
-            (`refs/remotes/origin/HEAD`, else origin/main, origin/master) or the branch's own
-            `origin/<branch>` (pushed by the ship-change skill)
-  keep: ... the reason, one line (changes, untracked files, a git operation in progress, no
-            remote origin, commits that are not on GitHub); the chat stays
+  ok        the worktree is gone already; or it is the top of its own git worktree and clean (no
+            tracked change, no untracked file in any directory whatever status.showUntrackedFiles
+            says, no change in a submodule, no file hidden from status by assume-unchanged or,
+            outside a sparse checkout, skip-worktree, no git operation in progress; ignored
+            files are build output), and its HEAD is in a remote-tracking branch of origin
+            after a fetch: the default branch (`refs/remotes/origin/HEAD`, else origin/main,
+            origin/master) or the branch's own `origin/<branch>` (pushed by ship-change)
+  keep: ... the reason, one line (not a worktree of its own, for example a folder whose .git
+            link is missing inside another checkout; changes, untracked or hidden files, a git
+            operation in progress, no remote origin, commits that are not on GitHub); the chat
+            stays
 
 It fetches origin first (no prune, so a branch GitHub deleted after its merge still counts as
 pushed); when the fetch fails it judges on the remote-tracking refs as last fetched, which only
@@ -31,7 +35,7 @@ import sys
 
 OPERATIONS = ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply",
               "BISECT_LOG")
-FETCH_TIMEOUT_S = 30
+FETCH_TIMEOUT_S = 25  # archive_guard.py waits at most 40 s for the whole check
 
 
 def git(wt: str, *args: str, timeout: int = 30) -> subprocess.CompletedProcess:
@@ -45,21 +49,49 @@ def out(wt: str, *args: str) -> str | None:
     return p.stdout.strip() if p.returncode == 0 else None
 
 
+def hidden_paths(wt: str) -> list[str] | None:
+    """Tracked paths whose changes git status does not show: assume-unchanged (a lowercase tag
+    in `git ls-files -v`) always, skip-worktree (`S`) unless the worktree is a sparse checkout,
+    where that bit is how the excluded paths are marked."""
+    p = git(wt, "ls-files", "-v", "-z")
+    if p.returncode != 0:
+        return None
+    sparse = (out(wt, "config", "--bool", "core.sparseCheckout") or "") == "true"
+    hidden = []
+    for entry in p.stdout.split("\0"):
+        if len(entry) < 3:
+            continue
+        tag, path = entry[0], entry[2:]
+        if tag.islower() or (tag == "S" and not sparse):
+            hidden.append(path)
+    return hidden
+
+
 def verdict(wt: str, fetch: bool = True) -> tuple[int, str]:
     if not os.path.lexists(wt):
         return 0, "ok (worktree gone)"
     gd = out(wt, "rev-parse", "--absolute-git-dir")
     if not gd:
         return 1, f"keep: {wt} is not a git worktree"
+    top = out(wt, "rev-parse", "--show-toplevel")
+    if not top or os.path.realpath(top) != os.path.realpath(wt):
+        return 1, (f"keep: {wt} is not the top of its own git worktree (it lies inside "
+                   f"{top or 'another checkout'}; is its .git link missing?)")
     for op in OPERATIONS:
         if os.path.exists(os.path.join(gd, op)):
             return 1, f"keep: a git operation is in progress ({op})"
-    st = git(wt, "status", "--porcelain")
+    st = git(wt, "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none")
     if st.returncode != 0:
         return 1, f"keep: git status failed: {st.stderr.strip()[:200]}"
     lines = [x for x in st.stdout.splitlines() if x.strip()]
     if lines:
         return 1, f"keep: {len(lines)} changed or untracked path(s), e.g. {lines[0][3:]}"
+    hidden = hidden_paths(wt)
+    if hidden is None:
+        return 1, "keep: git ls-files -v failed"
+    if hidden:
+        return 1, (f"keep: {len(hidden)} path(s) hidden from git status (assume-unchanged or "
+                   f"skip-worktree), e.g. {hidden[0]}")
     if "origin" not in (out(wt, "remote") or "").split():
         return 1, "keep: no remote origin, so nothing of this worktree is on GitHub"
     note = ""

@@ -97,8 +97,10 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
       when the platform has no known form of `script`, the CLI is logged out, the worktree is a
       primary checkout, dirty or already some session's, the title is not of the form, another
       running chat carries the title, or the issue is closed or already assigned. Exit 0 prints
-      `ok local_<sessionId>`: the new chat is open in the app. Exit 1 (`fail:`): nothing runs
-      and nothing was opened. Exit 2 (`unsure:`): it may be open or running.
+      `ok local_<sessionId>`: the new chat is open in the app, its ready reply on `<model>`.
+      Exit 1 (`fail:`): nothing runs and nothing was opened, also when the new chat gave no
+      real ready reply or answered on another model (the tool stops it). Exit 2 (`unsure:`): it
+      may be open or running.
    4. **Claim the issue:** `gh issue edit <n> --add-assignee @me`, then a signed comment whose
       text after the signature opens with
       `claimed for chat "<title>" (local_<sessionId>), branch <branch>, worktree <path>`, and

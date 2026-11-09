@@ -205,6 +205,9 @@ ASK = [
     ('ls | xargs -0n 1 -r rm -rf', REPO), ('ls | xargs -rL 1 -- rm -rf', REPO),
     ('ls | xargs -0P 4 -n1 rm -rf', REPO), ('ls | xargs -tL 1 -r rm -rf', REPO),
     ('ls | xargs -0n 1 -r sh -c "rm -rf $0"', REPO), ('ls | xargs --max-a 1 -r rm -rf', REPO),
+    ('ls | xargs -Z find . -delete', REPO), ('ls | xargs --max-a 1 find . -delete', REPO),
+    ('ls | xargs --foo find . -delete', REPO), ('ls | xargs -Z find ~ -delete', REPO),
+    ('ls | xargs -Z env find . -delete', REPO),
 ]
 if LINK:
     ASK.append(('rm -rf "%s/liblink/"' % R, REPO))

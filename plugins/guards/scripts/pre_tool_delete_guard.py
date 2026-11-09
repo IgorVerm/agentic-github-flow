@@ -981,6 +981,12 @@ def judge_xargs(args, state, depth):
     if SHELLS & set(named):
         return ('hands what xargs reads to a shell (%s), which may run it as commands'
                 % ' '.join(w.raw() for w in args))
+    if not sure:  # an option it does not know may take the next words: try every start
+        for j in range(k, len(args)):
+            tail = unwrap(args[j:])
+            if tail and deletes_inside(tail):
+                return ('hands what xargs reads to a program that deletes (%s)'
+                        % ' '.join(w.raw() for w in tail))
     if not rest:
         return None
     if deletes_inside(rest):

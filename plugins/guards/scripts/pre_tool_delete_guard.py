@@ -1695,6 +1695,26 @@ def moves_in(text, state):
     return specs
 
 
+def cdpath(word, state):
+    """The folders of a CDPATH value: split at `:` before a `~` at the start of an entry
+    expands (a Windows home has a drive colon), and a computed value is unknown."""
+    if any(q != "'" and ('$' in t or '`' in t) for q, t in word.parts):
+        value = evaluate(word, state.values())
+        if value.computed:
+            return [None]
+        entries = value.text.split(':')
+        if WINDOWS:  # `c:/x` split at its drive colon: join the letter back
+            k = 0
+            while k < len(entries) - 1:
+                if re.fullmatch(r'[A-Za-z]', entries[k]) and entries[k + 1].startswith(('/', '\\')):
+                    entries[k:k + 2] = [entries[k] + ':' + entries[k + 1]]
+                k += 1
+    else:
+        entries = word.raw().split(':')
+    return [norm(state.home + e[1:] if e == '~' or e.startswith('~/') else e or '.', state.cwd)
+            for e in entries]
+
+
 def computed_cd(word):
     """True for a computed command word whose text names a cd: `$(echo cd)`."""
     return any(q != "'" and ('$' in t or '`' in t) for q, t in word.parts) and bool(
@@ -1855,10 +1875,7 @@ class MoreFolders:
         ext = view
         for w in words:
             if w.raw().startswith('CDPATH='):
-                value = evaluate(tail_word(w, len('CDPATH=')) or Word(), state.values())
-                shell.cdpath = [None] if value.computed else [  # `~` after `:` expands too
-                    norm(state.home + p[1:] if p == '~' or p.startswith('~/') else p or '.',
-                         state.cwd) for p in value.text.split(':')]
+                shell.cdpath = cdpath(tail_word(w, len('CDPATH=')) or Word(), state)
         specs = cd_specs(rest, state)
         if specs is not None:
             targets = resolve(specs, view, state)

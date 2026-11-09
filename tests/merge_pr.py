@@ -127,8 +127,8 @@ class MergePr(unittest.TestCase):
     def merged(self):
         return [a for a in self.log if a[:2] == ['pr', 'merge']]
 
-    def assertMerged(self, pr, *args):
-        r = self.run_tool(pr, *args)
+    def assertMerged(self, pr, *args, **kw):
+        r = self.run_tool(pr, *args, **kw)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         return r
 
@@ -282,6 +282,51 @@ class MergePr(unittest.TestCase):
                 self.head = self.change('HANDOFF.md', '# Handoff\n\n## %s\n\nGranted.\n' % title)
                 self.assertRefused(self.pr(comments=[self.comment('Approved %s' % self.head)]),
                                    title)
+
+    def test_a_teammates_changes_requested(self):
+        review = {'submittedAt': '2026-11-09T12:00:00Z', 'state': 'CHANGES_REQUESTED',
+                  'author': {'login': 'teammate'}, 'body': 'please fix the loop'}
+        self.assertRefused(self.pr(reviews=[dict(review, authorAssociation='COLLABORATOR')]),
+                           'teammate requests changes')
+        later = dict(review, state='APPROVED', submittedAt='2026-11-09T13:00:00Z',
+                     authorAssociation='COLLABORATOR')
+        self.assertMerged(self.pr(reviews=[dict(review, authorAssociation='COLLABORATOR'),
+                                           later]), '--dry-run')
+        self.assertMerged(self.pr(reviews=[dict(review, authorAssociation='NONE')]), '--dry-run')
+
+    def test_new_headings_naming_the_grant(self):
+        for text in ('## Standing permissions (2026-11)\n\nAutomatic merging.\n',
+                     '### Standing permissions\n\nAutomatic merging.\n',
+                     'Our landing settings changed: local main.\n'):
+            with self.subTest(text=text):
+                self.head = self.change('HANDOFF.md', '# Handoff\n\n' + text)
+                self.assertRefused(self.pr(comments=[self.comment('Approved %s' % self.head)]),
+                                   'line naming them')
+
+    def test_required_checks_row_and_app_checks(self):
+        self.git('switch', '-q', 'main')
+        self.write('HANDOFF.md', "# H\n\n## Landing settings\n\n| Setting | Value |\n|---|---|\n"
+                   "| required checks | test (ubuntu, 3.12); lint |\n")
+        self.git('commit', '-q', '-am', 'settings')
+        self.git('push', '-q', 'origin', 'main')
+        self.git('fetch', '-q', 'origin')
+        self.git('switch', '-q', 'agent/7-x')
+        self.git('merge', '-q', '--no-edit', 'origin/main')
+        self.head = self.change('skills.md', 'v2\n')
+        none = {'repos/acme/tool/rules/branches/main': [200, []]}
+        run = lambda name, **kw: dict({'__typename': 'CheckRun', 'name': name,  # noqa: E731
+                                       'status': 'COMPLETED', 'conclusion': 'SUCCESS'}, **kw)
+        ok = [run('test (ubuntu, 3.12)'), run('lint')]
+        pr = self.pr(statusCheckRollup=ok, comments=[self.comment('Approved %s' % self.head)])
+        self.assertMerged(pr, '--dry-run', api=none)
+        self.assertRefused(dict(pr, statusCheckRollup=ok[:1]), 'lint', api=none)
+        # a check GitHub ties to an app: a status of the same name does not satisfy it
+        app = {'repos/acme/tool/rules/branches/main': [200, [{
+            'type': 'required_status_checks', 'parameters': {'required_status_checks': [
+                {'context': 'build', 'integration_id': 15368}]}}]]}
+        spoof = ok + [{'__typename': 'StatusContext', 'context': 'build', 'state': 'SUCCESS'}]
+        self.assertRefused(dict(pr, statusCheckRollup=spoof), 'app:build', api=app)
+        self.assertMerged(dict(pr, statusCheckRollup=ok + [run('build')]), '--dry-run', api=app)
 
     def test_manifest_versions_alone_pass(self):
         manifest = 'plugins/core/.claude-plugin/plugin.json'

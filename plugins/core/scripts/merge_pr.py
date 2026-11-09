@@ -14,11 +14,12 @@ when all hold:
             request's base is the landing branch;
   state     open, not a draft, merge state CLEAN (GitHub's own rules and checks satisfied), and
             no review decision CHANGES_REQUESTED;
-  checks    every required check is on the head commit and SUCCESS (a skipped one is not), and
-            no other check failed or is unfinished. Required: the checks GitHub requires on the
-            landing branch (ruleset or branch protection, as far as readable) and the names in
-            the row `required checks` of HANDOFF.md's `## Landing settings`; none named at all
-            refuses, since "every platform" cannot be checked then;
+  checks    every required check is on the head commit and SUCCESS (a skipped one is not; one
+            GitHub ties to an app only as a check run), and no other check failed or is
+            unfinished. Required: the checks GitHub requires on the landing branch (ruleset or
+            branch protection, as far as readable) and the names, separated by `;`, in the row
+            `required checks` of HANDOFF.md's `## Landing settings`; none named at all refuses,
+            since "every platform" cannot be checked then;
   review    the newest signed review by the signed-in account (agents post under the user's
             account; a stranger's or a pending review never counts), with the role `review` or
             `reviewer` (`🤖 <agent> (review): Approved <sha>`), approves: it opens with
@@ -27,16 +28,17 @@ when all hold:
             followed only by two-parent merges of the base branch whose tree is git's own merge
             result (no conflict resolved, nothing edited), so a merge of the default branch
             after the review needs only green checks again. A newer review of that account
-            with state CHANGES_REQUESTED refuses;
+            with state CHANGES_REQUESTED refuses, and so does the latest review of anyone with
+            write access (owner, member, collaborator) that requests changes;
   overlap   the body holds the overlap check's result: a line starting with `Overlap` (the
             ship-change skill's step 5); what it says stays the reviewer's to judge;
   paths     no changed path (both sides of a rename; compared without case, since macOS and
             Windows do not tell case apart) is one that merges only on the user's word: EXCLUDED
             below (a plugin manifest whose versions alone changed excepted: MANIFESTS), and the
             patterns (comma-separated, `*` matches across `/`) of the row `merge on the user's
-            word`; and the sections `## Standing permissions` and
-            `## Landing settings` of HANDOFF.md, which hold the grant and these settings, are
-            unchanged.
+            word`; and the sections `## Standing permissions` and `## Landing settings` of
+            HANDOFF.md (any case of its name), which hold the grant and these settings, are
+            unchanged, as is every line that names either.
 
 Then `gh pr merge <n> --match-head-commit <sha> --delete-branch --merge` (or --squash), so a
 commit pushed after the checks makes GitHub refuse. Afterwards the cleanup-merged skill. A bare
@@ -79,6 +81,7 @@ EXCLUDED = (
 # raises it) passes; any other change, such as a hook a manifest declares, is held.
 MANIFESTS = ("*.claude-plugin/*.json", "*.codex-plugin/*.json", ".agents/plugins/*.json")
 GUARDED_SECTIONS = ("Standing permissions", "Landing settings")
+GUARDED_LINE = re.compile(r"standing permission|landing setting", re.I)
 PASSED_RUNS = {"SUCCESS", "NEUTRAL", "SKIPPED"}
 REVIEW_ROLES = {"review", "reviewer"}
 SIGNED = re.compile(r"\A\s*\N{ROBOT FACE}\s*[^\n(]*\(([^)\n]*)\):\s*(?:\*\*)?(.*)", re.S)
@@ -129,22 +132,25 @@ def section(text: str | None, title: str) -> str:
 
 def required_checks(command: list, repo: str, branch: str, named: list) -> set:
     """The check names required on <branch>: the ruleset's and branch protection's, as far as
-    readable, and the names HANDOFF.md lists."""
+    readable, and the names HANDOFF.md lists. A name GitHub ties to an app (integration_id) is
+    returned as "app:<name>": only a check run, not a status anyone can post, satisfies it."""
     required = set(named)
     try:
         status, rules = gh_json(command, "api", f"repos/{repo}/rules/branches/{branch}")
         for rule in rules if status == 200 and isinstance(rules, list) else []:
             if isinstance(rule, dict) and rule.get("type") == "required_status_checks":
                 for c in (rule.get("parameters") or {}).get("required_status_checks") or []:
-                    required.add(str(c.get("context")))
+                    required.add(("app:" if c.get("integration_id") else "")
+                                 + str(c.get("context")))
         status, prot = gh_json(command, "api",
                                f"repos/{repo}/branches/{branch}/protection/required_status_checks")
         if status == 200 and isinstance(prot, dict):
             required |= {str(c) for c in prot.get("contexts") or []}
-            required |= {str(c.get("context")) for c in prot.get("checks") or []}
+            required |= {("app:" if c.get("app_id") else "") + str(c.get("context"))
+                         for c in prot.get("checks") or []}
     except Unknown:
         pass
-    return {r for r in required if r and r != "None"}
+    return {r for r in required if r and not r.endswith("None")}
 
 
 def check_reasons(rollup, required: set) -> list:
@@ -152,7 +158,7 @@ def check_reasons(rollup, required: set) -> list:
     if not required:
         return ["no required checks are named (a ruleset or branch protection on the landing "
                 "branch, or the row `required checks` in Landing settings)"]
-    bad, passed = [], set()
+    bad, passed, runs = [], set(), set()
     for c in rollup or []:
         name = str(c.get("name") or c.get("context") or "?")
         if c.get("__typename") == "StatusContext" or ("state" in c and "conclusion" not in c):
@@ -167,9 +173,11 @@ def check_reasons(rollup, required: set) -> list:
             conclusion = str(c.get("conclusion")).upper()
             if conclusion == "SUCCESS":
                 passed.add(name)
+                runs.add(name)
             elif conclusion not in PASSED_RUNS:
                 bad.append(f"check {name}: {conclusion}")
-    missing = sorted(required - passed)
+    missing = sorted(r for r in required if (r[4:] not in runs if r.startswith("app:")
+                                             else r not in passed))
     if missing:
         bad.append("required checks not passed on the head: " + ", ".join(missing))
     return bad
@@ -196,6 +204,23 @@ def clean_base_merges(path: str, reviewed: str, head: str, base_ref: str) -> str
         if tree.returncode != 0 or tree.stdout.split("\n")[0].strip() != own:
             return f"{sha[:10]} after the review is a merge with a conflict or an edit"
     return None
+
+
+MEMBERS = {"OWNER", "MEMBER", "COLLABORATOR"}
+
+
+def changes_requested(pr: dict) -> list:
+    """The people with write access (owner, member, collaborator) whose latest submitted review
+    requests changes."""
+    latest = {}
+    for r in sorted(pr.get("reviews") or [], key=lambda r: str((r or {}).get("submittedAt"))):
+        state = str((r or {}).get("state") or "").upper()
+        who = str(((r or {}).get("author") or {}).get("login") or "")
+        if state in ("PENDING", "COMMENTED", "") or not (r or {}).get("submittedAt") or not who:
+            continue
+        if str((r or {}).get("authorAssociation") or "").upper() in MEMBERS:
+            latest[who] = state
+    return sorted(w for w, s in latest.items() if s == "CHANGES_REQUESTED")
 
 
 def review_reason(path: str, pr: dict, login: str, head: str, base_ref: str) -> tuple:
@@ -313,9 +338,15 @@ def main(argv: list) -> int:
     except SettingError as e:
         print(f"merge_pr: {e}", file=sys.stderr)
         return 2
+    refreshed = git(path, "fetch", "--quiet", "origin",
+                    f"+refs/heads/{landing}:refs/remotes/origin/{landing}")
+    if refreshed.returncode != 0:
+        print(f"merge_pr: cannot fetch the landing branch {landing}: "
+              f"{refreshed.stderr.strip()[:200]}", file=sys.stderr)
+        return 2
     split = lambda v: [p for p in re.split(r"[,\s]+", v or "") if p]  # noqa: E731
     extra = split(row(text, "merge on the user's word"))
-    named = [p.strip() for p in (row(text, "required checks") or "").split(",") if p.strip()]
+    named = [p.strip() for p in (row(text, "required checks") or "").split(";") if p.strip()]
 
     reasons = []
     if mode != PR:
@@ -328,6 +359,8 @@ def main(argv: list) -> int:
         reasons.append(f"merge state {pr.get('mergeStateStatus')}, not CLEAN")
     if str(pr.get("reviewDecision") or "").upper() == "CHANGES_REQUESTED":
         reasons.append("a review requests changes")
+    for who in changes_requested(pr):
+        reasons.append(f"{who} requests changes")
     if base != landing:
         reasons.append(f"its base is {base}, not the landing branch {landing}")
     reasons += check_reasons(pr.get("statusCheckRollup"),
@@ -363,13 +396,15 @@ def main(argv: list) -> int:
                        and not version_only(path, merge_base, head, p)})
         if held:
             reasons.append("paths that merge only on the user's word: " + ", ".join(held[:8]))
-        if any(p.casefold() == "handoff.md" for p in changed):
-            before = git(path, "show", f"{merge_base}:HANDOFF.md").stdout
-            after = git(path, "show", f"{head}:HANDOFF.md").stdout
-            for title in GUARDED_SECTIONS:
-                if section(before, title) != section(after, title):
-                    reasons.append(f"HANDOFF.md §{title} changes: that merges only on the "
-                                   "user's word")
+        for name in sorted({p for p in changed if p.casefold() == "handoff.md"}):
+            before = git(path, "show", f"{merge_base}:{name}").stdout
+            after = git(path, "show", f"{head}:{name}").stdout
+            diff = git(path, "diff", "-U0", merge_base, head, "--", name).stdout.splitlines()
+            touched = [l for l in diff if l[:1] in "+-" and not l.startswith(("+++", "---"))
+                       and GUARDED_LINE.search(l)]
+            if touched or any(section(before, t) != section(after, t) for t in GUARDED_SECTIONS):
+                reasons.append(f"{name}: §Standing permissions, §Landing settings or a line "
+                               "naming them changes: that merges only on the user's word")
 
     print(f"merge_pr: #{number} in {repo}, head {head[:10]}, grant: {grant.strip()}")
     print(f"merge_pr: mode {mode}; {found or 'no approved review'}")

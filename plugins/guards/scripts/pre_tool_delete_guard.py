@@ -79,8 +79,9 @@ names a `cd` (`$(echo cd) ~`, `eval "$(echo cd ~)"`); and the `cd`s of a functio
 the function is called, and of a DEBUG, RETURN or ERR trap after each command. Function
 bodies and trap texts are judged again at the end of their shell, in every folder it may be
 in from their definition on (`trap 'rm -rf Documents' EXIT; cd ~`). The second reading gets
-half of DEADLINE; when it faults or runs out of time, the command is judged again by the
-first reading alone, so it never asks less than that reading.
+half of DEADLINE; when it runs out of time, or faults on a command that names no delete, the
+command is judged again by the first reading alone, so it never asks less than that reading.
+More function and trap bodies than MAX_LATER ask when the command names a delete.
 The temporary folders: `/tmp`, `/private/tmp`, `/var/tmp`, `/var/folders`, `/private/var/folders`
 and the folder that `TMPDIR`, `TEMP` or `TMP` names, unless that is a root or holds a home
 folder; a path inside a home folder counts only when the temporary folder lies inside that home

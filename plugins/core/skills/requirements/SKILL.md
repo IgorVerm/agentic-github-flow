@@ -15,13 +15,27 @@ plugin runs, issue chats pick the packages up; without it, whoever takes the iss
 **The chat.** One topic per chat: what the user named, or one open issue with the requirements
 label. It builds nothing.
 
+**Where issue chats run** (the issue-chats plugin is installed, the repository's `HANDOFF.md`
+has `## Issue chats settings`, and the desktop app's session tools are present), the chat keeps
+an issue chat's lifecycle; the title form and the settings are owned by that plugin's
+`issue-handover` skill, `method.md` §2 and §1. Its first steps: set its title with
+`set_session_title` on `"self"`, `<title prefix>Requirements · #<n> · <topic>` when it started
+from issue `<n>`, otherwise `<title prefix>Requirements · new · <topic>`; file itself under the
+settings' sidebar section (`list_sections`, `create_section` only if it is missing,
+`move_sessions` with `["self"]`); and work from the start in a worktree of its own, made with
+the settings' worktree tool for `<n>-requirements` from issue `<n>`, otherwise
+`requirements-<short topic>`, never in the primary checkout, so any file change below is made
+there. It renames itself at step 5 and archives itself at step 6.
+Elsewhere (without that plugin or section, outside the desktop app, in Codex) these steps do
+not apply and the chat ends with its report.
+
 **The issues hold the work.** The specification and the packages live on GitHub: the parent
 issue and its sub-issues. The chat changes a file in the repository only where an issue cannot
 own the fact: the user's rulings in `DESIGN_DECISIONS.md` (or where the repository keeps its
 decisions), a design document only when the design outlives the work, a short pointer from an
 existing document to the issue. Such edits stay minimal, are made on a branch in a worktree of
-their own and go to a pull request by the `ship-change` skill, with the user's yes before the
-push.
+their own and land by the `ship-change` skill (a pull request, or local main where that is the
+repository's landing mode), with the user's yes before any push.
 
 1. **Read before asking.** Read the code of the area, the open issues (overlapping ones and the
    requirements label's queue), the repository's decisions and the design sections that bear
@@ -47,16 +61,27 @@ push.
    rulings to record. The confirmation is the approved scope; a change goes round step 3 again.
 5. **Create.** The parent first, then each package with `gh issue create --parent <parent>`
    when `gh issue create --help` lists that flag; otherwise name the parent in the body and
-   tell the user. Bodies start `🤖 <agent> (requirements):`. Labels: each package the ready
-   label (and its area label); the parent the ready label with `after #n` for each package,
+   tell the user. Where issue chats run, rename this chat to
+   `<title prefix>Requirements · #<parent> · <topic>` as soon as the parent exists (work that
+   is one issue without a parent: that issue's number). Bodies
+   start `🤖 <agent> (requirements):`. Labels: each package the ready label (and its area
+   label); the parent the ready label with `after #n` for each package,
    so whoever picks it up runs its end-to-end check and closes it once its packages are merged
    and the check passed; other labels as the repository's documents say. An issue that carried
    the requirements label: comment the specification on it, remove that label, add the ready
    label (or make it the parent). Record the rulings by the route above. Finally a comment on
    the parent listing its packages.
-6. **Report and end.** Tell the user: the parent, each package with its area, the rulings'
-   branch or pull request, what waits for them (a push, a review). Start no build: the packages
-   wait for whoever picks them up (a `priority: high` one: `open-issue` step 4).
+6. **Report and end.** Tell the user, in their language: the parent, each package with its
+   area, the rulings' branch or pull request, what waits for them (a push, a review). Start no
+   build, no successor and no issue chat: the packages wait for whoever picks them up (a
+   `priority: high` one: `open-issue` step 4). Where issue chats run, then call
+   `get_session "self"` (the plugin's archive guard needs its result) and run the worktree
+   check (the issue-chats plugin's `scripts/chat_archivable.py <worktree>`) on the worktree
+   this chat made and on the `worktreePath` that result names, if any. When every check says
+   `ok`, archive this chat (`archive_session` with `"self"` and a short `reason`), telling the
+   user first; on `keep:`, or when the archive is refused, stop with the reason. A rulings
+   branch the check does not pass yet (it waits for its push, or for its landing on local
+   main) keeps the chat; once it passes, the chat archives the same way.
 
 ## Definition of ready
 

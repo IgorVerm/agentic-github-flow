@@ -126,8 +126,16 @@ def wiring() -> list[str]:
 def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         clean, dirty, gone, ahead = repo(tmp)
-        me = lambda wt=None: {"sessionId": APP, **({"worktreePath": wt} if wt else {})}  # noqa: E731
-        other = lambda wt=None: {"sessionId": OTHER, **({"worktreePath": wt} if wt else {})}  # noqa: E731
+        primary = os.path.join(tmp, "repo")
+        os.makedirs(os.path.join(ahead, "sub"))  # a working directory below a worktree's top
+
+        def session(sid, wt=None, **where):
+            # without a worktreePath, the app reports where the chat works (default: primary)
+            return {"sessionId": sid, **({"worktreePath": wt} if wt else where or {"cwd": primary})}
+
+        me = lambda wt=None, **where: session(APP, wt, **where)  # noqa: E731
+        other = lambda wt=None, **where: session(OTHER, wt, **where)  # noqa: E731
+        as_user = lambda rec: dict(rec, type="user")  # noqa: E731
         T1, T2 = "2026-10-24T10:00:00.000Z", "2026-10-24T11:00:00.000Z"
         cases = [
             # (name, records, target, extra, raw, sub, expected)
@@ -160,6 +168,18 @@ def main() -> int:
             ("self spoof: api-request-blob copy", [use("a", "self", T1), res("a", me(), T1, rtype="api-request-blob")], "self", None, None, False, 2),
             ("self from a subagent: agent_id", [use("a", "self", T1), res("a", me(clean), T1)], "self", {"agent_id": "x"}, None, False, 2),
             ("self from a subagent: transcript", [use("a", "self", T1), res("a", me(clean), T1)], "self", None, None, True, 2),
+            # no worktreePath: the working directory's worktree is checked (renamed key, tool-made)
+            ("self ok: cwd in a clean worktree on GitHub", [use("a", "self", T1), res("a", me(cwd=clean), T1)], "self", None, None, False, 0),
+            ("self ok: cwd gone", [use("a", "self", T1), res("a", me(cwd=gone), T1)], "self", None, None, False, 0),
+            ("self ok: cwd outside any repository", [use("a", "self", T1), res("a", me(cwd=tmp), T1)], "self", None, None, False, 0),
+            ("self not-ok: cwd below a worktree with a commit not on GitHub", [use("a", "self", T1), res("a", me(cwd=os.path.join(ahead, "sub")), T1)], "self", None, None, False, 2),
+            ("self not-ok: originCwd in a dirty worktree", [use("a", "self", T1), res("a", me(originCwd=dirty, cwd=primary), T1)], "self", None, None, False, 2),
+            ("self not-ok: no worktreePath and no working directory", [use("a", "self", T1), res("a", {"sessionId": APP}, T1)], "self", None, None, False, 2),
+            ("other not-ok: cwd in a dirty worktree", [use("a", OTHER, T1), res("a", other(cwd=dirty), T1)], OTHER, None, None, False, 2),
+            ("other not-ok: no worktreePath and no working directory", [use("a", OTHER, T1), res("a", {"sessionId": OTHER}, T1)], OTHER, None, None, False, 2),
+            # the app's record shape for any target: tool_use in assistant, tool_result in user
+            ("other spoof: api-request-blob copy", [use("a", OTHER, T1), res("a", other(dirty), T1), use("b", OTHER, T2), res("b", other(clean), T2, rtype="api-request-blob")], OTHER, None, None, False, 2),
+            ("other spoof: tool_use in a user record", [as_user(use("a", OTHER, T1)), res("a", other(clean), T1)], OTHER, None, None, False, 2),
         ]
         bad = 0
         for name, recs, target, extra, raw, sub, want in cases:

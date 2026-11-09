@@ -15,10 +15,21 @@ the other. The app's own answer does: the skill calls get_session for the target
 result, written by the app as a tool result, never text the agent wrote, and then:
 
   no get_session result for that session      -> deny: call get_session first
-  a result without worktreePath               -> pass: the chat ran in the primary checkout and
-                                                 archiving removes no worktree
   worktreePath, chat_archivable.py says "ok"  -> pass (the permission rules decide)
+  no worktreePath, but a working directory     -> the worktree that directory lies in, when it
+  (originCwd, else cwd) in a linked worktree     is a linked one (its git dir differs from the
+                                                 common one), checked the same way: an app-made
+                                                 worktree under a renamed key, or a worktree
+                                                 made by a tool, may still hold work
+  no worktreePath, the directory is gone, or  -> pass: archiving removes no worktree there
+  is in a primary checkout or no repository
+  no worktreePath and no working directory    -> deny: nothing says where the chat worked
   anything else, or the guard itself fails    -> deny, with the script's reason
+
+Only records of the app's own shape count, for any target: the get_session call in an
+`assistant` record and its result in a `user` record, so a copy of either (an api-request-blob,
+a tool's printed output) cannot pass for the app's answer. The check runs at most 40 s, inside
+the hook's 60 s timeout.
 
 "self" (an issue chat archiving itself at the end of issue-handover) is checked the same way, on
 the calling chat's own worktree, taken from the newest get_session "self" result that:
@@ -47,6 +58,7 @@ import sys
 TOOL = "mcp__ccd_session_mgmt__archive_session"
 GET = "mcp__ccd_session_mgmt__get_session"
 CHECK = os.path.join(os.path.dirname(os.path.realpath(__file__)), "chat_archivable.py")
+CHECK_TIMEOUT_S = 40  # hooks.json gives the hook 60 s
 
 
 def deny(reason: str) -> int:
@@ -107,7 +119,7 @@ def lookups(path: str, target: str, session: str | None = None) -> list[tuple[st
                 if block.get("type") == "tool_use" and block.get("name") == GET:
                     inp = block.get("input")
                     asked = inp.get("session_id") if isinstance(inp, dict) else None
-                    if not own or (asked == "self" and rec.get("type") == "assistant"):
+                    if rec.get("type") == "assistant" and (not own or asked == "self"):
                         uses.add(block.get("id"))
                 elif block.get("type") == "tool_result" and block.get("tool_use_id") in uses:
                     if block.get("is_error"):
@@ -121,7 +133,7 @@ def lookups(path: str, target: str, session: str | None = None) -> list[tuple[st
                         continue
                     if not isinstance(data, dict) or not isinstance(data.get("sessionId"), str):
                         continue
-                    if own and rec.get("type") != "user":
+                    if rec.get("type") != "user":
                         continue
                     if own or data.get("sessionId") == target:
                         found.append((str(rec.get("timestamp", "")), data))
@@ -168,16 +180,48 @@ def archive_self(event: dict, tpath: str) -> int:
     return check_worktree(max(results, key=lambda r: r[0])[1])
 
 
+def linked_worktree(directory: str) -> str | None:
+    """The top of the linked worktree <directory> lies in; None for a primary checkout, a
+    directory outside any repository, or one that is gone."""
+    if not os.path.isdir(directory):
+        return None
+
+    def rev(*args: str) -> str | None:
+        r = subprocess.run(["git", "-C", directory, "rev-parse", *args], stdin=subprocess.DEVNULL,
+                           capture_output=True, text=True, timeout=5)
+        return r.stdout.strip() if r.returncode == 0 else None
+
+    gd = rev("--absolute-git-dir")
+    if not gd:
+        return None
+    common = rev("--git-common-dir")  # relative to <directory> unless absolute
+    if not common:
+        raise OSError(f"git rev-parse --git-common-dir failed in {directory}")
+    if os.path.realpath(gd) == os.path.realpath(os.path.join(directory, common)):
+        return None
+    return rev("--show-toplevel") or directory
+
+
 def check_worktree(data: dict) -> int:
-    """Pass when the session has no worktree of its own or chat_archivable.py calls it ok."""
+    """Pass when chat_archivable.py calls the session's worktree ok, or when the session has no
+    worktree: no worktreePath, and its working directory is in no linked worktree."""
     worktree = data.get("worktreePath")
-    if not worktree:
-        return 0
-    if not isinstance(worktree, str):
+    if worktree is not None and not isinstance(worktree, str):
         return deny("get_session gave a worktreePath that is not a path")
+    if not worktree:
+        cwd = data.get("originCwd") or data.get("cwd")
+        if not isinstance(cwd, str) or not cwd:
+            return deny("get_session gave neither a worktreePath nor a working directory, so "
+                        "the worktree the chat worked in is unknown")
+        try:
+            worktree = linked_worktree(cwd)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return deny(f"git did not answer for {cwd}: {e}")
+        if not worktree:
+            return 0
     try:
         r = subprocess.run([sys.executable, CHECK, worktree], stdin=subprocess.DEVNULL,
-                           capture_output=True, text=True, timeout=50)
+                           capture_output=True, text=True, timeout=CHECK_TIMEOUT_S)
     except (OSError, subprocess.TimeoutExpired) as e:
         return deny(f"chat_archivable.py did not run: {e}")
     verdict = (r.stdout.strip().splitlines() or [""])[0]

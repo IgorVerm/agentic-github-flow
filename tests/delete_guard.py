@@ -175,6 +175,16 @@ ASK = [
     ('eval $(echo rm -rf ~/Library)', REPO), ('$(which rm) -r ~/Documents/notes', REPO),
     ("sh -c \"$(printf 'rm -rf %s' ~/Library)\"", REPO), ('${RM:-rm} -r ~/Library', REPO),
     ('busybox rm -rf ~/Library', REPO), ('runuser -u x -- rm -rf ~/Library', REPO),
+    # the second review: a default word with ~, trust that ends with the list, env and sudo
+    # options, trap bodies, a glob in the command name, a brace cap over a home folder
+    ('rm -rf ${CLEAN:-~}', REPO), ('rm -rf ${CLEAN:-~/Documents}', REPO),
+    ('rm -rf ${CLEAN-~}', REPO), ('rm -rf "${CLEAN:-%s}"' % H, REPO),
+    ('cd /tmp/nonexist && echo hi; rm -rf *', HOME), ('cd /tmp/x & rm -rf Library', HOME),
+    ('env -u FOO -C ~ rm -rf Documents', REPO), ('env -iC ~ rm -rf Documents', REPO),
+    ('sudo -D ~ rm -rf Documents', REPO), ('sudo -u root --chdir=$HOME rm -rf Documents', REPO),
+    ("trap 'rm -rf ~/Library' EXIT", REPO), ('/bin/r[m] -rf ~/Library', REPO),
+    ('rm -rf ~/{a,b,c,d,e,f,g,h}{1,2,3,4,5,6,7,8,9}', REPO),
+    ("ls | xargs -d '\\n' rm", REPO), ('ls | xargs --unknown-flag rm -rf', REPO),
 ]
 if LINK:
     ASK.append(('rm -rf "%s/liblink/"' % R, REPO))
@@ -219,6 +229,12 @@ PASS = [
     ('D="build dist"; rm -rf $D', REPO), ('X=build; rm -rf $X', REPO),
     ('rm -rf /mnt/c/%s/someone/code/repo/target' % USERS, REPO),
     ('rm -rf ~/{.cache/pip,Library/Caches/pip}', REPO), ('gio trash ~/Documents/notes', REPO),
+    ('rm -rf "${NOT_SET_ANYWHERE_X:-/tmp/session-1/x}"', REPO),
+    ('cd /tmp/x; rm -rf build', REPO), ('cd x || { echo no; exit 1; }; rm -rf build', REPO),
+    ('set -e; cd /tmp/x; rm -rf build', REPO), ('git ls-files | xargs grep -lw rm', REPO),
+    ('xargs -a list.txt grep -l rm', REPO), ('xargs grep -l bash < list.txt', REPO),
+    ('rm -f out/file{1..100}.txt', REPO), ('rm -rf /tmp/build{1..80}', REPO),
+    ("trap 'rm -rf \"$TMPDIR/x\"' EXIT", REPO), ('env -u FOO -C /tmp/session-1 rm -rf x', HOME),
 ]
 
 failures = []
@@ -260,6 +276,19 @@ dg.WINDOWS = os.name == 'nt'
 dg.variants.cache_clear()
 dg.git_root.cache_clear()
 dg.holds_repository.cache_clear()
+
+# a call that blocks (a hung mount): the judging thread is abandoned after HARD_DEADLINE
+saved = dg.decide, dg.HARD_DEADLINE
+dg.decide, dg.HARD_DEADLINE = (lambda command, cwd: time.sleep(30)), 0.3
+started = time.time()
+reason, finished = dg.decide_bounded('rm -rf build', REPO)
+if finished or 'within' not in (reason or '') or time.time() - started > 2:
+    failures.append('hard deadline: a blocked judgement must ask after HARD_DEADLINE')
+if dg.decide_bounded('ls -la', REPO) != (None, False):
+    failures.append('hard deadline: a blocked command without a delete must pass')
+dg.decide, dg.HARD_DEADLINE = saved
+if dg.HARD_DEADLINE >= 10:
+    failures.append('HARD_DEADLINE must stay under the 10 s timeout in hooks.json')
 
 # the deadline: past it, a command that names a delete asks, and any other passes
 saved, dg.DEADLINE = dg.DEADLINE, -1.0

@@ -23,7 +23,8 @@ Who decides is named in `AGENTS.md`: the user who owns the repository, or its ma
 Rules that apply to one part of the code go in an `AGENTS.md` inside that directory (with a
 one-line `CLAUDE.md` importing it), so both clients load them only when working there.
 A procedure with several steps becomes a skill in `.agents/skills/<name>/SKILL.md`, with
-`.claude/skills/<name>` as a symlink to it, so both clients load it on demand.
+`.claude/skills/<name>` as a symlink to it, so both clients load it on demand. Writing or changing
+one follows the Agent Skills standard and the checks in [skill-standard.md](skill-standard.md).
 
 ## What goes where
 

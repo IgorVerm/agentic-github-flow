@@ -15,8 +15,10 @@ None. The core rules apply here too, through the maintainer's own install.
   that must hold every time without exception becomes a hook or a permission rule in the guards
   plugin, because a sentence is advice the model weighs, not a guarantee.
 - **Skills are written once** for both clients: `plugins/<plugin>/skills/<name>/SKILL.md`,
-  inside what both accept (`tests/skills_format.py`). Scripts a skill runs live in its plugin's
-  `scripts/` folder, because an installed plugin is copied without the rest of the repository.
+  inside what both accept (`tests/skills_format.py`). Writing or changing one follows the Agent
+  Skills standard: `plugins/core/skills/repo-docs/skill-standard.md`. Scripts a skill runs live
+  in its plugin's `scripts/` folder, because an installed plugin is copied without the rest of
+  the repository.
 - **Plugin names never change** once published. When any file of a plugin changes, raise its
   version in both manifests and in both marketplace files, or installed copies keep the old
   files (both clients cache plugins per version; measured 2026-10-25). `tests/repo_checks.py`

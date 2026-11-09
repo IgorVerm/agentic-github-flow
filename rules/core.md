@@ -1,7 +1,7 @@
 # agentic-github-flow: rules for every session
 
-These rules apply to every AI coding agent (Claude Code, Codex) on this machine. Procedures that
-matter at one moment are skills: your client lists them and loads one when the task matches.
+These rules apply to every AI coding agent (Claude Code, Codex) on this machine. Procedures are
+skills, which your client loads when a task matches.
 
 **Precedence.** A company overlay's binding rules (its AI policy, its data classes) are never
 relaxed in a conversation, by anyone. Below that, the user's word in the conversation beats these
@@ -61,12 +61,15 @@ have destroyed hours of uncommitted work with `reset --hard` and `checkout -- .`
   committed mistake with `git revert`; bring `main` into a branch by merge, never rebase.
 - **Files in a checkout that you did not write belong to another session.** Leave them, never
   stage them, never move another worktree's branch. Read a file before you overwrite it.
+- **Outside a repository, delete with the system's trash, not `rm -rf`;** a recursive delete
+  takes only literal, absolute paths you listed and checked, never paths built from command
+  output.
 - **Work on a branch in a worktree, never on `main`:**
   `git worktree add -b agent/<task> ../<repo>-worktrees/<task> origin/main`.
 - **Commit freely:** small commits of verified work, staged by explicit path
   (`git commit -m "…" -- <paths>`, never `add -A`, `add .`, `add -f` or `commit -a`), the
   subject ending in the issue reference `(#n)`, with a `Co-Authored-By` trailer naming the
-  agent. Ask before committing a file over 10 MB; never commit one over 50 MB.
+  agent. Never commit a file over 50 MB.
 - **Ask before every push.** Prepare the branch, the checks and the pull request text, then ask.
   On a yes, push your own task branch and open the pull request (the `ship-change` skill). Never
   push `main` and never merge; mark a draft ready, or merge, only when the user says so for that
@@ -96,7 +99,7 @@ have destroyed hours of uncommitted work with `reset --hard` and `checkout -- .`
 - **Each repository keeps the same few documents:** `AGENTS.md` (its own rules), `HANDOFF.md`
   (what is true now; how to build, test and run), `ROADMAP.md`, `DESIGN_DECISIONS.md` and
   `archive_implementations.md`. A change that makes one untrue updates it in the same change.
-  The `repo-docs` skill has the layout.
+  The `repo-docs` skill has the layout and the standard for writing a skill.
 - **The user, or the maintainers the repository names, decides.** Record a ruling in
   `DESIGN_DECISIONS.md` with their words.
 

@@ -10,6 +10,7 @@ otherwise clutter the sidebar for good (the worktree gone, HEAD in the default b
 branch pushed, a merge on GitHub seen only after the fetch, a landing on local main in local-main
 mode, with the setting or without a remote). Offline: origin is a local folder.
 """
+import json
 import os
 import shutil
 import subprocess
@@ -66,19 +67,19 @@ class ChatArchivable(unittest.TestCase):
             f.write(text)
         self.git(wt, 'commit', '-q', '-am', 'work')
 
-    def check(self, path, *extra):
+    def check(self, path, *extra, env=None):
         r = subprocess.run([sys.executable, TOOL, path, *extra], capture_output=True, text=True,
-                           env=self.env)
+                           env=dict(self.env, **(env or {})))
         return r.returncode, r.stdout.strip()
 
-    def assertOk(self, path, *extra):
-        code, line = self.check(path, *extra)
+    def assertOk(self, path, *extra, env=None):
+        code, line = self.check(path, *extra, env=env)
         self.assertEqual(code, 0, line)
         self.assertTrue(line.startswith('ok'), line)
         return line
 
-    def assertKeep(self, path, reason, *extra):
-        code, line = self.check(path, *extra)
+    def assertKeep(self, path, reason, *extra, env=None):
+        code, line = self.check(path, *extra, env=env)
         self.assertEqual(code, 1, line)
         self.assertTrue(line.startswith('keep: '), line)
         self.assertIn(reason, line)
@@ -225,6 +226,91 @@ class ChatArchivable(unittest.TestCase):
         self.git(repo, 'merge', '-q', '--ff-only', 'agent/task2')
         self.assertKeep(wt2, 'not on GitHub')
 
+    def test_a_successor_s_pushed_branch_holds_a_handed_over_chat(self):
+        # #14: a chat hands its unfinished issue to a fresh chat whose branch starts from its
+        # head; once that branch is on GitHub, the predecessor holds nothing GitHub does not
+        pred = self.worktree('pred')
+        self.commit(pred, 'pred\n')
+        succ = self.worktree('succ', base='agent/pred')
+        self.commit(succ, 'succ\n')
+        self.assertKeep(pred, 'not on GitHub')  # the successor's branch is local only
+        self.git(succ, 'push', '-q', 'origin', 'agent/succ')
+        self.assertIn('held by origin/agent/succ', self.assertOk(pred))
+        # the successor archived itself after its push: its worktree is gone, GitHub holds it
+        self.git(self.repo, 'worktree', 'remove', succ)
+        self.assertIn('held by origin/agent/succ', self.assertOk(pred))
+
+    def test_a_successor_does_not_cover_commits_only_the_predecessor_s_history_holds(self):
+        pred = self.worktree('pred-reflog')
+        self.commit(pred, 'kept\n')
+        self.commit(pred, 'dropped\n')
+        self.git(pred, 'reset', '-q', '--hard', 'HEAD~1')  # "dropped" is in the reflog only
+        succ = self.worktree('succ-reflog', base='agent/pred-reflog')
+        self.commit(succ, 'succ\n')
+        self.git(succ, 'push', '-q', 'origin', 'agent/succ-reflog')
+        self.assertKeep(pred, 'only this worktree')
+
+    def test_a_live_local_successor_alone_keeps(self):
+        # a successor's branch that is only on this machine is not on GitHub, in either mode
+        pred = self.worktree('pred-local')
+        self.commit(pred, 'pred\n')
+        succ = self.worktree('succ-local', base='agent/pred-local')
+        self.commit(succ, 'succ\n')
+        self.assertKeep(pred, '1 commit(s) of agent/pred-local are not on GitHub')
+
+    def fake_gh(self, pulls):
+        """AGENTIC_GITHUB_FLOW_GH for a gh whose `pr list` answers `pulls`."""
+        script = os.path.join(self.root, 'fake_gh_%d.py' % len(os.listdir(self.root)))
+        with open(script, 'w') as f:
+            f.write('import json, sys\nprint(json.dumps(%r))\n' % (pulls,))
+        return json.dumps([sys.executable, script])
+
+    def test_landed_requires_the_landing_branch_or_a_merged_pull_request(self):
+        # #18: a side chat leaves only once its work landed or its pull request merged, so a
+        # follow-up still reaches it while the pull request is open
+        wt = self.worktree('side')
+        self.commit(wt, 'side\n')
+        self.git(wt, 'push', '-q', 'origin', 'agent/side')
+        self.assertOk(wt)  # on GitHub: an issue chat may go
+        head = self.git(wt, 'rev-parse', 'HEAD')
+        none = self.fake_gh([])
+        self.assertKeep(wt, 'not landed', '--landed', env={'AGENTIC_GITHUB_FLOW_GH': none})
+        # a squash merge: main does not hold HEAD, the merged pull request's head is HEAD
+        squash = self.fake_gh([{'number': 7, 'headRefOid': head, 'baseRefName': 'main'}])
+        self.assertIn('pull request #7 merged',
+                      self.assertOk(wt, '--landed', env={'AGENTIC_GITHUB_FLOW_GH': squash}))
+        # merged into another branch (stacked) proves nothing about the landing branch
+        stacked = self.fake_gh([{'number': 8, 'headRefOid': head, 'baseRefName': 'agent/x'}])
+        self.assertKeep(wt, 'not landed', '--landed', env={'AGENTIC_GITHUB_FLOW_GH': stacked})
+        # a pull request whose head is not this HEAD (a later commit was not part of it)
+        older = self.fake_gh([{'number': 9, 'headRefOid': '0' * 40, 'baseRefName': 'main'}])
+        self.assertKeep(wt, 'not landed', '--landed', env={'AGENTIC_GITHUB_FLOW_GH': older})
+        # no gh: a squash merge cannot be proven, and the chat stays
+        self.assertKeep(wt, 'not landed', '--landed', env={'AGENTIC_GITHUB_FLOW_GH': '"x"'})
+        # a merge on GitHub: origin's main holds HEAD, no pull request needed
+        self.git(self.origin, 'fetch', '-q', self.repo, 'agent/side:main')
+        self.assertIn('in origin/main', self.assertOk(wt, '--landed', env={
+            'AGENTIC_GITHUB_FLOW_GH': none}))
+
+    def test_landed_does_not_count_a_successor(self):
+        pred = self.worktree('pred-landed')
+        self.commit(pred, 'pred\n')
+        succ = self.worktree('succ-landed', base='agent/pred-landed')
+        self.git(succ, 'push', '-q', 'origin', 'agent/succ-landed')
+        self.assertKeep(pred, 'not landed', '--landed',
+                        env={'AGENTIC_GITHUB_FLOW_GH': self.fake_gh([])})
+
+    def test_landed_on_local_main(self):
+        lone = os.path.join(self.root, 'lone-landed')
+        self.git(self.root, 'init', '-q', '-b', 'main', lone)
+        self.git(lone, 'commit', '-q', '--allow-empty', '-m', 'x')
+        wt = os.path.join(self.root, 'lone-landed-worktrees', 'side')
+        self.git(lone, 'worktree', 'add', '-q', '-b', 'agent/side', wt, 'main')
+        self.git(wt, 'commit', '-q', '--allow-empty', '-m', 'unlanded')
+        self.assertKeep(wt, 'no remote origin', '--landed')
+        self.git(lone, 'merge', '-q', '--ff-only', 'agent/side')
+        self.assertIn('landed on local main', self.assertOk(wt, '--landed'))
+
     def test_not_a_worktree_and_usage(self):
         plain = os.path.join(self.root, 'plain')
         os.makedirs(plain, exist_ok=True)
@@ -233,6 +319,8 @@ class ChatArchivable(unittest.TestCase):
         r = subprocess.run([sys.executable, TOOL], capture_output=True, text=True)
         self.assertEqual(r.returncode, 2)
         r = subprocess.run([sys.executable, TOOL, 'a', 'b'], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 2)
+        r = subprocess.run([sys.executable, TOOL, 'a', '--landd'], capture_output=True, text=True)
         self.assertEqual(r.returncode, 2)
 
     def test_a_failed_fetch_judges_on_the_refs_as_last_fetched(self):
@@ -248,6 +336,15 @@ class ChatArchivable(unittest.TestCase):
             self.assertKeep(wt, 'fetch failed')
         finally:
             os.rename(moved, self.origin)
+
+
+class Copy(unittest.TestCase):
+    def test_issue_chats_copy_of_work_proof_is_identical(self):
+        owner = os.path.join(ROOT, 'plugins', 'core', 'scripts', 'work_proof.py')
+        copy = os.path.join(os.path.dirname(TOOL), 'work_proof.py')
+        with open(owner, 'rb') as a, open(copy, 'rb') as b:
+            self.assertEqual(a.read(), b.read(), 'copy plugins/core/scripts/work_proof.py to %s'
+                             % os.path.relpath(copy, ROOT))
 
 
 if __name__ == '__main__':

@@ -28,6 +28,9 @@ Checked on 2026-11-09 (v2, and the landing modes of #13).
   the landing branch on the user's word (`plugins/core/skills/ship-change/local-main.md`). The
   setting `## Landing settings` can fix the mode and name a landing branch; the worktree,
   overlap and cleanup scripts and `templates/pre-push` follow that branch.
+- Automatic merging (#13, `DESIGN_DECISIONS.md`): under a standing grant, `merge_pr.py` merges
+  an agent's own pull request when its checks, review, overlap line and paths allow it. This
+  repository grants nothing (Standing permissions below).
 - Not run yet: the live skill-choice probe for the new and changed descriptions, an end-to-end
   issue-chat chain in the desktop app or in Codex.
 
@@ -49,6 +52,7 @@ Checked on 2026-11-09 (v2, and the landing modes of #13).
 | a skill | its `SKILL.md`, `plugins/core/skills/repo-docs/skill-standard.md`, `tests/skills_format.py` |
 | the installer | `tools/installer.py` (its docstring owns the behaviour), `tests/installer.py` |
 | the guards | `plugins/guards/scripts/*.py` headers, `plugins/guards/policy/*.rules`, `tests/git_guard.py`, `tests/delete_guard.py`, `tests/personal_data_guard.py`, `tests/codex_policy.py` |
+| automatic merging | `plugins/core/scripts/merge_pr.py` header, `DESIGN_DECISIONS.md`, `tests/merge_pr.py` |
 | landing modes | `plugins/core/scripts/landing.py` and `promote_main.py` headers, `plugins/core/skills/ship-change/` (`SKILL.md`, `local-main.md`), `tests/landing.py`, `tests/promote_main.py` |
 | worktrees and cleanup | `plugins/core/scripts/*.py` headers, `plugins/core/skills/cleanup-merged/SKILL.md`, `tests/worktree_tools.py`, `tests/new_worktree.py`, `tests/overlap_check.py` |
 | the security scanners | `plugins/security/scripts/*.py` headers, `plugins/security/skills/review-security/sources.md`, `tests/scan_secrets.py`, `tests/audit_dependencies.py` |

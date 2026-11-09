@@ -50,7 +50,10 @@ The review route, in both modes:
   dependencies, agent rules. A context that did not write the change reviews it: `/code-review`
   in Claude Code, `/review` in Codex, run in a fresh session or subagent. In pull-request mode
   that happens before the pull request is marked ready, and the repository's own required
-  reviewers still review it on GitHub; in local-main mode the reviewer also lands it. A change
+  reviewers still review it on GitHub; the reviewer's verdict is a comment on the pull
+  request signed with the role `review` (`🤖 <agent> (review): Approved <sha>`, the commit it
+  reviewed) or listing its findings. In
+  local-main mode the reviewer also lands it. A change
   touching authentication, permissions, secrets, dependencies or deployment also gets the
   `review-security` skill when it is installed.
 
@@ -82,7 +85,7 @@ unclear go to the user.
 
 Write the title and body to a file outside the repository. The body starts with
 `🤖 <agent> (<role>):` and holds what changed and why, how it was checked, what is not covered,
-and `Closes #<n>` for the issue it finishes (a closing keyword is right here: the merge is the
+a line `Overlap check: <result>` (step 5), and `Closes #<n>` for the issue it finishes (a closing keyword is right here: the merge is the
 verified publication). Draft or ready: draft while an independent review is still open.
 
 ## 5. The overlap check
@@ -127,5 +130,11 @@ On the yes:
 
 Review comments become new commits on the same branch; each new push asks again. Marking the
 draft ready and merging happen only on the user's word for that pull request
-(`gh pr ready <n>`, `gh pr merge <n>` with the method the repository uses). After the merge:
-the `cleanup-merged` skill.
+(`gh pr ready <n>`, `gh pr merge <n>` with the method the repository uses), unless a standing
+grant allows automatic merging: the repository's `HANDOFF.md` §Standing permissions, or an
+overlay the user installed. Then, never `gh pr merge` yourself:
+`python3 <plugin>/scripts/merge_pr.py <n> --grant "<where the grant is written>"`
+([merge_pr.py](../../scripts/merge_pr.py)) merges only when every condition in its header holds
+(green checks, an approving review of the head by another agent, the overlap line, no path that
+merges only on the user's word) and otherwise names each one that fails: those wait for the
+user. After the merge: the `cleanup-merged` skill.

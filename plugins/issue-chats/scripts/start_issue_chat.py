@@ -18,9 +18,10 @@ prefix is the repository's optional setting, empty by default, e.g. `--prefix "W
 that issue, read with `gh issue view` in <worktree>, is open and has no assignee (the claim:
 another chat already works on it), unless --handover says the claim is the calling chat's own
 and it hands the issue over before its branch is ready (context limit, two failed corrections):
-then the issue's newest signed claim comment must name the calling chat, by its session id
-(`CLAUDE_CODE_SESSION_ID`, or `CLAUDE_CODE_HOST_SESSION_ID` as `local_<id>`) or by the worktree
-its working directory is in, so the flag cannot take over another chat's claim. Then it runs
+then the issue's newest claim comment (signed, opening with `claimed for chat`) must name the
+calling chat, by its session id (`CLAUDE_CODE_SESSION_ID`, or `CLAUDE_CODE_HOST_SESSION_ID` as
+`local_<id>`) or by the full path of the worktree its working directory is in, so the flag
+cannot take over another chat's claim. Then it runs
 `claude --bg --name <title> --model <model> --effort <level> <ready prompt>` in <worktree>,
 waits up to 120 s until `claude agents --json --cwd <worktree>` lists that one session idle,
 runs `claude stop <short id>`, and opens it with `claude --desktop --resume <sessionId>` under
@@ -34,8 +35,9 @@ Last line and exit code, for the caller:
   1  `fail: ...`: nothing runs and nothing was opened in the app (a background session that
      started was stopped; its conversation stays on disk). Never `claude rm`, which deletes a
      session's worktree.
-  2  `unsure: ... local_<sessionId>`: it may be open in the app or still running; the caller
-     checks `list_sessions` for that id before anything else.
+  2  `unsure: ...`: it may be open in the app or still running, with `local_<sessionId>` or the
+     short id when known; the caller checks `list_sessions` and `claude agents --json --cwd
+     <worktree>` before anything else. Any failure after `claude --bg` ran ends here.
 """
 from __future__ import annotations
 
@@ -53,8 +55,9 @@ READY = "Reply with exactly one line: ready. Use no tools."
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 WAIT_IDLE_S = 120
 TITLE = r"(?:Requirements · )?#([1-9][0-9]*) · \S.*|Requirements · new · \S.*"
-SIGN = "\N{ROBOT FACE}"
-CLAIM = re.compile(r"\bclaim", re.I)
+# A claim comment: the signature, then the opening the skill issue-handover gives it (the same
+# marker next_issue.py reads), optionally in bold.
+CLAIM = re.compile(r"\A\s*\N{ROBOT FACE}[^\n]*?\):\s*(?:\*\*)?claimed for chat\b", re.I)
 
 
 def title_issue(title: str, prefix: str) -> tuple[bool, int | None]:
@@ -185,9 +188,11 @@ def unclaimed(wt: str, issue: int, handover: bool = False) -> None:
 
 
 def own_claim(issue: int, comments) -> None:
-    """--handover: the newest signed claim comment names this chat (its session id or worktree)."""
+    """--handover: the newest signed claim comment names this chat, by its session id or by
+    the full path of the worktree it works in (never a folder name alone, which another
+    repository's worktree may share)."""
     claims = [str(c.get("body") or "") for c in comments or [] if isinstance(c, dict)]
-    claims = [b for b in claims if b.lstrip().startswith(SIGN) and CLAIM.search(b)]
+    claims = [b for b in claims if CLAIM.match(b)]
     if not claims:
         raise Fail(f"issue #{issue} is assigned but has no signed claim comment: --handover "
                    "hands over only this chat's own claim")
@@ -200,9 +205,9 @@ def own_claim(issue: int, comments) -> None:
             names.add("(?:local_)?" + re.escape(v))
     p = run(["git", "rev-parse", "--show-toplevel"])
     if p.returncode == 0 and p.stdout.strip():
-        here = real(p.stdout.strip())
-        names.update({re.escape(here), re.escape(os.path.basename(here))})
-    if any(re.search(r"(?<![\w.-])" + n + r"(?![\w-])", newest) for n in names):
+        top = p.stdout.strip()
+        names.update({re.escape(top), re.escape(real(top))})
+    if any(re.search(r"(?<![\w./-])" + n + r"(?![\w.-]|/[\w.-])", newest) for n in names):
         return
     raise Fail(f"the newest claim on issue #{issue} names another chat, not this one (session "
                "id or worktree): --handover hands over only this chat's own claim")
@@ -213,17 +218,26 @@ def start(wt: str, title: str, model: str, effort: str | None) -> tuple[int, str
     if effort:
         cmd += ["--effort", effort]
     p = run(cmd + [READY], cwd=wt)
+    # From here on a session may run: any failure is `unsure`, never `nothing started`.
     m = re.search(r"backgrounded\s*·\s*(\S+)", p.stdout + p.stderr)
     if p.returncode != 0 or not m:
-        if agents(wt):
+        try:
+            running = agents(wt)
+        except (Fail, subprocess.TimeoutExpired) as e:
+            return 2, (f"unsure: claude --bg gave no short id ({(p.stderr or p.stdout).strip()[:200]})"
+                       f" and the sessions in {wt} could not be listed: {e}")
+        if running:
             return 2, f"unsure: claude --bg gave no short id but a session runs in {wt}"
         return 1, f"fail: claude --bg: {(p.stderr or p.stdout).strip()[:300]}"
     short = m.group(1)
     try:
         return after_start(wt, title, short)
     except (Fail, subprocess.TimeoutExpired) as e:
-        s = run(["claude", "stop", short])
-        state = "stopped" if s.returncode == 0 else "maybe still running"
+        try:
+            s = run(["claude", "stop", short])
+            state = "stopped" if s.returncode == 0 else "maybe still running"
+        except (OSError, subprocess.TimeoutExpired):
+            state = "maybe still running"
         return 2, f"unsure: {e}; background session {short} {state}; check list_sessions"
 
 

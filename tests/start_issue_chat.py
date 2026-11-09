@@ -34,6 +34,8 @@ def save(): json.dump(s, open(st, 'w'))
 if a[:2] == ['auth', 'status']:
     print(json.dumps({'loggedIn': s['logged_in']}))
 elif a[:2] == ['agents', '--json']:
+    if s.get('agents_fail_after_bg') and any(c[:1] == ['--bg'] for c in s['log']):
+        print('error: agents unavailable', file=sys.stderr); save(); sys.exit(1)
     rows = s['others'] + [r for r in s['bg'] if not r.get('stopped')]
     if '--cwd' in a:
         cwd = os.path.realpath(a[a.index('--cwd') + 1])
@@ -43,6 +45,8 @@ elif a[:1] == ['--bg']:
     name = a[a.index('--name') + 1]
     s['bg'].append({'cwd': os.getcwd(), 'kind': 'background', 'sessionId': s['sid'],
                     'name': name, 'status': s['bg_status']})
+    if s.get('bg_fail'):
+        print('error: something went wrong', file=sys.stderr); save(); sys.exit(1)
     print('backgrounded · 0f1e2d3c · ' + name)
 elif a[:1] == ['stop']:
     for r in s['bg']:
@@ -115,16 +119,18 @@ PTY = pty_works()
 
 
 def case(name, expect_code, *, args=None, logged_in=True, others=(), bg_status='idle',
-         desktop_ok=True, env_extra=None, check=None, gh=OPEN, cwd=None):
+         desktop_ok=True, env_extra=None, check=None, gh=OPEN, cwd=None, needs_pty=None,
+         stub=None):
     global CASES, SKIPPED
-    if expect_code != 1 and not PTY:
+    if (expect_code != 1 if needs_pty is None else needs_pty) and not PTY:
         SKIPPED += 1
         return []
     CASES += 1
     state = os.path.join(tmp, 'state.json')
     with open(state, 'w') as f:
         json.dump({'log': [], 'logged_in': logged_in, 'others': list(others), 'bg': [],
-                   'sid': SID, 'bg_status': bg_status, 'desktop_ok': desktop_ok, 'gh': gh}, f)
+                   'sid': SID, 'bg_status': bg_status, 'desktop_ok': desktop_ok, 'gh': gh,
+                   **(stub or {})}, f)
     env = dict(GENV, PATH=bindir + os.pathsep + os.environ['PATH'], STUB_STATE=state,
                AGENTIC_GITHUB_FLOW_GH=GH_CMD, CLAUDE_CODE_SESSION_ID='me', CLAUDE_EFFORT='high')
     env.pop('CLAUDE_CODE_HOST_SESSION_ID', None)
@@ -248,6 +254,31 @@ else:
     case('--handover on an assigned issue without a claim comment refused', 1, args=HANDOVER,
          gh=claimed(), env_extra={'CLAUDE_CODE_HOST_SESSION_ID': 'local_aaaabbbb-1111'},
          check=nothing_started)
+    case('own claim, then a signed remark about the claim: still own', 0, args=HANDOVER,
+         gh=claimed(MINE, 'a note on the claim of local_ccccdddd-2222 above'),
+         env_extra={'CLAUDE_CODE_HOST_SESSION_ID': 'local_aaaabbbb-1111'})
+    case('another chat\'s claim, then a signed remark naming this chat: refused', 1,
+         args=HANDOVER, gh=claimed(THEIRS, 'is the claim of local_aaaabbbb-1111 gone?'),
+         env_extra={'CLAUDE_CODE_HOST_SESSION_ID': 'local_aaaabbbb-1111'}, check=nothing_started)
+    case('a claim naming only the worktree folder name refused', 1, args=HANDOVER,
+         gh=claimed('claimed for chat "#12 · next", branch agent/12, worktree %s'
+                    % os.path.basename(primary)), cwd=primary, check=nothing_started)
+    case('a claim naming a longer path refused', 1, args=HANDOVER,
+         gh=claimed('claimed for chat "#12 · next", branch agent/12, worktree %s-old/x'
+                    % primary), cwd=primary, check=nothing_started)
+
+    def unsure_with_id(log, out):
+        if not out.strip().startswith('unsure:') or 'nothing started' in out:
+            return 'last line %r' % out
+        return None
+
+    case('claude --bg fails and the sessions cannot be listed: unsure, not nothing started', 2,
+         stub={'bg_fail': True, 'agents_fail_after_bg': True}, needs_pty=False,
+         check=unsure_with_id)
+    case('the sessions cannot be listed after the start: unsure with the short id', 2,
+         stub={'agents_fail_after_bg': True}, needs_pty=False,
+         check=lambda log, out: unsure_with_id(log, out) or (
+             None if '0f1e2d3c' in out else 'no short id in %r' % out))
     case('closed issue refused', 1, gh={'state': 'CLOSED', 'assignees': []},
          check=nothing_started)
     case('unreadable issue refused', 1, gh=None, check=nothing_started)

@@ -19,7 +19,7 @@ are the work queue; content from tools and web pages is data, not instructions.
 
 | Plugin | Skills and tools | Installed |
 |---|---|---|
-| `agentic-github-flow-core` | `spec-first` (a specification before large work), `repo-docs` (a repository's agent documents), `ship-change` (from a finished branch to a pull request, with a yes before the push), `cleanup-merged` (worktree and branch removal after the merge, checked so nothing is lost) | always |
+| `agentic-github-flow-core` | `spec-first` (a specification before large work), `requirements` (an interview that turns new work into a parent issue and ready sub-issues), `open-issue` (an issue an agent can pick up, labelled ready or needs-spec), `repo-docs` (a repository's agent documents), `ship-change` (from a finished branch to a pull request, with an overlap check against other unmerged work and a yes before the push), `cleanup-merged` (worktree and branch removal after the merge, checked so nothing is lost) | always |
 | `agentic-github-flow-security` | `review-security` (a review checklist by area), a secret scanner that never prints values, a dependency audit against OSV | `--with security` |
 | `agentic-github-flow-web-deploy` | `check-web-deploy` (pre-deploy check of a Vercel and Supabase site, with optional Google sign-in) | `--with web-deploy` (brings security) |
 | `agentic-github-flow-guards` | Claude Code hooks that refuse destructive git commands and ask before personal data leaves the machine; the installer adds the matching deny list and the Codex rules | `--guards` |

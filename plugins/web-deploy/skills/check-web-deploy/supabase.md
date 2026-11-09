@@ -18,6 +18,10 @@ project's state is on [dashboard.md](dashboard.md).
   (`auth.uid() is not null and auth.uid() = user_id`): an unauthenticated request has a null
   `auth.uid()`, and `null = null` is not true but a careless policy can still pass. A table with
   RLS on and no policy is locked, which may be intended (writes through RPC only): say so.
+- **A policy `using (true)` or `with check (true)`** hands every row to the roles it names:
+  correct only for data that is public by intent, which the migration says; on `insert`,
+  `update` or `delete` for `anon` or `authenticated` it is a finding (linter 0024
+  `permissive_rls_policy`).
 - **Policies do not remove default grants.** Migrations revoke what `anon` and `authenticated`
   should not have, and `alter default privileges … revoke all on tables from anon,
   authenticated, service_role` where the project uses a dedicated schema (Hardening the Data
@@ -36,8 +40,14 @@ project's state is on [dashboard.md](dashboard.md).
   no bucket public unless the content is public; size and MIME limits on upload buckets; downloads
   of private objects through signed URLs with a short expiry (Storage access control; linter 0025
   `public_bucket_allows_listing`).
-- **Realtime and queues**: a channel or queue exposed through the API has its own policies
-  (linter 0019 `insecure_queue_exposed_in_api`).
+- **Realtime and queues**: a table in the `supabase_realtime` publication sends its changes to
+  every subscriber its `select` policy allows, but `DELETE` events are not filtered by RLS
+  (Postgres Changes guide), so every subscriber of the table learns of each deletion, with at
+  least the row's primary key (Postgres's default replica identity). Broadcast and Presence
+  channels that carry user data are private (`private: true`) with `select` and `insert`
+  policies on `realtime.messages`, and public channel access is off in the Realtime settings
+  (Realtime Authorization guide; a dashboard line). A queue exposed through the API has its own
+  policies (linter 0019 `insecure_queue_exposed_in_api`).
 
 ## Keys: which key where (API keys guide)
 
@@ -77,6 +87,10 @@ project's state is on [dashboard.md](dashboard.md).
   3600 s, CAPTCHA on sign-up, sign-in and password reset for a public site (Going into
   production); these are `config.toml` keys where the project tracks the file, dashboard lines
   otherwise.
+- **Auth mail** in production goes through custom SMTP: Supabase's default sender delivers only
+  to the project team's addresses, a few messages an hour, without an SLA (Auth SMTP guide).
+  `[auth.email.smtp]` in `config.toml` reads its password through `env()`, its name in
+  `.env.example`; the sending domain's records are in [mail.md](mail.md).
 - **Server Actions and route handlers** re-check the user and the object they act on
   (`review-security/checklist.md` §1); the proxy's redirect to the sign-in page is convenience,
   not the gate.

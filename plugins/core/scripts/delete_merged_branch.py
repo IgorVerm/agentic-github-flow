@@ -5,9 +5,9 @@ Usage: python3 delete_merged_branch.py <branch> [--remote origin] [--dry-run]
 
 The cleanup-merged skill runs this after the user said yes to the push. It reads the branch's
 tip on the remote (`git ls-remote`) and deletes the branch only when that tip is exactly the head
-commit of a pull request merged into the default branch (`gh pr list --head <branch> --state
-merged`, its `baseRefName` the default branch), or is already in the default branch as just
-fetched. The push carries a lease on that tip (`--force-with-lease=refs/heads/<branch>:<tip>`),
+commit of a pull request merged into the default branch (`gh pr list -R <remote url> --head
+<branch> --state merged`, its `baseRefName` the default branch), or is already in the default
+branch as just fetched. The push carries a lease on that tip (`--force-with-lease=refs/heads/<branch>:<tip>`),
 so a commit a teammate pushed after the merge makes the push fail instead of vanishing. It
 refuses the default branch. AGENTIC_GITHUB_FLOW_GH, a JSON list, replaces the `gh` command
 (tests use it). Exit 0: deleted, or already gone; 1: kept, with the reason; 2: usage error.
@@ -43,13 +43,18 @@ def default_branch(remote):
     return None
 
 
-def merged_heads(branch, base):
-    """(set of head commits of pull requests from branch merged into base, problem)."""
+def merged_heads(branch, base, remote):
+    """(set of head commits of pull requests from branch merged into base, problem). The
+    repository is named outright (`-R <remote url>`): gh alone would prefer a remote `upstream`."""
     gh = gh_command()
     if not gh:
         return set(), 'gh is not installed'
+    url = git('remote', 'get-url', remote)
+    if url.returncode or not url.stdout.strip():
+        return set(), 'no URL for remote %s, so no pull request can be read' % remote
     try:
-        result = subprocess.run(gh + ['pr', 'list', '--head', branch, '--state', 'merged',
+        result = subprocess.run(gh + ['pr', 'list', '-R', url.stdout.strip(), '--head', branch,
+                                      '--state', 'merged',
                                       '--json', 'number,headRefOid,baseRefName', '--limit', '50'],
                                 capture_output=True, text=True, timeout=60)
         pulls = json.loads(result.stdout or '[]') if result.returncode == 0 else None
@@ -102,7 +107,7 @@ def main(argv):
         print('GONE %s: no such branch on %s (GitHub may have deleted it at the merge)'
               % (branch, remote))
         return 0
-    heads, problem = merged_heads(branch, base)
+    heads, problem = merged_heads(branch, base, remote)
     if tip in heads:
         why = 'the head of a pull request merged into %s' % base
     elif git('merge-base', '--is-ancestor', tip, default).returncode == 0:

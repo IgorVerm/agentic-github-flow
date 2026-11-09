@@ -62,7 +62,9 @@ loads analytics or fonts names those origins in the CSP instead of widening it.
   security guide; `proxy` reference: a matcher gap also skips Server Function calls).
 - Server Actions are "reachable via direct POST requests": arguments validated with a schema,
   ownership checked, `serverActions.allowedOrigins` set when a proxy or custom domain sits in
-  front.
+  front. `serverActions.bodySizeLimit` stays at its 1 MB default unless a feature needs more,
+  and large uploads go straight to storage (a signed upload URL) instead of through an action
+  (`serverActions` reference).
 - A Data Access Layer with `import 'server-only'` is the shape to expect; a component marked
   `"use client"` never receives a whole database row or a secret as a prop.
 - **Runtime and framework versions**: `audit_dependencies.py --upgrades` reports, for
@@ -79,6 +81,9 @@ loads analytics or fonts names those origins in the CSP instead of widening it.
 - `.gitignore` carries the secrets block of `templates/gitignore-secrets` of agentic-github-flow (every
   `.env*` except the examples, keys, certificates); `.vercel/` is ignored; `vercel.json` holds no
   secret.
+- `public/` holds only what anyone may fetch: Next.js serves every file in it from the site
+  root (`public` folder reference), and Vite copies it into the build as is. No `.env`,
+  configuration, database dump, export, backup or private upload there.
 - `scan_secrets.py --history` is clean or explained; `audit_dependencies.py` at
   `--level moderate` is clean or every advisory has an owner on the issue, with the framework's
   own advisories first.

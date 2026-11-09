@@ -13,8 +13,8 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 TESTS = ['skills_format.py', 'repo_checks.py', 'claude_permissions.py', 'git_guard.py',
          'personal_data_guard.py', 'scan_secrets.py', 'audit_dependencies.py',
-         'skill_triggers_offline.py', 'worktree_tools.py', 'installer.py', 'codex_policy.py',
-         'overlap_check.py', 'plugin_validate.py']
+         'skill_triggers_offline.py', 'worktree_tools.py', 'new_worktree.py', 'installer.py',
+         'codex_policy.py', 'overlap_check.py', 'plugin_validate.py']
 
 
 def main():

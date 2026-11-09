@@ -9,8 +9,9 @@ so here, by changing this test, not by slipping through.
 
 The commands: every ASK and PASS case of tests/delete_guard_cases.py; the probe corpus in
 tests/fixtures/delete_guard_probes.txt (the independent reviews' probes); and a generated corpus
-that joins prefixes which change, hide or confuse the working folder with deletes, in the home
-folder, a repository and a folder deep inside it.
+that joins prefixes which change, hide or confuse the working folder with deletes (also ones
+without a delete word, which the guard's fallback for a fault or an overrun does not catch), in
+the home folder, a repository and a folder deep inside it.
 
 The fixture's own `import` of pre_tool_git_guard.py resolves to the plugin's copy (the shared
 shell helpers): the fixture is loaded with the plugin's scripts folder as its location. Nothing
@@ -70,6 +71,9 @@ DELETES = [
     'rm known_hosts', 'rm -rf ../Documents', 'rm -rf "$X"', 'rm -rf $X/Library', 'rm -rf .',
     'rmdir Documents', 'unlink .zshrc', 'rm -rf ~+/Library', "trap 'rm -rf Documents' EXIT",
     'bash -c "rm -rf Documents"', 'eval "rm .zshrc"', 'ls | xargs rm', 'f',
+    # deletes without a delete word, which a fault or an overrun of the guard does not catch
+    'R=rm; $R -r Library', '/bin/r? -r Documents', "$'\\x72m' -r ~/Library", '=rm -r .ssh',
+    '$RMCMD -rf Library',
 ]
 GENERATED_WHERE = ('HOME', 'REPO', 'SCRIPTS')
 

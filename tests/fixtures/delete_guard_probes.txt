@@ -213,3 +213,158 @@ REPO trap 'cd ~' DEBUG; rm -rf Documents
 REPO trap 'cd ~' DEBUG; rm .zshrc
 REPO function function function function function function function function function function function function function function function function function function function function function function function function function function function function function function function function function function function function function function function function function ; $R -rf ~
 REPO T='trap "$T" "$T" "$T"'; trap "$T" "$T" "$T"; $R -rf ~
+# the independent review of the second attempt (round 1)
+HOME repeat ² true; R=rm; $R -r ~/Library
+REPO repeat ² true; R=rm; $R -r ~/Library
+HOME repeat ² true; /bin/r? -r ~/Library
+HOME repeat ² true; =rm -r ~/Library
+HOME repeat ² true; rm -r ~/Library
+HOME trap -- "'" EXIT; R=rm; $R -r ~/Library
+HOME builtin trap "'" EXIT; R=rm; $R -r ~/Library
+HOME trap -- "echo it's done" EXIT; R=rm; $R -r ~/Library
+HOME trap -- "echo it's done" EXIT; rm -r ~/Library
+HOME trap "echo it's done" EXIT; R=rm; $R -r ~/Library
+HOME command trap 'echo "' EXIT; /bin/r? -r ~/.ssh
+HOME time trap "'" EXIT; $'\x72m' -r ~/Library
+HOME E=; rm ${E:-~-}
+HOME E=; rmdir ${E:-~-}
+HOME E=; unlink ${E:-~1}
+HOME E=; rm ${E:-~+1}
+HOME E=; rm ${E-~2}
+REPO E=; rm ${E:-~-}
+HOME E=; rm -f ${E:-~-}
+HOME R=rm; $R -r ~/Library
+HOME $'\x72m' -r ~/Library
+HOME /bin/r? -r ~/Library
+REPO trap 'cd ~' USR1; kill -USR1 $$; rm -rf Documents
+REPO trap 'cd ~' CHLD; true & wait; rm -rf Documents
+REPO trap 'cd ~' ALRM; rm -rf Documents
+REPO run() { "$@"; }; run cd ~; rm -rf Documents
+REPO run() { "$@"; }; run rm -rf ~/Library
+HOME run() { echo "+ $*"; "$@"; }; run rm -rf Library
+REPO set -- rm -rf ~/Library; "$@"
+REPO set -- cd ~; "$@"; rm -rf Documents
+REPO source /dev/stdin <<< 'cd ~'; rm -rf Documents
+REPO source <(echo 'rm -rf ~/Library')
+REPO . <(echo rm -rf ~/Library)
+REPO source /dev/stdin <<< 'rm -rf ~/Library'
+REPO echo 'rm -rf ~/Library' | source /dev/stdin
+REPO ( cd ~ && case a in a) rm -rf Documents;; esac )
+REPO ( cd ~ && case a in b|a) rm -rf Documents;; esac )
+REPO ( case a in a) cd ~;; esac; rm -rf Documents )
+REPO cd ~ && case a in (a) rm -rf Documents;; esac
+REPO a=(x y); cd ~ && rm -rf Documents
+REPO rm -rf {~,}/Library
+REPO rm -rf {a,~}
+REPO rm -rf {{~,a},b}
+REPO rm -rf {~/Doc,x}uments
+REPO rm -rf ~0
+REPO rm -rf ~+0
+HOME rm ~0/.zshrc
+REPO rm -rf ~"/Library"
+REPO X=a:~/Library; IFS=:; rm -rf $X
+REPO rm -rf {~,a}/.ssh
+REPO find {~,/tmp/x} -delete
+REPO rm -rf ${X:-{~,a}}
+REPO rm -rf ~{,/Library}
+REPO rm -rf ~{/Documents,/x}
+REPO rm -rf ~{/.ssh,}
+REPO true | cd ~; rm -rf Documents
+REPO cd() { builtin cd ~; }; cd /tmp && rm -rf Documents
+REPO f() if true; then cd ~; fi; f; rm -rf Documents
+REPO eval cd ~ && rm -rf Documents
+REPO x=cd; $x ~ && rm -rf Documents
+REPO cd -L -- ~ && rm -rf Documents
+REPO pushd ~ >/dev/null; rm -rf Documents
+REPO pushd ~ >/dev/null && popd >/dev/null && pushd -0 && rm -rf Documents
+REPO cd ~ && cd /tmp && cd - && rm -rf Documents
+REPO while cd ..; do :; done; rm -rf Documents
+REPO for d in . ..; do cd $d; done; rm -rf Documents
+REPO if true; then for i in 1; do cd ..; done; fi; cd ..; rm -rf Documents
+REPO { cd ~ ; } 2>/dev/null; rm -rf Documents
+REPO cd ~ 2>/dev/null || true; rm -rf Documents
+REPO coproc cd ~; rm -rf Documents
+REPO exec 3>&1; cd ~ && rm -rf Documents
+REPO eval 'f() { cd ~; }'; f; rm -rf Documents
+REPO eval 'trap "rm -rf Documents" EXIT'; cd ~
+REPO sh -c 'trap "rm -rf Documents" EXIT; cd ~'
+REPO f() { rm -rf Documents; }; (cd ~ && f)
+REPO f() { rm -rf Documents; }; cd ~ & f
+REPO f() { rm -rf "$1"; }; f ~/Library
+REPO f() { rm -rf "$@"; }; f ~/Library
+REPO alias go='cd ~'; go; rm -rf Documents
+REPO zshexit() { rm -rf Documents; }; cd ~
+REPO TRAPEXIT() { rm -rf Documents; }; cd ~
+REPO trap 'cd ~' ZERR; false; rm -rf Documents
+REPO trap 'cd ~' SIGRETURN; rm -rf Documents
+REPO precmd() { cd ~; }; rm -rf Documents
+REPO chpwd() { cd ~; }; cd /tmp/x; rm -rf Documents
+REPO cd /tmp/x && rm -rf ../../Users
+SCRIPTS cd ../../../.. && rm -rf Documents
+DEEP cd ../../.. && rm -rf Documents
+HOME for i in 1 2 3 4 5 6 7 8; do cd ..; cd a; cd b; pushd x; popd; done; f() { cd ..; pushd y; popd; }; f; f; f; f; R=rm; $R -r ~/Library
+REPO cd & cd ${Y:-~+}; cd /tmp/x & /bin/r? -r ../Documents
+HOME cd ~ && E=; /bin/r? ${E:-~+1}
+HOME pushd /tmp/p0; pushd /tmp/p1; pushd /tmp/p2; pushd /tmp/p3; pushd /tmp/p4; pushd /tmp/p5; pushd /tmp/p6; pushd /tmp/p7; pushd /tmp/p8; pushd /tmp/p9; pushd /tmp/p10; pushd /tmp/p11; pushd /tmp/p12; pushd /tmp/p13; pushd /tmp/p14; pushd /tmp/p15; pushd /tmp/p16; pushd /tmp/p17; pushd /tmp/p18; pushd /tmp/p19; pushd /tmp/p20; pushd /tmp/p21; pushd /tmp/p22; pushd /tmp/p23; pushd /tmp/p24; pushd /tmp/p25; pushd /tmp/p26; pushd /tmp/p27; pushd /tmp/p28; pushd /tmp/p29; pushd /tmp/p30; pushd /tmp/p31; pushd /tmp/p32; pushd /tmp/p33; pushd /tmp/p34; pushd /tmp/p35; pushd /tmp/p36; pushd /tmp/p37; pushd /tmp/p38; pushd /tmp/p39; sh -c 'pushd /tmp/q0; pushd /tmp/q1; pushd /tmp/q2; pushd /tmp/q3; pushd /tmp/q4; pushd /tmp/q5; pushd /tmp/q6; pushd /tmp/q7; pushd /tmp/q8; pushd /tmp/q9; pushd /tmp/q10; pushd /tmp/q11; pushd /tmp/q12; pushd /tmp/q13; pushd /tmp/q14; pushd /tmp/q15; pushd /tmp/q16; pushd /tmp/q17; pushd /tmp/q18; pushd /tmp/q19; pushd /tmp/q20; pushd /tmp/q21; pushd /tmp/q22; pushd /tmp/q23; pushd /tmp/q24; pushd /tmp/q25; pushd /tmp/q26; pushd /tmp/q27; pushd /tmp/q28; pushd /tmp/q29; pushd /tmp/q30; pushd /tmp/q31; pushd /tmp/q32; pushd /tmp/q33; pushd /tmp/q34; pushd /tmp/q35; pushd /tmp/q36; pushd /tmp/q37; pushd /tmp/q38; pushd /tmp/q39; x() { cd /tmp/w0; }; x() { cd /tmp/w1; }; x() { cd /tmp/w2; }; x() { cd /tmp/w3; }; x() { cd /tmp/w4; }; x() { cd /tmp/w5; }; x() { cd /tmp/w6; }; x() { cd /tmp/w7; }; x() { cd /tmp/w8; }; x() { cd /tmp/w9; }; x() { cd /tmp/w10; }; x() { cd /tmp/w11; }; x() { cd /tmp/w12; }; x() { cd /tmp/w13; }; x() { cd /tmp/w14; }; x() { cd /tmp/w15; }; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true'; sh -c 'pushd /tmp/q0; pushd /tmp/q1; pushd /tmp/q2; pushd /tmp/q3; pushd /tmp/q4; pushd /tmp/q5; pushd /tmp/q6; pushd /tmp/q7; pushd /tmp/q8; pushd /tmp/q9; pushd /tmp/q10; pushd /tmp/q11; pushd /tmp/q12; pushd /tmp/q13; pushd /tmp/q14; pushd /tmp/q15; pushd /tmp/q16; pushd /tmp/q17; pushd /tmp/q18; pushd /tmp/q19; pushd /tmp/q20; pushd /tmp/q21; pushd /tmp/q22; pushd /tmp/q23; pushd /tmp/q24; pushd /tmp/q25; pushd /tmp/q26; pushd /tmp/q27; pushd /tmp/q28; pushd /tmp/q29; pushd /tmp/q30; pushd /tmp/q31; pushd /tmp/q32; pushd /tmp/q33; pushd /tmp/q34; pushd /tmp/q35; pushd /tmp/q36; pushd /tmp/q37; pushd /tmp/q38; pushd /tmp/q39; x() { cd /tmp/w0; }; x() { cd /tmp/w1; }; x() { cd /tmp/w2; }; x() { cd /tmp/w3; }; x() { cd /tmp/w4; }; x() { cd /tmp/w5; }; x() { cd /tmp/w6; }; x() { cd /tmp/w7; }; x() { cd /tmp/w8; }; x() { cd /tmp/w9; }; x() { cd /tmp/w10; }; x() { cd /tmp/w11; }; x() { cd /tmp/w12; }; x() { cd /tmp/w13; }; x() { cd /tmp/w14; }; x() { cd /tmp/w15; }; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true; true'; R=rm; $R -r ~/Library
+REPO command -p trap 'rm -rf Documents' EXIT; cd ~
+REPO pushd ~ && pushd /tmp/x && popd && rm -rf Documents
+REPO function f() { cd ~; }; f; rm -rf Documents
+REPO g() { cd ~; }; f() { g; }; f; rm -rf Documents
+REPO for i (1 2) { rm -rf Documents; cd ~ }
+REPO repeat 2 { rm -rf Documents; cd ~ }
+REPO for ((i=0;i<2;i++)); do rm -rf Documents; cd ~; done
+REPO while read -r l; do rm -rf Documents; cd ~; done < f
+REPO for i in 1 2; do rm -rf Documents; cd ~; done
+REPO for i in 1; do rm -rf Documents; cd ~; done; rm -rf Documents
+REPO if true; then for i in 1 2; do cd ..; done; fi; rm -rf Documents
+REPO do_it() { rm -rf Documents; }; cd ~ && do_it
+REPO do_it() { rm -rf Documents; }; pushd ~ >/dev/null; do_it
+REPO trap -- 'rm -rf Documents' EXIT; cd ~
+REPO trap 'rm -rf Documents' 0; cd ~
+REPO f() { trap 'rm -rf Documents' RETURN; }; cd ~; f
+REPO cd ~ && exec bash -c 'rm -rf Documents'
+REPO cd ~; dirs; rm -rf ~1
+REPO rm -rf {~+,a}
+REPO rm -rf {~-,a}
+REPO rm -rf ""{~,a}
+REPO hash -d x=~; rm -rf ~x
+REPO cd ~/Documents/.. && find . -maxdepth 1 -name Documents -delete
+REPO cd ~ && find Documents -delete
+REPO eval "cd ~"; find Documents -delete
+REPO C='cd ~'; $C; rm -rf Library
+REPO C='pushd ~'; $C; rm -rf Library
+REPO f() { pushd ~; }; f >/dev/null; rm -rf Library
+REPO { pushd ~; } >/dev/null; rm -rf Library
+REPO ( pushd ~ ); rm -rf Library
+REPO cd ~ & wait; rm -rf Library
+REPO while true; do rm -rf Documents; cd ~; done
+REPO while :; do rm -rf Documents; cd ~; done
+REPO until false; do rm -rf Documents; cd ~; done
+REPO while sleep 1; do rm -rf Documents; cd ..; done
+SCRIPTS while true; do rm -rf Documents; cd ..; done
+REPO while true; do rm -rf Documents; pushd ~; done
+REPO while true; do rm -rf Documents; f; done
+REPO while true; do cd ..; done; rm -rf Documents
+REPO repeat 3 { rm -rf Documents; cd .. }
+REPO command -p cd ~ && rm -rf Documents
+REPO builtin -- trap 'rm -rf ~/Library' EXIT
+REPO command -- trap 'rm -rf ~/Library' EXIT
+REPO command -p eval 'cd ~'; rm -rf Documents
+SCRIPTS while [ "$PWD" != / ]; do rm -rf .cache; cd ..; done
+SCRIPTS until [ -d .git ] || [ "$PWD" = / ]; do rm -rf .venv; cd ..; done
+SCRIPTS while [ "$PWD" != / ]; do rm -rf Library; cd ..; done
+REPO for i in 1 2; do while false; do :; done; rm -rf Documents; cd ~; done
+REPO for i in 1 2; do if true; then rm -rf Documents; fi; cd ~; done
+REPO while true; do rm -rf Documents; cd ~ || break; done
+REPO while true; do rm -rf Documents; do_cd; done
+HOME while true; do rm -rf *; cd /tmp/x; done
+REPO trap -- "echo it's done" EXIT; rm -f /tmp/x/a.log
+REPO pushd /tmp/x && rm -rf build && popd
+REPO cd /tmp/x && rm -rf build; cd - && rm -rf dist
+REPO for d in a b; do (cd $d && rm -rf build); done
+REPO for i in 1 2; do rm -rf build; done
+REPO cleanup() { rm -rf "$T"; }; T=$(mktemp -d); trap cleanup EXIT; cd "$T" && make
+REPO T=$(mktemp -d); trap 'rm -rf "$T"' EXIT; cd "$T"; rm -rf out
+REPO cd plugins && rm -rf __pycache__; cd ..; rm -rf build
+REPO pushd plugins >/dev/null; rm -rf build; popd >/dev/null; rm -rf dist
+REPO while read f; do rm -f "$f"; done < list

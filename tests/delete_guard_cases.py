@@ -247,6 +247,13 @@ ASK = [
     ("nocorrect trap 'rm -rf ~/Library' EXIT", REPO), ('repeat 1 rm -rf ~/Library', REPO),
     ('repeat 2 do rm -rf ~/Library; done', REPO),
     ("eval \"trap 'rm -rf Documents' EXIT\"; cd ~", REPO),
+    # the second attempt's review: while and until loops, options of command and builtin
+    ('while [ "$PWD" != / ]; do rm -rf .cache; cd ..; done', SCRIPTS),
+    ('until [ -d .git ] || [ "$PWD" = / ]; do rm -rf .venv; cd ..; done', SCRIPTS),
+    ('while true; do rm -rf Documents; cd ~; done', REPO),
+    ('for i in 1 2; do while false; do :; done; rm -rf Documents; cd ~; done', REPO),
+    ("command -p trap 'rm -rf ~/Library' EXIT", REPO),
+    ('command -p cd ~ && rm -rf Documents', REPO),
 ]
 if LINK:
     ASK.append(('rm -rf "%s/liblink/"' % R, REPO))
@@ -311,4 +318,7 @@ PASS = [
     ("trap 'rm -rf node_modules/.cache' EXIT; npm test", REPO),
     ('pushd build && make && popd; rm -rf out', REPO),
     ('pushd /tmp/x >/dev/null; make; popd >/dev/null; rm -rf dist', REPO),
+    ('while read d; do (cd "$d" && make); done < l; rm -rf build', REPO),
+    ('while true; do make || break; done; rm -rf build', REPO),
+    ("trap -- \"echo it's done\" EXIT; rm -f /tmp/x/a.log", REPO),
 ]

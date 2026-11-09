@@ -1,6 +1,6 @@
 ---
 name: issue-handover
-description: Pick and claim the next ready GitHub issue and hand an issue chat over to the chat for it - record that the branch is ready to push, pick the next issue by priority, check it for overlapping work, start its chat in the background, claim the issue and hand over the brief, then ask for the push. Use when an issue chat's branch is ready to push, when its context nears the limit, after two failed corrections, or when the user asks to start issue chats.
+description: Pick and claim the next ready GitHub issue and hand an issue chat over to the chat for it - record that the branch is ready to push or landed on local main, pick the next issue by priority, check it for overlap, start its chat in the background, claim the issue and hand over the brief, then ask for the push or archive. Use when an issue chat's branch is ready to push or landed, when its context nears the limit, after two failed corrections, or when the user asks to start issue chats.
 compatibility: The background start needs the Claude Code desktop app and a logged-in claude CLI (measured on macOS; Linux unmeasured; Windows unsupported) plus gh. Codex desktop uses codex.md. Elsewhere the chat gives the user the brief to paste.
 ---
 
@@ -24,10 +24,14 @@ for the push runs in the foreground of the turn of the task's work.
 **The push stays the user's.** The settings section lets this chat pick, claim, start the next
 chat and archive itself without asking; it never covers a push, a merge or marking a pull
 request ready. This chat pushes only after the user's yes for this push, typed in this chat.
+In local-main mode (`ship-change` step 1) the chat lands its own work on local main instead, as
+the `ship-change` skill's `local-main.md` says, and the push of the landing branch waits for
+the user's word in any chat; steps 2, 6 and 7 below say what changes.
 
 **Never archive this chat** while any of these holds: its worktree, or a task worktree it
 worked in, fails the worktree check (`python3 <plugin>/scripts/chat_archivable.py <worktree>`
-says `keep:`, as it does while a commit of this chat is not on GitHub); a run, subagent or background job of it is still
+says `keep:`, as it does while a commit of this chat is not on GitHub or, in local-main
+mode, not landed); a run, subagent or background job of it is still
 running; another session it started is not detached and is running or fails the worktree check,
 because archiving takes its finished side sessions along and removes their worktrees; a
 question to the user is unanswered and the next step needs its answer (any other question waits
@@ -48,8 +52,12 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
    Then a signed comment on the issue whose text after the signature opens with
    `ready to push:`: the branch, its head commit, the checks and their results, and one line per
    overlap hit (the next chat's pick reads this opening: the area is free again, method.md §1).
-   The issue stays open and assigned; the merge closes it. A correction to an earlier comment is
-   a new comment, never an edit. Each open question for the user stands on its owning issue,
+   The issue stays open and assigned; the merge closes it. **In local-main mode** land the work
+   instead (`local-main.md` §1; for the independent route a subagent that did not write it
+   reviews and lands it, §2), then the signed comment opens with
+   `landed on local <landing branch> at <commit>`: what landed, the checks, the overlap lines;
+   the issue stays open and assigned until the push's cleanup closes it. Landing refused: stop
+   and report, no hand-over. A correction to an earlier comment is a new comment, never an edit. Each open question for the user stands on its owning issue,
    signed, with the question label.
 3. **Pick the next issue:** `git fetch origin`, then
    `python3 <plugin>/scripts/next_issue.py -C <this worktree>`, with `--area <area label>` when
@@ -70,7 +78,8 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
 4. **Check before you start anything:** no run of yours is still going and no half-made chat of
    an earlier attempt exists. The worktree check of your own worktree (the `worktreePath` of
    `get_session "self"`, or, for a chat with none, the worktree it worked in) is expected to say
-   `keep:` while your branch waits for the push: that stops only the archive, never the start.
+   `keep:` while your branch waits for the push: that stops only the archive, never the start
+   (in local-main mode it says `ok` once the work landed).
 5. **Start the next chat and claim its issue.** Each numbered call stands alone, in the
    foreground of this turn; any failure goes to the fallback below.
    1. **Its worktree:** always a new one, made with the settings' worktree tool from the
@@ -126,7 +135,9 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
    to push (`ship-change` step 6: the branch, how many commits, the checks and their results,
    the overlap check's result, the pull request title, draft or ready); which chat started with
    which model and effort, and its issue; anything that stopped you. Then end the turn: this
-   chat waits for the yes and does not archive now.
+   chat waits for the yes and does not archive now. **In local-main mode** tell the user what
+   landed (the commits and checks; the landing branch now holds unpushed landings, pushed on
+   their word in any chat) in place of the ask, and go on with step 7 in this turn.
 7. **Push and archive,** in the turn of the user's yes: `ship-change` step 7 (push your task
    branch, open the pull request, report its URL and first CI result); a signed comment on the
    issue whose text after the signature opens with `pull request opened: #<number>`; then rerun
@@ -136,7 +147,9 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
    user wants changes first, they are new commits on this branch and steps 2 and 6 again; if
    anything fails, do not archive: report and stop. A chat with nothing to push (no next issue
    and no commits, or a task stopped for open requirements) archives at step 6 when the check
-   passes.
+   passes. **In local-main mode** step 7 is the archive alone: rerun the worktree check (`ok`
+   once landed), `get_session "self"`, tell the user, then `archive_session` with
+   `session_id: "self"` and a short `reason`; no push and no pull request.
 
 **Starting chains** (a chat the user types in, method.md §7): run steps 3 and 5 once per chain,
 each pick after the previous claim, so a spreading repository gets one chain per area with the
@@ -147,7 +160,8 @@ chats already working; then report. That chat does not archive itself.
 turn this chat detaches the session the click started (`detach_session` with its id, from the
 turn or from `list_sessions` by the title of step 5), because that one is its child, and goes
 on with step 6. If no turn reaches this chat, it stays as it is: the next chat detaches itself
-and a later `archive-finished-chats` archives this one once its work is on GitHub.
+and a later `archive-finished-chats` archives this one once its work is on GitHub (in
+local-main mode: landed).
 
 **A hand-over before the branch is ready** (context limit, two failed corrections) keeps the
 issue: commit what is verified, a signed state comment on the issue (branch, worktree, head

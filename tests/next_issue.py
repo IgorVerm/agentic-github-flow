@@ -76,6 +76,7 @@ def issue(n, *labels, assigned=False, ready=True, comments=()):
 CLAIM = ROBOT + ' Claude Code (issue chat): claimed for chat "#{0} · x" (local_1), branch b, worktree w'
 READY = ROBOT + ' Claude Code (issue chat): **Ready to push:** branch `agent/2-x` at `abc1234`; checks green'
 OPENED = ROBOT + ' Claude Code (issue chat): pull request opened: #40'
+LANDED = ROBOT + ' Claude Code (issue chat): Landed on local main at `abc1234`: the fix; checks green'
 
 
 class NextIssue(unittest.TestCase):
@@ -186,7 +187,7 @@ class NextIssue(unittest.TestCase):
 
     def test_a_branch_ready_to_push_frees_its_area_until_a_new_claim(self):
         self.settings('| spread over areas | yes: `area:a`, `area:b` |')
-        for handoff in (READY, OPENED):
+        for handoff in (READY, OPENED, LANDED):
             # #2 in area:a: claim, then ready to push (or its pull request opened), then a
             # question: no chat works there any more, so area:a is free again
             self.issues[0]['comments'] = [CLAIM.format(2), handoff, ROBOT + ' Codex (review): a question']

@@ -1,6 +1,6 @@
 ---
 name: cleanup-merged
-description: Remove a task's worktree and branches after its pull request was merged, and make sure its issue is closed. Use when the user says a pull request was merged, when asked to clean up merged work, old worktrees or leftover local branches, or to audit which worktrees and branches can go.
+description: Remove a task's worktree and branches once its work is merged - its pull request merged, or in local-main mode the landing branch pushed - and close its issue. Use when the user says a pull request was merged, right after a verified push of the landing branch, when asked to clean up merged work, old worktrees or leftover local branches, or to audit which worktrees and branches can go.
 ---
 
 # Cleaning up after a merge
@@ -8,10 +8,15 @@ description: Remove a task's worktree and branches after its pull request was me
 `<plugin>` below is the folder two levels above this skill's folder; the scripts are
 [remove_merged_worktree.py](../../scripts/remove_merged_worktree.py) and
 [delete_merged_branch.py](../../scripts/delete_merged_branch.py). Run everything from the
-repository's primary checkout, not from inside the worktree that goes.
+repository's primary checkout, not from inside the worktree that goes. "The default branch"
+below is the landing branch when `HANDOFF.md` names one (`landing.py` in the same folder owns
+the setting); the scripts read it themselves.
 
-1. **Prove the merge.** `gh pr view <number or branch> --json state,mergedAt,mergeCommit,headRefName,headRefOid`
-   must say `MERGED`. Not merged: stop and tell the user.
+1. **Prove the merge.** Pull-request mode: `gh pr view <number or branch> --json state,mergedAt,mergeCommit,headRefName,headRefOid`
+   must say `MERGED`. Local-main mode (the `ship-change` skill's `local-main.md`): the push of
+   the landing branch is verified, `git ls-remote origin refs/heads/<landing>` equal to
+   `git rev-parse <landing>`; a repository without a remote has nothing to publish, and its
+   landing is the merge. Not merged: stop and tell the user.
 2. **Remove the worktree and the local branch:**
    `python3 <plugin>/scripts/remove_merged_worktree.py <worktree>`, or `--sweep` for every
    linked worktree of the repository, `--dry-run` to only report. It fetches, runs the checks
@@ -34,7 +39,9 @@ repository's primary checkout, not from inside the worktree that goes.
    tell the user. The `pre-push` template allows the deletion on the same terms.
 4. **The issue.** `gh issue view <n> --json state`. A closing keyword in the pull request closed
    it at the merge. Still open and fully resolved: close it with a signed comment naming the pull
-   request and the merge commit. Resolved in part: comment what remains and leave it open.
+   request and the merge commit, or in local-main mode
+   `Landed in <landing sha>; verified on remote <landing> at <remote tip>.` with what landed and
+   the checks. Resolved in part: comment what remains and leave it open.
    Record in that signed comment each branch the sweep printed as DELETED that had a remote
    copy or belongs to that issue, with its head SHA: the SHA is the way back until git prunes
    the commit. Branches that existed only locally and belong to no such issue are not

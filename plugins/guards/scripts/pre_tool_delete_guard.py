@@ -34,9 +34,10 @@ command (or a `run_in_terminal` call) that:
   that part empty, and the guard assumes it holds no `..`. An unquoted one asks, because it
   splits on spaces. A known variable used unquoted is split at white space and its `*?[`
   expand (`D="$HOME/Documents backup"; rm -rf $D` deletes `~/Documents`). `${NAME:-word}` is
-  NAME's value when NAME is known, word (a leading `~` expanded) when NAME is known to be
-  empty, and otherwise word only when it lies in a temporary folder or a git worktree; else it
-  is unknown (`rm -rf ${CLEAN:-~}` asks);
+  NAME's value when NAME is known, word (a leading `~`, `~+` or `~+0` expanded; `~-` and `~N`
+  make it unknown) when NAME is known to be empty, and otherwise word only when it lies in a
+  temporary folder or a git worktree; else it is unknown (`rm -rf ${CLEAN:-~}` and
+  `rm -rf ${CLEAN:-~+}` in a repository ask);
 - deletes recursively a repository or worktree root (a folder holding `.git`, or one directly
   holding such folders) or a `.git` folder; worktrees go through the cleanup-merged skill;
 - deletes what `xargs` or GNU `parallel` hands over, or hands it to a shell: the command
@@ -54,10 +55,11 @@ command (or a `run_in_terminal` call) that:
   while it names a delete; holds a `$'…'` string the guard cannot decode while it names a
   delete; names more than MAX_PATHS paths to delete; holds a brace expansion of more than
   MAX_BRACES texts with an alternative holding `/` or `..` (without one, everything from the
-  first `{` is judged as a glob: `rm -f out/file{1..100}.txt` stays in `out`); or, while it
-  names a delete, takes longer than DEADLINE seconds to judge or blocks in a call (a hung
-  mount) past HARD_DEADLINE, after which the hook answers without waiting for it (the hook's
-  timeout in hooks.json is 10 s).
+  first `{` is judged as a glob: `rm -f out/file{1..100}.txt` stays in `out`; one with an
+  alternative that starts with `~` asks); or, while it names a delete or holds an `-rf`-style
+  flag cluster, takes longer than DEADLINE seconds to judge or blocks in a call (a hung mount)
+  past HARD_DEADLINE, after which the hook answers without waiting for it (the hook's timeout
+  in hooks.json is 10 s).
 Working folders: a `cd` in a loop, or anywhere once the command defines a function, makes the
 folder unknown. Otherwise a `cd` is trusted for the rest of its list when what follows runs
 only on its success (`cd x && …`, `cd x || exit`). When the list ends (`;`, a newline, `&`), and after
@@ -65,6 +67,18 @@ any other `cd`, relative paths are judged against both the folder before and the
 the `cd`, and the command asks if either is protected (`cd /tmp/x; rm -rf build` from a
 repository passes, `cd /tmp/gone && echo; rm -rf *` from the home folder asks). A subshell's
 `cd` ends at its `)`; `env -C <folder>` and `sudo -D <folder>` count as a trusted `cd`.
+Next to these folders it keeps a second set (MoreFolders) that only ever adds folders, and
+judges every command in both: a `cd` behind `time`, `noglob`, `nocorrect`, `-`, `!`, an
+assignment or zsh's `repeat N`; the folder before a `cd` that may be skipped (after `||`, in a
+pipeline, negated); for popd and pushd any folder the command was in, for `cd -` and zsh's
+`cd ±N` also an unknown one; zsh's `cd OLD NEW`; a CDPATH the command sets; a `cd` in a loop
+as often as the loop runs (the words of `for x in a b`, `repeat N`, else any number of
+times), also for a delete before it in the loop; the folders an `eval` or a variable holding a
+command (`C='cd ~'; $C`) may end in; an unknown folder after a computed command whose text
+names a `cd` (`$(echo cd) ~`, `eval "$(echo cd ~)"`); and the `cd`s of a function body where
+the function is called, and of a DEBUG, RETURN or ERR trap after each command. Function
+bodies and trap texts are judged again at the end of their shell, in every folder it may be
+in from their definition on (`trap 'rm -rf Documents' EXIT; cd ~`).
 The temporary folders: `/tmp`, `/private/tmp`, `/var/tmp`, `/var/folders`, `/private/var/folders`
 and the folder that `TMPDIR`, `TEMP` or `TMP` names, unless that is a root or holds a home
 folder; a path inside a home folder counts only when the temporary folder lies inside that home
@@ -73,14 +87,18 @@ too (Windows' `AppData/Local/Temp`).
 It reads the command as the shell would: behind `sh -c`, `bash -c --`, `su … -c`, `csh`,
 `fish`, `eval`, `$(…)`, a here-document or here-string a shell reads, wrappers (`sudo`, `env`,
 `nice`, `timeout`, `arch`, `script`, `command`, `builtin`, `busybox`, `pkexec`, `runuser`),
-quoting and escapes in the command name (`\\rm`, `"r"m`, `$'rm'`, zsh's `=rm`, `rm.exe`,
-`C:\\…\\rm.exe`, a glob such as `/bin/r[m]`), a variable that holds the command
-(`R=rm; $R -rf x`), the text of `trap '…' EXIT`, `~user` and `~+`, brace expansion (also
-`{a..c}`), `cd` (also inside `if` and `{ }`), find's `-O3` and `-D <flags>` before its folders,
-command names in any case. Literal paths inside a git worktree or a temporary folder pass,
-and `trash` always passes. Paths are compared without regard to case, as the macOS and
-Windows file systems do (on Linux that only asks more), both as written and with links
-resolved. On Windows, Git Bash paths (`/c/Users/…`, `/cygdrive/c/…`) and `C:\\…` or `C:/…`
+the precommands `time`, `noglob`, `nocorrect` and `-`, zsh's `repeat N`, a one-line function
+header (`function f { rm -rf x; }`), quoting and escapes in the command name (`\\rm`, `"r"m`,
+`$'rm'`, zsh's `=rm`, `rm.exe`, `C:\\…\\rm.exe`, a glob such as `/bin/r[m]`), a variable that
+holds the command (`R=rm; $R -rf x`), the text of `trap [--] '…' EXIT`, `~user`, `~+` and
+`~+0`, brace expansion (also `{a..c}`), `cd` (also inside `if` and `{ }`), find's `-O3` and
+`-D <flags>` before its folders, command names in any case. A `~` form the shell expands that
+the literal reading leaves alone is judged in addition to it: a brace alternative that starts
+with `~` (`{~,a}`, `~{/.zshrc,/.bashrc}`), and the folder stack's `~-`, `~N`, `~+N` and `~-N`
+as every folder the command was in and an unknown one. Literal paths inside a git worktree or
+a temporary folder pass, and `trash` always passes. Paths are compared without regard to case,
+as the macOS and Windows file systems do (on Linux that only asks more), both as written and
+with links resolved. On Windows, Git Bash paths (`/c/Users/…`, `/cygdrive/c/…`) and `C:\\…` or `C:/…`
 are read as the same drive paths; on every system WSL's `/mnt/<letter>/…` is also judged as
 that Windows drive.
 
@@ -107,11 +125,13 @@ its built-in check of `rm -f`, and the prompt rules in policy/delete-guard.rules
 deletes without `-f`, `xargs … rm`), which the installer copies into ~/.codex/rules/. The
 written rule binds Codex where those do not reach.
 
-An input it cannot parse is asked about when it names a delete program, and passes otherwise;
-a fault in the guard itself asks in the same case. Any other input, a malformed event
-included, passes with exit 0. Nothing is ever denied. The shell helpers it shares
-(`base`, `SHELLS`, `KEYWORDS`, `ASSIGN`, `HEREDOC`, `$'…'` decoding, the input and depth limits)
-have one owner, pre_tool_git_guard.py.
+An input it cannot parse is asked about when it names a delete program or holds an
+`-rf`-style flag cluster (what a computed command name may run), and passes otherwise; a fault
+in the guard itself asks in the same case. tests/delete_guard_differential.py checks that the
+guard asks for every command the guard as it was before issue #4 asks for. Any other input,
+a malformed event included, passes with exit 0. Nothing is ever denied. The shell helpers it
+shares (`base`, `SHELLS`, `KEYWORDS`, `ASSIGN`, `HEREDOC`, `$'…'` decoding, the input and
+depth limits) have one owner, pre_tool_git_guard.py.
 
 Usage as a hook: reads the PreToolUse JSON on stdin, prints the "ask" decision on stdout or
 nothing, and exits 0. For tests: `pre_tool_delete_guard.py --check '<command>' [cwd]` prints the

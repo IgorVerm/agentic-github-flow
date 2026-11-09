@@ -81,9 +81,10 @@ creates before deleting through it, a computed command name whose text names no 
 has no `-rf`-style flag (`$PROG -r x` with PROG set outside the command), a non-recursive
 delete of a computed target (`for f in ~/.ssh/*; do rm "$f"; done`), lines after a
 here-document marker that stands inside quotes or a comment (read as a body, so a `)` in a
-commit message cannot end a substitution), brace expansion of the command word, wrappers it does not know (`watch`, `tmux`, `env -S`, `osascript`), GNU `grm` and
-`gfind`, `fd -X rm`, `rmdir -p`, encoded commands piped into a shell, and PowerShell
-(`Remove-Item -Recurse`, `rd /s` in `cmd`). A quoted variable after a safe folder is assumed to
+commit message cannot end a substitution), brace expansion of the command word, wrappers it
+does not know (`watch`, `tmux`, `env -S`, `osascript`), GNU `grm` and `gfind`, `fd -X rm`,
+`rmdir -p`, encoded commands piped into a shell, and PowerShell (`Remove-Item -Recurse`,
+`rd /s` in `cmd`). A quoted variable after a safe folder is assumed to
 hold no `..`. Deliberate evasion is the job of a sandbox, not of this hook.
 
 Not for Codex: Codex accepts only "deny" from a PreToolUse hook, and a deny would make a

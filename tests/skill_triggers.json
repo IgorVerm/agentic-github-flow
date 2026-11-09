@@ -17,7 +17,7 @@
   },
   "ship-change": {
     "should": [
-      "The fix for issue 12 is committed on my task branch and the tests pass. Get it into a pull request."
+      "The fix for issue 12 is committed on my task branch and the tests pass. Land it the way this repository lands work."
     ],
     "should_not": [
       "Run the unit tests for the parser module and tell me which fail."
@@ -25,7 +25,7 @@
   },
   "cleanup-merged": {
     "should": [
-      "Pull request 41 was merged on GitHub. Clean up its worktree and branch."
+      "I just pushed main with the landed fix for issue 7. Clean up its worktree and branch and close the issue."
     ],
     "should_not": [
       "Close issue 50 as a duplicate of issue 49; no code or branch was created."

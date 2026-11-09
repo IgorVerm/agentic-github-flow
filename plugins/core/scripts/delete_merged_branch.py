@@ -9,7 +9,8 @@ commit of a pull request merged into the default branch (`gh pr list -R <remote 
 <branch> --state merged`, its `baseRefName` the default branch), or is already in the default
 branch as just fetched. The push carries a lease on that tip (`--force-with-lease=refs/heads/<branch>:<tip>`),
 so a commit a teammate pushed after the merge makes the push fail instead of vanishing. It
-refuses the default branch. AGENTIC_GITHUB_FLOW_GH, a JSON list, replaces the `gh` command
+refuses the default branch, main, master and origin's HEAD branch. "The default branch" here is
+the landing branch when HANDOFF.md's `## Landing settings` names one (landing.py). AGENTIC_GITHUB_FLOW_GH, a JSON list, replaces the `gh` command
 (tests use it). Exit 0: deleted, or already gone; 1: kept, with the reason; 2: usage error.
 """
 import json
@@ -17,6 +18,9 @@ import os
 import shutil
 import subprocess
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from landing import SettingError, landing_setting  # noqa: E402  (owner of the setting)
 
 
 def git(*args):
@@ -36,8 +40,13 @@ def gh_command():
 
 
 def default_branch(remote):
+    """The landing branch on <remote> when HANDOFF.md names one (landing.py), else the remote's
+    default branch, as fetched."""
+    setting = landing_setting('.')
     head = git('symbolic-ref', '-q', 'refs/remotes/%s/HEAD' % remote).stdout.strip()
-    for ref in (head, 'refs/remotes/%s/main' % remote, 'refs/remotes/%s/master' % remote):
+    refs = ['refs/remotes/%s/%s' % (remote, setting)] if setting else [
+        head, 'refs/remotes/%s/main' % remote, 'refs/remotes/%s/master' % remote]
+    for ref in refs:
         if ref and git('rev-parse', '-q', '--verify', ref).returncode == 0:
             return ref
     return None
@@ -90,12 +99,17 @@ def main(argv):
     if fetched.returncode:
         print('KEPT %s: git fetch %s failed: %s' % (branch, remote, fetched.stderr.strip()))
         return 1
-    default = default_branch(remote)
+    try:
+        default = default_branch(remote)
+    except SettingError as e:
+        print('KEPT %s: %s' % (branch, e))
+        return 1
     if not default:
         print('KEPT %s: no default branch for %s' % (branch, remote))
         return 1
-    base = default.rsplit('/', 1)[-1]
-    if branch in (base, 'main', 'master'):
+    base = default[len('refs/remotes/%s/' % remote):]
+    head = git('symbolic-ref', '-q', 'refs/remotes/%s/HEAD' % remote).stdout.strip()
+    if branch in (base, 'main', 'master', head[len('refs/remotes/%s/' % remote):]):
         print('KEPT %s: the default branch is never deleted' % branch)
         return 1
     listed = git('ls-remote', '--heads', remote, 'refs/heads/' + branch)

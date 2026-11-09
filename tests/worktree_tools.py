@@ -997,6 +997,28 @@ class PrePushTests(Repos):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn('not the head', r.stderr)
 
+    def test_landing_branch_setting(self):
+        self.write(self.repo, 'HANDOFF.md', '# Handoff\n\n## Landing settings\n\n'
+                   '| Setting | Value |\n|---|---|\n| landing branch | `editor` |\n')
+        self.git(self.repo, 'add', '--', 'HANDOFF.md')
+        self.git(self.repo, 'commit', '-q', '-m', 'landing branch')
+        self.assertEqual(self.push('main', 'main:editor').returncode, 0)
+        for name, target in (('agent/on-editor', 'editor'), ('agent/on-main', 'main')):
+            self.git(self.repo, 'switch', '-q', '-c', name, 'main')
+            self.write(self.repo, name.split('/')[1] + '.txt', 'x\n')
+            self.git(self.repo, 'add', '--', name.split('/')[1] + '.txt')
+            self.git(self.repo, 'commit', '-q', '-m', name)
+            self.assertEqual(self.push(name, name + ':' + target).returncode, 0)
+            self.git(self.repo, 'switch', '-q', 'main')
+        self.git(self.repo, 'fetch', '-q', 'origin')
+        self.assertEqual(self.push('--delete', 'agent/on-editor').returncode, 0)
+        r = self.push('--delete', 'agent/on-main')  # in main, but not in the landing branch
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn('not in refs/remotes/origin/editor', r.stderr)
+        r = self.push('--delete', 'editor')
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn('landing branch', r.stderr)
+
     def test_lease_protected_delete_passes_the_hook(self):
         self.new_task('pp-lease')
         self.github_merge('agent/pp-lease')

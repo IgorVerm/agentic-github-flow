@@ -95,7 +95,11 @@ class InstallerTests(unittest.TestCase):
     def setUpClass(cls):
         cls.base = os.path.realpath(tempfile.mkdtemp(prefix='agf-installer-'))
         config = os.path.join(cls.base, 'gitconfig')
-        open(config, 'w').close()
+        # No automatic maintenance: once the source repository holds enough loose objects, the
+        # commit below starts a detached `git maintenance run --auto` that packs them while the
+        # installer clones, and the clone fails on a vanished object (measured with git 2.54).
+        with open(config, 'w') as f:
+            f.write('[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n')
         cls.git_env = {'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': config,
                        'GIT_AUTHOR_NAME': 't', 'GIT_AUTHOR_EMAIL': 't@example.invalid',
                        'GIT_COMMITTER_NAME': 't', 'GIT_COMMITTER_EMAIL': 't@example.invalid'}

@@ -2,11 +2,12 @@
 # agentic-github-flow pre-push hook. Refuses remote ref deletions, non-fast-forward (force)
 # updates and moving an existing tag, from any agent or spelling. `--no-verify` skips it, which is
 # why the rules and the guards forbid that flag.
-# One exception: deleting a refs/heads/* branch that is not the remote's default branch and whose
-# remote tip is already in that default branch as last fetched (refs/remotes/<remote>/HEAD, else
-# <remote>/main), or is the head commit of a pull request merged into that default branch
-# (`gh pr list --head <branch> --base <default> --state merged`, when gh is installed): a merged
-# task branch, as the cleanup-merged skill deletes it.
+# One exception: deleting a refs/heads/* branch that is not main, master or the remote's default
+# branch (refs/remotes/<remote>/HEAD, else <remote>/main), whose remote tip is already in that
+# default branch as last fetched, or is the head commit of a pull request merged into that
+# default branch (`gh pr list --head <branch> --base <default> --state merged`, when gh is
+# installed): a merged task branch, as the cleanup-merged skill deletes it. main and master are
+# refused by name even when the default branch is another one.
 # Install per repository (worktrees share it): cp pre-push "$(git rev-parse --git-path hooks)/pre-push"
 # and chmod +x it; an existing pre-push hook is chained by hand, never overwritten. On Windows,
 # Git for Windows runs it with its own sh.

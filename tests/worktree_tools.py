@@ -353,6 +353,12 @@ class PrePushTests(Repos):
         self.assertIn('MOVE tag', r.stderr)
         r = self.push('--delete', 'main')
         self.assertNotEqual(r.returncode, 0)
+        # master is refused by name, although its tip is in the default branch
+        self.assertEqual(self.push('main:master').returncode, 0)
+        self.git(self.repo, 'fetch', '-q', 'origin')
+        r = self.push('--delete', 'master')
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn('default branch', r.stderr)
 
     def test_branch_deletion_only_when_merged(self):
         self.new_task('pp-merged')

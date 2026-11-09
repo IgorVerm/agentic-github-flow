@@ -62,8 +62,8 @@ have destroyed hours of uncommitted work with `reset --hard` and `checkout -- .`
 - **Files in a checkout that you did not write belong to another session.** Leave them, never
   stage them, never move another worktree's branch. Read a file before you overwrite it.
 - **Outside a repository, delete with the system's trash, not `rm -rf`;** a recursive delete
-  takes only literal, absolute paths you listed and checked, never paths built from command
-  output.
+  takes only literal, quoted, absolute paths you listed and checked, never paths built from
+  command output.
 - **Work on a branch in a worktree, never on `main`:**
   `git worktree add -b agent/<task> ../<repo>-worktrees/<task> origin/main`.
 - **Commit freely:** small commits of verified work, staged by explicit path

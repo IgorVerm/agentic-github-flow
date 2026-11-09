@@ -15,6 +15,7 @@ ALLOWED = {'name', 'description', 'license', 'compatibility', 'metadata', 'allow
 RULES_LIMIT = 8000
 LINK = re.compile(r'\]\(([^)#]+)(?:#[^)]*)?\)')
 CHARS_PER_TOKEN = 4  # an estimate: no tokenizer here, and the bound is a recommendation
+PLAIN_NEVER_FIRST = '[]{}>|*&!%@`,?-#'  # YAML indicators that cannot start a plain value
 errors = []
 
 
@@ -56,16 +57,20 @@ for plugin in sorted(os.listdir(plugins_dir)):
         m = re.match(r'---\n(.*?)\n---\n', text, re.S)
         if not m:
             fail(f'{plugin}/{name}: frontmatter must open the file'); continue
-        head = re.sub(r'^metadata:[ \t]*\n(?:[ \t].*\n?)+', 'metadata:\n', m.group(1), flags=re.M)
+        head = re.sub(r'^metadata:[ \t]*\n(?:[ \t].*\n?|\n)+', 'metadata:\n', m.group(1), flags=re.M)
         front = dict(line.split(':', 1) for line in head.splitlines() if ':' in line)
         front = {k.strip(): v.strip() for k, v in front.items()}
         for key in front:
             if key not in ALLOWED:
                 fail(f'{plugin}/{name}: frontmatter key {key!r} is not one both clients accept')
-            if front[key][:1] not in ('"', "'", '{', '[') and (
-                    ': ' in front[key] or ' #' in front[key]):
+            value = front[key]
+            quoted = value[:1] in ('"', "'") or (
+                key in ('allowed-tools', 'metadata') and value[:1] in ('[', '{'))
+            if not quoted and (re.search(r':(\s|$)', value) or re.search(r'\s#', value)
+                               or (value and value[0] in PLAIN_NEVER_FIRST)):
                 fail(f'{plugin}/{name}: frontmatter {key} needs quotes: in a plain YAML value '
-                     '": " is an error and " #" starts a comment')
+                     '": " or a final ":" is an error, " #" starts a comment, and it may not '
+                     'start with one of ' + PLAIN_NEVER_FIRST)
         if front.get('name') != name:
             fail(f'{plugin}/{name}: frontmatter name {front.get("name")!r} differs from the folder')
         if not re.fullmatch(r'[a-z0-9]+(-[a-z0-9]+)*', name) or len(name) > 64:
@@ -73,9 +78,8 @@ for plugin in sorted(os.listdir(plugins_dir)):
         desc = front.get('description', '')
         if not 40 <= len(desc) <= 500:
             fail(f'{plugin}/{name}: description is {len(desc)} characters; keep it 40 to 500')
-        if desc.startswith(('"', "'")) or ': ' in desc or ' #' in desc:
-            fail(f'{plugin}/{name}: description must be a plain YAML scalar (no quotes, no ": ", '
-                 'no " #")')
+        if desc.startswith(('"', "'")):
+            fail(f'{plugin}/{name}: description must be a plain YAML scalar, without quotes')
         if 'compatibility' in front and not 1 <= len(front['compatibility']) <= 500:
             fail(f'{plugin}/{name}: compatibility is {len(front["compatibility"])} characters; '
                  '1 to 500 if present')
@@ -90,11 +94,14 @@ for plugin in sorted(os.listdir(plugins_dir)):
         for link in relative_links(body):
             if not os.path.exists(os.path.join(folder, link)):
                 fail(f'{plugin}/{name}: link to missing file {link}')
-        for md in sorted(p for p in os.listdir(folder) if p.endswith('.md') and p != 'SKILL.md'):
+        linked_md = {r for r in direct
+                     if r.endswith('.md') and os.path.isfile(os.path.join(folder, r))}
+        top_md = {p for p in os.listdir(folder) if p.endswith('.md') and p != 'SKILL.md'}
+        for md in sorted(linked_md | top_md):
             with open(os.path.join(folder, md), encoding='utf-8') as f:
                 content = f.read()
             for link in relative_links(content):
-                target = os.path.normpath(link)
+                target = os.path.normpath(os.path.join(os.path.dirname(md), link))
                 if not os.path.exists(os.path.join(folder, target)):
                     fail(f'{plugin}/{name}/{md}: link to missing file {link}')
                 elif md in direct and not target.startswith('..') and \

@@ -49,7 +49,7 @@ The pages were read on 2026-10-30. None shows a version or a date.
 |---|---|---|---|
 | Description length | 1-1024 | 40-500 | Every description sits in every session's list. Twelve skills at 1024 characters are 12,288, past the 8,000 at which Codex shortens descriptions; at 500, 6,000. The floor stops a description too short to pick its skill |
 | `disable-model-invocation` | Not a field | Allowed for a skill only the user starts, always with `agents/openai.yaml` setting `policy.allow_implicit_invocation: false` | Claude Code's and Codex's ways to keep a skill from the model; such a skill fails `skills-ref` and cannot be uploaded to claude.ai |
-| Description wording | Err on the side of triggering | Narrow triggers where a skill can do damage or costs much | Broad descriptions load cleanup and storage procedures for unrelated tasks |
+| Description wording | Err on the side of triggering | Narrow triggers where a skill can do damage or costs much | Broad descriptions load cleanup procedures for unrelated tasks |
 | Testing a description | About 20 queries, 3 runs each | One request that should pick the skill and one that should not | A mini test catches a wrong trigger at a fraction of the cost |
 | Scripts | `scripts/`, `references/`, `assets/` recommended | Support files beside `SKILL.md`; scripts in a `scripts/` folder the skill names by a relative path | One script can serve several skills of a plugin |
 
@@ -57,5 +57,6 @@ The pages were read on 2026-10-30. None shows a version or a date.
 
 In a repository, a skill is `.agents/skills/<name>/SKILL.md` (Codex reads it there) with
 `.claude/skills/<name>` as a symlink to the folder (Claude Code reads that), so it is written
-once. Check one with `claude plugin validate <folder>` where Claude Code is installed, and after
-changing a description, try the two requests in a fresh session of each client.
+once. No client command checks a single skill's frontmatter (`claude plugin validate` checks a
+plugin's layout and passed malformed frontmatter when tried), so check it against the table
+above, and after changing a description, try the two requests in a fresh session of each client.

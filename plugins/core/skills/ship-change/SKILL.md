@@ -27,7 +27,9 @@ above this skill's folder ([new_worktree.py](../../scripts/new_worktree.py)); a 
   deployment also gets the `review-security` skill when it is installed. The repository's own
   required reviewers still review the pull request on GitHub.
 
-One sentence on the issue is enough: the route and why.
+One sentence on the issue is enough: the route and why. When you start work on an issue that
+has no assignee, assign it to the account you post under (`gh issue edit <n> --add-assignee
+@me`) and say so on the issue: that is the claim the overlap check of step 5 reads.
 
 ## 2. Bring the default branch in
 
@@ -54,8 +56,8 @@ verified publication). Draft or ready: draft while an independent review is stil
 ## 5. The overlap check
 
 Other sessions may have unmerged work in the same files. Run
-`python3 <plugin>/scripts/overlap_check.py --branch <your task branch>`
-([overlap_check.py](../../scripts/overlap_check.py)). It only reads git and `gh`, compares
+`python3 <plugin>/scripts/overlap_check.py --branch <your task branch> --issue <n>`
+([overlap_check.py](../../scripts/overlap_check.py)), `<n>` the issue it works on. It only reads git and `gh`, compares
 against the default branch as fetched in step 2, and lists the local branches, open pull
 requests and claimed (assigned) open issues that share a path with yours; `--no-github` in a
 repository without a GitHub remote.
@@ -65,6 +67,8 @@ repository without a GitHub remote.
   newest signed comment) it names, and add one line per hit to the pull request body of
   step 4: the two agree, or what the later one must change. A conflict of design goes to its
   authors or to the user, not into this pull request.
+- Exit 2: nothing was judged. Fix the call, or fetch, and run it again; never report it as
+  no overlap.
 - Exit 3 (GitHub not read; any branch hits it lists count as for exit 1): run it again; go on
   without the pull requests and claims only with that limitation stated in the body.
 

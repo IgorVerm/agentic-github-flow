@@ -12,7 +12,8 @@ the secret is revoked first, and history is cleaned up only on the user's word (
 force-push).
 
 `<plugin>` below is the folder two levels above this skill's folder. The checks are in
-[checklist.md](checklist.md), each with the source it rests on.
+[checklist.md](checklist.md), each with the source it rests on; the sources, with the date they
+were read, are in [sources.md](sources.md).
 
 1. **Scope and context.** A change: the diff of the branch against the default branch and the
    files it touches. An audit: the whole repository. Read the repository's `AGENTS.md`,
@@ -34,18 +35,41 @@ force-push).
    `--upgrades` adds the latest release of each direct dependency and the support status of
    frameworks and runtimes: a cycle past its end of support is a finding, a major behind is
    advice. A transitive finding is fixed through the direct dependency that pulls it in; a
-   finding with no fix is suppressed only per advisory id, with the reason on the issue.
+   finding with no fix is suppressed only per advisory id, with the reason on the issue. A
+   requirement it cannot audit (not pinned with `==`, a URL, a path, an include it does not read)
+   is listed as `unaudited` with its file and line, and ranks as moderate.
+   Where the user has installed osv-scanner ([sources.md](sources.md) §Installing osv-scanner),
+   the same run asks it for a second opinion, sending only package names and versions to
+   api.osv.dev, and lists what only one side found: an `only-osv-scanner` advisory is checked
+   like any finding of the script, whose exit code stays the verdict (on a requirement the
+   script lists as unaudited it is for the lower bound, not an installed version). For a Rust
+   repository on Linux, an audit may add `--reachability`, which marks each advisory that names
+   functions reachable or not: context for the report, never a reason to suppress. It runs
+   `cargo build`, which executes the branch's build scripts and procedural macros, fetches from
+   crates.io and writes `target/release`, so ask the user first, naming that, and run it on an
+   exported copy of the branch (as for the base below), not on the checkout.
+   For a change, run it with `--json` on the branch and on the default branch's lockfiles, and
+   compare advisory id and package: what both show already stood on the base (`checklist.md`
+   §Severity says what that means for the merge). The base needs no checkout: list its
+   lockfiles with `git ls-tree -r --name-only origin/HEAD`, export them into a new empty folder
+   outside every checkout with `git archive -o <folder>/base.tar origin/HEAD -- <those paths>`
+   and `tar -xf <folder>/base.tar -C <folder>`, and run the audit there with `--no-npm`. A worktree of the default branch instead would have
+   to be removed again, and in a large repository it copies every asset.
 4. **The client's own review.** In Claude Code, `/security-review` on the branch. In Codex,
    `/review` with the focus text in `checklist.md` §Focus for a client review. Their findings
    are input: check each against the code before it becomes yours, and keep the ones they
    missed.
-5. **The checks** of `checklist.md`, area by area, for the files in scope, plus the stack notes
-   that match the repository. Trace each user input to where it is used; the diff alone does not
-   show the sink.
+5. **The checks** of `checklist.md`, area by area, for the files in scope (access control and
+   ownership, authentication and sessions, input, injection and output, secrets and
+   configuration, supply chain, error handling and logging, agents and tools), plus the stack
+   notes that match the repository. Trace each user input to where it is used; the diff alone
+   does not show the sink.
 6. **Report** on the owning issue or pull request, signed `🤖 <agent> (reviewer):`, in the
    format of `checklist.md` §Report, severity first; then the areas confirmed clean, one line
    each; then what was not checked. No secret value, no personal data, environment variables by
-   name only. A finding that blocks the merge says so (`checklist.md` §Severity).
+   name only. A finding that blocks the merge says so; `checklist.md` §Severity owns what each
+   level means for a merge and a release, the due dates, and the tracking issue of a finding
+   that already stands on the default branch.
 
-Optional cross-checks, never requirements: Gitleaks and osv-scanner for the two scripts, and the
-vendors' own deep-scan tools when the user installs them.
+Optional cross-checks, never requirements: Gitleaks for `scan_secrets.py`, osv-scanner (built
+into the audit, above), and the vendors' own deep-scan tools when the user installs them.

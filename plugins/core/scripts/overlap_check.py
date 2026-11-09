@@ -12,13 +12,15 @@ origin. "Unmerged" means not merged into <base>. It lists:
 
   - every local branch not merged into <base> whose diff against its merge base shares a path
     with the input (renames count on both sides), with its head, the issue its name or last
-    commit subject names, and how old its first unmerged and its newest commit are. A branch
-    whose newest commit is older than --days is counted, not listed; a branch the candidate
+    commit subject names (for the candidate: its last commit that is not a merge), and how old
+    its first unmerged and its newest commit are. A branch whose newest commit is older than
+    --days is counted, not listed; a branch the candidate
     already contains is left out; a branch whose tip is the head of a pull request merged into
     <base> (a squash or rebase merge) is counted as merged. A branch of the same issue as
     --issue is reported as such: a second session on one issue;
   - every open pull request whose changed files share a path with the input, except the
-    candidate's own and those whose head is a local branch judged above (GitHub lists the new
+    candidate's own and those whose head is a local branch judged above or contained in the
+    candidate; a quiet branch's open pull request is still judged (GitHub lists the new
     path of a rename and at most 100 files of a pull request);
   - every open issue that is claimed (has an assignee) and whose body or comments name one of
     the input paths (the full path, or its file name when that is not a generic one such as
@@ -31,13 +33,15 @@ It does not fetch; fetch first for a current default branch. AGENTIC_GITHUB_FLOW
 list, replaces the `gh` command (tests use it). Last line and exit code, for the caller:
   0  `none: ...`  no overlap (the GitHub part checked, or left out with --no-github)
   1  `overlaps: <n>`  hits listed above (the GitHub part checked, or left out with --no-github)
-  2  `usage: ...` or `error: ...`  bad arguments or a git failure; nothing was judged
+  2  `usage: ...` or `error: ...`  bad arguments, a git failure, a candidate without a merge
+     base, or any unexpected failure; nothing was judged
   3  `unchecked: ...`  GitHub could not be read: pull requests and claims are unknown; any
      branch hits are listed above and count as for exit 1
 """
 import argparse
 import json
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -65,7 +69,7 @@ class GitHubError(Exception):
 
 def run(cmd, cwd):
     return subprocess.run(cmd, cwd=cwd, stdin=subprocess.DEVNULL, capture_output=True,
-                          text=True, timeout=120)
+                          text=True, encoding="utf-8", errors="replace", timeout=120)
 
 
 def git(cwd, *args):
@@ -102,10 +106,13 @@ def branch_name(ref):
     return ref
 
 
-def changed(cwd, base, ref):
-    """Paths a branch changes against its merge base with base, both sides of a rename."""
+def changed(cwd, base, ref, strict=False):
+    """Paths a branch changes against its merge base with base, both sides of a rename.
+    No merge base: no paths, or with strict (the candidate) an error, since nothing is judged."""
     mb = run(["git", "merge-base", base, ref], cwd).stdout.split()
     if not mb:
+        if strict:
+            raise Usage(f"error: {ref} has no merge base with {base}; nothing was judged")
         return set()
     out = git(cwd, "diff", "--no-renames", "--name-only", "-z", mb[0], ref)
     return {p for p in out.split("\0") if p}
@@ -143,14 +150,15 @@ def local_branches(cwd, base, paths, candidate, cand_sha, issue, days):
     hits, tips, stale = [], set(), 0
     for row in rows:
         name, sha, when, subject = (row.split("\0") + ["", "", "0", ""])[:4]
-        tips.add(sha)
         if name == candidate or sha == cand_sha:
             continue
         if cand_sha and contains(cwd, sha, cand_sha):
+            tips.add(sha)
             continue
-        if int(when or 0) < cutoff:
+        if int(when or 0) < cutoff:  # its open pull request, if any, is still judged
             stale += 1
             continue
+        tips.add(sha)
         n = issue_of(name, subject)
         if issue is not None and n == issue:
             hits.append({"kind": "same", "name": name, "sha": sha, "issue": n,
@@ -229,6 +237,14 @@ def branch_lines(hit):
 
 
 def main(argv):
+    try:
+        return check(argv)
+    except Exception as error:  # an unexpected failure must never read as exit 1 (overlaps)
+        print(f"error: {type(error).__name__}: {error}; nothing was judged")
+        return 2
+
+
+def check(argv):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("-C", dest="cwd", default=".")
     g = ap.add_mutually_exclusive_group(required=True)
@@ -253,11 +269,11 @@ def main(argv):
         cand_sha = None
         if a.branch:
             cand_sha = git(cwd, "rev-parse", "--verify", a.branch + "^{commit}").strip()
-            paths = changed(cwd, base, a.branch)
-            issue = a.issue if a.issue is not None else issue_of(
-                a.branch, git(cwd, "log", "-1", "--format=%s", a.branch).strip())
+            paths = changed(cwd, base, a.branch, strict=True)
+            issue = a.issue if a.issue is not None else issue_of(  # past ship-change's merge
+                a.branch, git(cwd, "log", "-1", "--no-merges", "--format=%s", a.branch).strip())
         else:
-            paths = {p.replace("\\", "/").strip("/") for p in a.paths}
+            paths = {posixpath.normpath(p.replace("\\", "/")).strip("/") for p in a.paths}
             issue = a.issue
         hits, tips, stale = local_branches(cwd, base, paths, a.branch, cand_sha, issue, a.days)
     except Usage as e:
@@ -272,14 +288,14 @@ def main(argv):
     issues, pulls = {}, []
     if not a.no_github:
         try:
-            kept = []
+            kept, gone = [], []
             for hit in hits:
                 n = merged_pull(cwd, hit["name"], hit["sha"], base_name)
                 if n is None:
                     kept.append(hit)
                 else:
-                    merged.append(f"{hit['name']} (pull request #{n})")
-            hits = kept
+                    gone.append(f"{hit['name']} (pull request #{n})")
+            hits, merged = kept, gone  # together, so a failure halfway changes neither
             pulls = gh(cwd, "pr", "list", "--state", "open", "--limit", "200", "--json",
                        PR_FIELDS)
             issues = {i["number"]: i for i in gh(
@@ -314,7 +330,7 @@ def main(argv):
                      + f" {str(pull.get('title'))[:70]!r}: {', '.join(shared)}")
         lines.append(f"  #{n}" if n else note_line(pull))
         count += 1
-    if unchecked is None:
+    if unchecked is None and not a.no_github:
         for i, line in enumerate(lines):  # a branch's or pull request's issue: its note
             m = re.fullmatch(r"  #(\d+)", line)
             if not m:
@@ -362,4 +378,6 @@ def main(argv):
 
 
 if __name__ == "__main__":
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.exit(main(sys.argv[1:]))

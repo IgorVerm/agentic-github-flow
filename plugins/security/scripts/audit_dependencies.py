@@ -2,7 +2,7 @@
 """Audit a repository's locked dependencies against the OSV vulnerability database.
 
 Usage: python3 audit_dependencies.py <repo> [--level info|low|moderate|high|critical]
-                                          [--upgrades] [--no-npm]
+                                          [--upgrades] [--no-npm] [--no-osv-scanner] [--reachability]
                                           [--offline <answers.json>] [--record <answers.json>] [--json]
 
 The `review-security` and `check-web-deploy` skills run this. It is a thin client instead of an
@@ -13,7 +13,11 @@ in a repository, and a company overlay may forbid it.
 
 What it reads: every lockfile under <repo> outside build and dependency folders:
 `package-lock.json` (v1 to v3), `pnpm-lock.yaml`, `Cargo.lock`, `poetry.lock`, `uv.lock`,
-`composer.lock` and `requirements*.txt` with `==` pins. Not seen: runtimes and platform packages
+`composer.lock`, and `requirements*.txt` and `requirements/*.txt` with `==` pins. Any other requirement in a requirements
+file (`flask>=3`, a bare name, `==3.*`, a URL, a path, `-e`, a `-r` or `-c` include of a file
+this run does not read itself) cannot be audited, because the installed version is unknown: it is
+listed as `unaudited` with its file, line and reason, never skipped without a word, and it ranks
+as moderate, like an advisory of unknown severity. Not seen: runtimes and platform packages
 (Node itself, PHP itself, Homebrew, the OS), which have no lockfile here; the skills check those
 against the vendor's supported-versions list by hand. Each package goes to OSV as name, ecosystem and version:
 that is all that leaves the machine (POST https://api.osv.dev/v1/querybatch, then GET
@@ -25,6 +29,8 @@ silently trusted. `--no-npm` leaves it out.
 
 Output, one line per advisory and package:
   <level>  <id>  <ecosystem>:<name>@<version>  direct|transitive[,dev]  fixed: <versions>  <lockfile>  <summary>
+and one line per requirement that could not be audited:
+  unaudited  <requirement>  <reason>  <requirements file>:<line>
 Levels come from the advisory: GitHub's label when it has one, otherwise the CVSS 3.x base score
 computed from the advisory's vector (none 0, low to 3.9, moderate to 6.9, high to 8.9, critical
 above); an informational RustSec notice (unmaintained, unsound) is `info`; anything else is
@@ -46,11 +52,31 @@ high), `major-behind` (a newer major exists: advice, ranks as low so the pre-dep
 `--level moderate` does not fail on it), `behind` (a newer minor or patch: info), `current`. Crates are not looked up on crates.io, whose crawler policy asks for contact
 details in the User-Agent (`cargo update --dry-run` shows the same locally).
 
-`--record` saves the answers so a test can replay them with `--offline`; `--json` prints the
-findings as JSON for other tools.
+Second opinion: when `osv-scanner` is on PATH, it runs too, as `osv-scanner scan source -r
+--no-resolve --all-packages --x-disable-plugins=directory --format json <repo>`, and its answer is
+compared per package (its own lockfile parsers) and per advisory family (shared aliases are one
+advisory), as with npm audit: the lines name what only one side found. The two flags keep what
+leaves the machine to what this audit sends, package names and versions, to one host,
+api.osv.dev: `--no-resolve` stops it resolving unpinned requirements through deps.dev, and
+`--x-disable-plugins=directory` stops it sending file hashes of vendored folders (measured
+2026-11-08). It still reads an unpinned requirement (`django>=3.0`) at its lower bound, which
+this audit lists as unaudited, so its advisories there are for a version nobody pinned; and it
+lists Rust workspace members, which this audit skips, as packages only it saw. Absent, failing,
+an answer in an unexpected shape, or a release other than the pinned one: one line says so, and
+this audit works as without it. Its answer never changes the exit code: this audit stays the
+primary. `--reachability` adds `--call-analysis=rust`, on Linux only: osv-scanner then runs
+`cargo build` on <repo>, which executes the repository's build scripts and procedural macros,
+fetches crates from crates.io and overwrites <repo>'s `target/release`. It runs the audited
+code, so it is asked for first and best pointed at an exported copy, not a checkout; why it
+needs Linux is in the review-security skill's `sources.md` (the osv-scanner row). Per advisory that names functions it reports whether one is
+called: information, never a reason to suppress. `--no-osv-scanner` skips the second opinion.
+
+`--record` saves the answers (osv-scanner's included) so a test can replay them with
+`--offline`; `--json` prints the findings as JSON for other tools, also when no lockfile is found.
 """
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import re
@@ -65,6 +91,7 @@ OSV = 'https://api.osv.dev/v1'
 NPM_REGISTRY = 'https://registry.npmjs.org/'
 EOL = 'https://endoflife.date/api'
 EOL_ALIASES = {'next': 'nextjs', 'node': 'nodejs', '@angular/core': 'angular', 'vue': 'vue', 'nuxt': 'nuxt'}
+UNAUDITED_RANK = 'moderate'  # unknown risk, ranked like an advisory of unknown severity
 UPGRADE_RANK = {'eol': 'high', 'major-behind': 'low', 'behind': 'info', 'current': 'info', 'unknown': 'info'}
 LEVELS = ['info', 'low', 'moderate', 'high', 'critical']
 SKIP_DIRS = {'.git', 'node_modules', '.venv', 'venv', '__pycache__', 'target', 'dist', 'build',
@@ -166,31 +193,106 @@ def parse_composer_lock(path, rel):
     for section, dev in (('packages', False), ('packages-dev', True)):
         for info in data.get(section, []):
             if info.get('name') and info.get('version'):
-                out.append(Package('Packagist', info['name'], info['version'].lstrip('v'), True, dev, rel))
+                out.append(Package('Packagist', info['name'], info['version'].lstrip('vV'), True, dev, rel))
     return out
 
 
-def parse_requirements(path, rel):
+# pip options that change where or how packages come from, not which ones: no package to audit.
+REQUIREMENT_OPTIONS = ('-i', '--index-url', '--extra-index-url', '--no-index', '-f', '--find-links',
+                       '--trusted-host', '--pre', '--prefer-binary', '--only-binary', '--no-binary',
+                       '--require-hashes', '--hash', '--use-feature', '--config-settings')
+
+
+def requirement_lines(path):
+    """(line number, text) per logical line: comments cut, `\\` continuations joined (pip-compile
+    puts each `--hash` on a continuation line)."""
+    out, buf, start = [], '', 0
+    for n, line in enumerate(read_lines(path), 1):
+        s = re.split(r'(?:^|\s)#', line, maxsplit=1)[0].rstrip()
+        if not buf:
+            start = n
+        if s.endswith('\\'):
+            buf += s[:-1] + ' '
+            continue
+        text = (buf + s).strip()
+        buf = ''
+        if text:
+            out.append((start, text))
+    if buf.strip():
+        out.append((start, buf.strip()))
+    return out
+
+
+ARCHIVE_SUFFIXES = ('.whl', '.tar.gz', '.tgz', '.zip', '.tar.bz2')
+
+
+def parse_requirements(path, rel, unaudited=None, audited=None):
+    """The `==` pins of a requirements file. Every other requirement is a package the audit cannot
+    vouch for; it goes to `unaudited` as {lockfile, line, requirement, reason} instead of being
+    skipped without a word. A `-r` or `-c` include counts as audited only when the file
+    it names, resolved from this file's folder, is in `audited` (the real paths of the files this
+    run reads); any other include is named."""
     out = []
-    for line in read_lines(path):
-        s = line.split('#', 1)[0].strip()
-        m = re.match(r'^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?\s*==\s*([^\s;\\]+)', s)
-        if m:
-            out.append(Package('PyPI', m.group(1), m.group(2), True, False, rel))
+
+    def skip(n, requirement, reason):
+        if unaudited is not None:
+            unaudited.append({'lockfile': rel, 'line': n, 'requirement': requirement, 'reason': reason})
+
+    for n, text in requirement_lines(path):
+        first = text.split()[0]
+        if first.startswith('-'):
+            if '=' in first:
+                opt, arg = first.split('=', 1)
+            elif not first.startswith('--') and len(first) > 2:  # -rbase.txt, -efoo: pip's glued form
+                opt, arg = first[:2], first[2:]
+            else:
+                opt, arg = first, text[len(first):].strip()
+            arg = arg.split()[0] if arg.split() else ''
+            if opt in ('-r', '--requirement', '-c', '--constraint'):
+                if '://' in arg:
+                    skip(n, text, 'remote include: the file it names is not read')
+                elif not arg or audited is None or \
+                        os.path.realpath(os.path.join(os.path.dirname(path), arg)) not in audited:
+                    skip(n, text, 'included file not read: not among the files this audit reads')
+            elif opt in ('-e', '--editable'):
+                skip(n, text, 'editable or local requirement: no registry version to audit')
+            elif opt not in REQUIREMENT_OPTIONS:
+                skip(n, text, 'unknown option')
+            continue
+        req = text.split(';', 1)[0].strip()
+        m = re.match(r'^([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[[^\]]*\])?\s*(.*)$', req)
+        head = req.split('@', 1)[0]
+        if not m or req.startswith(('.', '/', '~', 'file:')) or '://' in head or '/' in head or \
+                '\\' in head or head.strip().lower().endswith(ARCHIVE_SUFFIXES):
+            skip(n, text, 'URL or path: no registry version to audit')
+            continue
+        name, spec = m.group(1), m.group(2).strip()
+        pin = re.match(r'^==\s*([^\s,;#]+)(?:\s+--hash(?:=|\s+)\S+)*\s*$', spec)
+        if spec.startswith('@'):
+            skip(n, name, 'direct URL: no registry version to audit')
+        elif not spec:
+            skip(n, name, 'no version: any release may be installed')
+        elif pin and '*' not in pin.group(1) and not spec.startswith('==='):
+            out.append(Package('PyPI', name, pin.group(1), True, False, rel))
+        else:
+            skip(n, name + spec.split(' --hash', 1)[0], 'not pinned with ==: the installed version is unknown')
     return out
 
 
 def find_lockfiles(repo):
+    """Lockfiles and requirements files: `requirements*.txt`, and every `.txt` directly in a folder
+    named `requirements` (the `requirements/base.txt` layout)."""
     found = []
     for root, dirs, names in os.walk(repo):
         dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not d.startswith('.'))
+        in_requirements_folder = os.path.basename(root) == 'requirements'
         for n in sorted(names):
-            if n in LOCKFILES or (n.startswith('requirements') and n.endswith('.txt')):
+            if n in LOCKFILES or (n.endswith('.txt') and (n.startswith('requirements') or in_requirements_folder)):
                 found.append(os.path.join(root, n))
     return found
 
 
-def parse_lockfile(path, repo):
+def parse_lockfile(path, repo, unaudited=None, audited=None):
     rel = os.path.relpath(path, repo).replace(os.sep, '/')
     name = os.path.basename(path)
     if name == 'package-lock.json':
@@ -203,7 +305,7 @@ def parse_lockfile(path, repo):
         return parse_toml_packages(path, rel, 'PyPI', skip_without_source=False)
     if name == 'composer.lock':
         return parse_composer_lock(path, rel)
-    return parse_requirements(path, rel)
+    return parse_requirements(path, rel, unaudited, audited)
 
 
 # ---- OSV clients -----------------------------------------------------------------------------
@@ -240,7 +342,9 @@ class Online:
         try:
             with urllib.request.urlopen(req, timeout=60, context=self.ctx) as r:
                 return json.load(r)
-        except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+        except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as exc:
+            # HTTPException: a reply cut off mid-body (IncompleteRead, measured 2026-11-08 through
+            # the sandbox proxy) is a network error (exit 2), not a crash that exits 1 like a finding
             hint = ''
             if 'CERTIFICATE_VERIFY_FAILED' in str(exc):
                 hint = ' (this Python has no certificate bundle: run its Install Certificates command, use the system Python, or set SSL_CERT_FILE)'
@@ -291,6 +395,11 @@ class Online:
         self.answers.setdefault('eol', {})[product] = cycles
         return cycles
 
+    def osv_scanner(self, repo, reachability):
+        answer = run_osv_scanner(repo, reachability)
+        self.answers['osv_scanner'] = answer
+        return answer
+
     def close(self):
         if self.record_to:
             with open(self.record_to, 'w', encoding='utf-8') as f:
@@ -315,6 +424,9 @@ class Offline:
 
     def eol_cycles(self, product):
         return self.answers.get('eol', {}).get(product, [])
+
+    def osv_scanner(self, repo, reachability):
+        return self.answers.get('osv_scanner') or {'problem': 'not in the recorded answers'}
 
     def close(self):
         pass
@@ -580,8 +692,154 @@ def compare_with_npm(findings, lockfile_dir, lockfile_rel):
                ', '.join(only_npm) or 'none', ', '.join(only_osv) or 'none'))
 
 
+# ---- osv-scanner, the second opinion ---------------------------------------------------------
+
+OSV_SCANNER_PIN = '2.7.0'  # the release review-security's sources.md pins, with its checksums
+OSV_SCANNER_ARGS = ['scan', 'source', '-r', '--no-resolve', '--all-packages', '--x-disable-plugins=directory',
+                    '--format', 'json']
+
+
+def run_osv_scanner(repo, reachability):
+    """osv-scanner's answer for `repo`, compacted and with lockfile paths relative to it:
+    {'version', 'args', 'exit', 'notes', 'output'}, or {'problem': ...} when it is absent or fails."""
+    exe = shutil.which('osv-scanner')
+    if not exe:
+        return {'problem': 'not installed; second opinion skipped (to install it: review-security sources.md, osv-scanner)'}
+    args, notes = list(OSV_SCANNER_ARGS), []
+    if reachability:
+        if sys.platform.startswith('linux'):
+            args.append('--call-analysis=rust')
+        else:
+            notes.append('osv-scanner reachability: skipped, its Rust call analysis reads ELF binaries '
+                         'only, so it runs on Linux, not on %s' % sys.platform)
+    try:
+        v = subprocess.run([exe, '--version'], capture_output=True, text=True, errors='replace', timeout=30)
+        m = re.search(r'version:?\s*v?(\d+(?:\.\d+)+)', v.stdout + v.stderr)
+        r = subprocess.run([exe, *args, repo], capture_output=True, text=True, errors='replace',
+                           timeout=3600 if reachability else 600)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return {'problem': 'failed: %s; second opinion skipped' % type(exc).__name__}
+    version = m.group(1) if m else None
+    if r.returncode == 128:  # osv-scanner: no packages found
+        output = {'results': []}
+    elif r.returncode in (0, 1):  # 1: packages with vulnerabilities
+        try:
+            output = json.loads(r.stdout)
+        except ValueError:
+            return {'version': version, 'problem': 'gave no JSON (exit %d); second opinion skipped' % r.returncode}
+    else:
+        last = (r.stderr.strip().splitlines() or ['no message'])[-1][:200]
+        return {'version': version, 'problem': 'failed (exit %d: %s); second opinion skipped' % (r.returncode, last)}
+    try:
+        results = []
+        for res in output.get('results') or []:
+            path = (res.get('source') or {}).get('path', '')
+            packages = []
+            for pv in res.get('packages') or []:
+                packages.append({'package': {k: (pv.get('package') or {}).get(k, '') for k in ('ecosystem', 'name', 'version')},
+                                 'groups': [dict(g) for g in pv.get('groups') or []]})
+            rel = os.path.relpath(path, repo) if os.path.isabs(path) else path
+            results.append({'source': {'path': rel.replace(os.sep, '/')}, 'packages': packages})
+    except (AttributeError, TypeError, ValueError):
+        # its answer never fails this audit, not even in a shape nobody expected
+        return {'version': version, 'problem': 'gave an answer in an unexpected shape (exit %d); second '
+                                               'opinion skipped' % r.returncode}
+    return {'version': version, 'args': args, 'exit': r.returncode, 'notes': notes, 'output': {'results': results}}
+
+
+def package_key(ecosystem, name, version):
+    """One key per package on both sides: PyPI names compare as PEP 503 normalises them;
+    Packagist names without case and versions without the leading `v` that composer.lock keeps
+    and osv-scanner reports (this audit's parser strips it)."""
+    if ecosystem == 'PyPI':
+        name = re.sub(r'[-_.]+', '-', name).lower()
+    elif ecosystem == 'Packagist':
+        name, version = name.lower(), version.lstrip('vV')  # as parse_composer_lock does
+    return '%s:%s@%s' % (ecosystem, name, version)
+
+
+def compare_with_osv_scanner(findings, packages, answer):
+    """(lines, summary): osv-scanner's packages and advisories against this audit's. An advisory
+    is the same on both sides when the package matches and the id families share an id."""
+    if 'problem' in answer:
+        return ['osv-scanner: %s' % answer['problem']], {'problem': answer['problem']}
+    lines = []
+    version = answer.get('version')
+    if version != OSV_SCANNER_PIN:
+        lines.append('osv-scanner: version %s, not the pinned %s; compared anyway' % (version or 'unknown', OSV_SCANNER_PIN))
+    ours_packages = {}
+    for p in packages:
+        ours_packages.setdefault(package_key(p.ecosystem, p.name, p.version), p.lockfile)
+    theirs_packages, groups = {}, []
+    for res in answer['output'].get('results') or []:
+        rel = res['source']['path']
+        for pv in res.get('packages') or []:
+            pkg = pv['package']
+            key = package_key(pkg['ecosystem'], pkg['name'], pkg['version'])
+            theirs_packages.setdefault(key, rel)
+            for g in pv.get('groups') or []:
+                ids = list(g.get('ids') or [])
+                if ids:
+                    groups.append({'key': key, 'lockfile': rel, 'id': preferred_id(ids),
+                                   'family': set(ids) | set(g.get('aliases') or []),
+                                   'severity': g.get('max_severity') or '',
+                                   'analysis': g.get('experimental_analysis') or {}})
+    matched, both, only_ours = set(), [], []
+    for f in findings:
+        key = package_key(f['ecosystem'], f['name'], f['version'])
+        hits = [i for i, g in enumerate(groups) if g['key'] == key and g['family'] & {f['id'], *f['aliases']}]
+        matched.update(hits)
+        (both if hits else only_ours).append({'id': f['id'], 'package': key, 'lockfile': f['lockfile']})
+    only_theirs, seen = [], set()
+    for i, g in enumerate(groups):
+        if i not in matched and (g['key'], g['id']) not in seen:
+            seen.add((g['key'], g['id']))
+            only_theirs.append({'id': g['id'], 'package': g['key'], 'lockfile': g['lockfile'], 'severity': g['severity']})
+    reach, seen = [], set()
+    for g in groups:
+        if g['analysis'] and (g['key'], g['id']) not in seen:
+            seen.add((g['key'], g['id']))
+            called = any(a.get('called') for a in g['analysis'].values())
+            reach.append({'id': g['id'], 'package': g['key'], 'state': 'reachable' if called else 'not-reachable'})
+    advisories = len({(g['key'], g['id']) for g in groups})
+    pk_only_ours = sorted(set(ours_packages) - set(theirs_packages))
+    pk_only_theirs = sorted(set(theirs_packages) - set(ours_packages))
+
+    def sample(keys):
+        return ', '.join(keys[:5]) + (', …' if len(keys) > 5 else '') if keys else 'none'
+    lines.append('osv-scanner %s: %d package(s), %d advisory(ies); ours: %d package(s), %d finding(s); '
+                 'in both: %d; only ours: %d; only osv-scanner: %d' % (
+                     version or '?', len(theirs_packages), advisories, len(ours_packages), len(findings),
+                     len(both), len(only_ours), len(only_theirs)))
+    lines.append('osv-scanner packages: only ours: %d (%s); only osv-scanner: %d (%s)' % (
+        len(pk_only_ours), sample(pk_only_ours), len(pk_only_theirs), sample(pk_only_theirs)))
+    for o in only_ours:
+        lines.append('only-ours\t%s\t%s\t%s' % (o['id'], o['package'], o['lockfile']))
+    for o in only_theirs:
+        lines.append('only-osv-scanner\t%s\t%s\t%s\t%s' % (o['id'], o['package'], o['severity'] or '?', o['lockfile']))
+    for r in reach:
+        lines.append('%s\t%s\t%s\t(osv-scanner call analysis; information only)' % (r['state'], r['id'], r['package']))
+    lines += answer.get('notes') or []
+    summary = {'version': version, 'packages': len(theirs_packages), 'advisories': advisories,
+               'both': both, 'only_ours': only_ours, 'only_osv_scanner': only_theirs,
+               'packages_only_ours': pk_only_ours, 'packages_only_osv_scanner': pk_only_theirs,
+               'reachability': reach, 'notes': answer.get('notes') or []}
+    return lines, summary
+
+
+def second_opinion(findings, packages, answer):
+    """compare_with_osv_scanner, except that an answer in a shape it cannot read (a recorded file
+    edited by hand, a release that changed its output) skips the second opinion, never the audit."""
+    try:
+        return compare_with_osv_scanner(findings, packages, answer)
+    except (KeyError, TypeError, AttributeError, IndexError, ValueError) as exc:
+        problem = 'answer in an unexpected shape (%s); second opinion skipped' % type(exc).__name__
+        return ['osv-scanner: ' + problem], {'problem': problem}
+
+
 def main(argv):
     repo, level, use_npm, offline, record, as_json, want_upgrades = None, 'high', True, None, None, False, False
+    use_osv_scanner, reachability = True, False
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -589,6 +847,10 @@ def main(argv):
             level = argv[i + 1]; i += 1
         elif a == '--no-npm':
             use_npm = False
+        elif a == '--no-osv-scanner':
+            use_osv_scanner = False
+        elif a == '--reachability':
+            reachability = True
         elif a == '--offline' and i + 1 < len(argv):
             offline = argv[i + 1]; i += 1
         elif a == '--record' and i + 1 < len(argv):
@@ -609,22 +871,37 @@ def main(argv):
     repo = os.path.abspath(repo)
     lockfiles = find_lockfiles(repo)
     if not lockfiles:
-        print('audit_dependencies: no lockfile found under %s' % repo)
+        notes, osv_summary = ['audit_dependencies: no lockfile found under %s' % repo], None
+        if use_osv_scanner:  # it reads lockfiles this audit has no parser for
+            client = Offline(offline) if offline else Online(record)
+            try:
+                osv_lines, osv_summary = second_opinion([], [], client.osv_scanner(repo, reachability))
+                notes += osv_lines
+            finally:
+                client.close()
+        if as_json:  # the same object as with lockfiles, so a caller comparing two runs can parse both
+            print(json.dumps({'packages': 0, 'lockfiles': [], 'findings': [], 'unaudited': [], 'upgrades': [],
+                              'notes': notes, 'osv_scanner': osv_summary}, indent=1))
+        else:
+            print('\n'.join(notes))
         return 0
-    packages = []
+    packages, unaudited = [], []
+    audited = {os.path.realpath(p) for p in lockfiles}
     for path in lockfiles:
         try:
-            packages += parse_lockfile(path, repo)
+            packages += parse_lockfile(path, repo, unaudited, audited)
         except (ValueError, OSError) as exc:
             print('audit_dependencies: cannot parse %s: %s' % (os.path.relpath(path, repo).replace(os.sep, '/'), exc), file=sys.stderr)
             return 2
     client = Offline(offline) if offline else Online(record)
-    advice = []
+    advice, second = [], None
     try:
         findings = audit(packages, client)
         if want_upgrades:
             import datetime
             advice = upgrades(packages, runtimes(repo), client, datetime.date.today().isoformat())
+        if use_osv_scanner:
+            second = client.osv_scanner(repo, reachability)
     except RuntimeError as exc:
         print('audit_dependencies: %s' % exc, file=sys.stderr)
         return 2
@@ -640,15 +917,23 @@ def main(argv):
         for path in lockfiles:
             if os.path.basename(path) == 'package-lock.json':
                 notes.append(compare_with_npm(findings, os.path.dirname(path), os.path.relpath(path, repo).replace(os.sep, '/')))
+    osv_summary = None
+    if second is not None:
+        osv_lines, osv_summary = second_opinion(findings, packages, second)
+        notes += osv_lines
     if as_json:
         print(json.dumps({'packages': len(packages), 'lockfiles': [os.path.relpath(p, repo).replace(os.sep, '/') for p in lockfiles],
-                          'findings': findings, 'upgrades': advice, 'notes': notes}, indent=1))
+                          'findings': findings, 'unaudited': unaudited, 'upgrades': advice, 'notes': notes,
+                          'osv_scanner': osv_summary},
+                         indent=1))
     else:
         for f in findings:
             print('%s\t%s\t%s:%s@%s\t%s%s\tfixed: %s\t%s\t%s' % (
                 f['level'], f['id'], f['ecosystem'], f['name'], f['version'],
                 'direct' if f['direct'] else 'transitive', ',dev' if f['dev'] else '',
                 ', '.join(f['fixed']) or 'none', f['lockfile'], f['summary']))
+        for u in unaudited:
+            print('unaudited\t%s\t%s\t%s:%d' % (u['requirement'], u['reason'], u['lockfile'], u['line']))
         for n in notes:
             print(n)
         for r in advice:
@@ -660,7 +945,8 @@ def main(argv):
             counts[f['level']] = counts.get(f['level'], 0) + 1
         print('audit_dependencies: %d package(s) in %d lockfile(s); %d finding(s)%s' % (
             len(packages), len(lockfiles), len(findings),
-            '' if not findings else ' (' + ', '.join('%s %d' % (k, counts[k]) for k in LEVELS + ['unknown'] if k in counts) + ')'))
+            '' if not findings else ' (' + ', '.join('%s %d' % (k, counts[k]) for k in LEVELS + ['unknown'] if k in counts) + ')')
+            + ('; %d requirement(s) not audited' % len(unaudited) if unaudited else ''))
         if advice:
             states = {}
             for r in advice:
@@ -669,6 +955,7 @@ def main(argv):
                 len(advice), ', '.join('%s %d' % (k, states[k]) for k in ('eol', 'major-behind', 'behind', 'current', 'unknown') if k in states)))
     failing = [f for f in findings if rank(f['level']) >= LEVELS.index(level)]
     failing += [r for r in advice if rank(UPGRADE_RANK[r['state']]) >= LEVELS.index(level)]
+    failing += [u for u in unaudited if rank(UNAUDITED_RANK) >= LEVELS.index(level)]
     return 1 if failing else 0
 
 

@@ -5,8 +5,9 @@ The repository has an origin whose default branch (origin/HEAD) is ahead of loca
 merged branch, a candidate branch and other unmerged branches: one that shares a file with it,
 one that does not, one that shares a file but went quiet long ago, one that the candidate already
 contains, one that renames the shared file away, one squash-merged by a pull request, and a
-second branch of the candidate's own issue. A stand-in `gh` (AGENTIC_GITHUB_FLOW_GH) answers
-from a state file. Each case is a way the check could let two sessions collide unnoticed (a
+second branch of the candidate's own issue; a candidate whose tip is a merge, and one with no
+history in common with the default branch. A stand-in `gh` (AGENTIC_GITHUB_FLOW_GH) answers
+from a state file in UTF-8, whatever the locale. Each case is a way the check could let two sessions collide unnoticed (a
 missed branch, pull request or claimed issue, a design note not named, a GitHub failure read as
 "no overlap") or bury a real hit in noise; the last case checks that the tool changed nothing.
 Offline; no network, no real gh.
@@ -25,23 +26,27 @@ URL = 'https://github.com/o/r/issues/'
 ROBOT = '\N{ROBOT FACE}'
 
 STUB = r'''import json, os, sys
-s = json.load(open(os.environ['STUB_GH']))
+with open(os.environ['STUB_GH'], encoding='utf-8') as f:
+    s = json.load(f)
 a = sys.argv[1:]
 s.setdefault('log', []).append(a)
-json.dump(s, open(os.environ['STUB_GH'], 'w'))
+with open(os.environ['STUB_GH'], 'w', encoding='utf-8') as f:
+    json.dump(s, f)
 if s.get('fail'):
     print('error connecting to api.github.com', file=sys.stderr); sys.exit(1)
 issues = s['issues']
 def arg(name):
     return a[a.index(name) + 1] if name in a else None
+def out(value):  # UTF-8 bytes, as gh writes them, whatever the locale
+    sys.stdout.buffer.write(json.dumps(value, ensure_ascii=False).encode('utf-8') + b'\n')
 if a[:2] == ['issue', 'view']:
-    print(json.dumps(next(i for i in issues if str(i['number']) == a[2])))
+    out(next(i for i in issues if str(i['number']) == a[2]))
 elif a[:2] == ['issue', 'list'] and arg('--assignee') == '*':
-    print(json.dumps([i for i in issues if i['assignees']]))
+    out([i for i in issues if i['assignees']])
 elif a[:2] == ['pr', 'list'] and arg('--state') == 'open':
-    print(json.dumps(s['pulls']))
+    out(s['pulls'])
 elif a[:2] == ['pr', 'list'] and arg('--state') == 'merged':
-    print(json.dumps([p for p in s['merged'] if p['headRefName'] == arg('--head')]))
+    out([p for p in s['merged'] if p['headRefName'] == arg('--head')])
 else:
     sys.exit(2)
 '''
@@ -101,9 +106,19 @@ class OverlapCheck(unittest.TestCase):
         cls.git('checkout', '-q', '-b', 'agent/12-move', 'main')
         cls.git('mv', 'src/other.rs', 'src/moved.rs')
         cls.git('commit', '-q', '-m', 'move')
+        # the candidate after ship-change merged the default branch in: its tip is a merge
+        cls.git('checkout', '-q', '-b', 'feature/merged-tip', 'main')
+        cls.commit('src/z.rs', 'z\n', 'z (#10)')
+        cls.git('merge', '-q', '--no-ff', '-m', 'Merge origin/main', 'origin/main')
+        # a branch with no history in common with the default branch
+        tree = subprocess.run(['git', 'mktree'], cwd=r, env=cls.env, input='', check=True,
+                              capture_output=True, text=True).stdout.strip()
+        orphan = cls.git('commit-tree', tree, '-m', 'orphan').strip()
+        cls.git('branch', 'agent/15-orphan', orphan)
         cls.git('checkout', '-q', 'main')
         cls.sha = {b: cls.git('rev-parse', b).strip()
-                   for b in ('agent/7-hot', 'agent/10-mine', 'agent/14-squashed')}
+                   for b in ('agent/7-hot', 'agent/9-stale', 'agent/10-mine',
+                             'agent/14-squashed')}
 
     @classmethod
     def tearDownClass(cls):
@@ -128,12 +143,12 @@ class OverlapCheck(unittest.TestCase):
         cls.git('commit', '-q', '-m', msg, env=env)
 
     def run_tool(self, *args, issues=(), pulls=(), merged=(), fail=False, env=None):
-        with open(self.state, 'w') as f:
+        with open(self.state, 'w', encoding='utf-8') as f:
             json.dump({'issues': list(issues), 'pulls': list(pulls), 'merged': list(merged),
                        'fail': fail}, f)
         env = dict(env or self.env, STUB_GH=self.state)
         p = subprocess.run([sys.executable, TOOL, '-C', self.repo, *args], env=env,
-                           capture_output=True, text=True, timeout=60)
+                           capture_output=True, text=True, encoding='utf-8', timeout=60)
         return p.returncode, p.stdout
 
     def test_seeded_overlapping_branch_found(self):
@@ -160,6 +175,49 @@ class OverlapCheck(unittest.TestCase):
         code, out = self.run_tool('--paths', 'src/elsewhere.rs', '--issue', '10', '--no-github')
         self.assertEqual(code, 1, out)
         self.assertIn('same issue: branch agent/10-dup', out)
+
+    def test_issue_of_a_candidate_whose_tip_is_a_merge(self):
+        code, out = self.run_tool('--branch', 'feature/merged-tip', '--no-github')
+        self.assertEqual(code, 1, out)
+        self.assertIn('same issue: branch agent/10-dup', out)
+
+    def test_candidate_without_merge_base_is_not_judged(self):
+        code, out = self.run_tool('--branch', 'agent/15-orphan', '--no-github')
+        self.assertEqual(code, 2, out)
+        self.assertIn('no merge base', out)
+        code, out = self.run_tool('--branch', 'agent/10-mine', '--no-github')
+        self.assertEqual(code, 1, out)  # as another branch it is passed over, not an error
+
+    def test_paths_are_normalized(self):
+        code, out = self.run_tool('--paths', './src/hot.rs', '--issue', '99', '--no-github')
+        self.assertIn('overlap: branch agent/7-hot', out)
+        code, out = self.run_tool('--paths', '.\\src\\hot.rs', '--issue', '99', '--no-github')
+        self.assertIn('overlap: branch agent/7-hot', out)
+
+    def test_no_github_calls_no_gh(self):
+        code, out = self.run_tool('--branch', 'agent/10-mine', '--no-github',
+                                  issues=[issue(7, assigned=True)])
+        self.assertEqual(code, 1, out)
+        with open(self.state, encoding='utf-8') as f:
+            self.assertEqual(json.load(f).get('log', []), [])
+
+    def test_utf8_from_gh(self):
+        issues = [issue(7, assigned=True, comments=[
+            ROBOT + ' Claude Code (author): design note \u2014 caf\u00e9 stays \u00fcber']),
+            issue(20, body='src/hot.rs, na\u00efve \u2192 \u65e5\u672c', assigned=True,
+                  comments=[ROBOT + ' Codex (author): \u00e9t\u00e9'])]
+        issues[1]['title'] = 'R\u00e9sum\u00e9 \u2014 \u65e5\u672c'
+        code, out = self.run_tool('--branch', 'agent/10-mine', issues=issues)
+        self.assertEqual(code, 1, out)
+        self.assertIn('note: %s7#c0' % URL, out)
+        self.assertIn('overlap: issue #20 (claimed) \'R\u00e9sum\u00e9 \u2014 \u65e5\u672c\'', out)
+        self.assertIn('newest signed comment: %s20#c0' % URL, out)
+
+    def test_unexpected_failure_is_not_an_overlap(self):
+        code, out = self.run_tool('--paths', 'a', '--no-github', '-C',
+                                  os.path.join(self.repo, 'no-such-dir'))
+        self.assertEqual(code, 2, out)
+        self.assertTrue(out.strip().splitlines()[-1].startswith('error:'), out)
 
     def test_branch_contained_in_the_candidate_left_out(self):
         code, out = self.run_tool('--branch', 'integrate/11-whole', '--no-github')
@@ -198,6 +256,7 @@ class OverlapCheck(unittest.TestCase):
             pull(32, 'agent/10-mine', self.sha['agent/10-mine'], ['src/hot.rs']),  # the candidate
             pull(33, 'teammate/docs', 'b' * 40, ['docs/b.md']),
             pull(34, 'teammate/40-other', 'c' * 40, ['src/hot.rs']),
+            pull(35, 'agent/9-stale', self.sha['agent/9-stale'], ['src/hot.rs']),  # quiet, open
         ]
         issues = [issue(40, comments=[ROBOT + ' Claude Code (author): design delta: Y'])]
         code, out = self.run_tool('--branch', 'agent/10-mine', '--days', '1', pulls=pulls,
@@ -207,6 +266,7 @@ class OverlapCheck(unittest.TestCase):
         self.assertIn('note: https://github.com/o/r/pull/30#c0', out)
         self.assertIn('overlap: pull request #34 (teammate/40-other) (#40)', out)
         self.assertIn('note: %s40#c0' % URL, out)
+        self.assertIn('overlap: pull request #35 (agent/9-stale)', out)
         for absent in ('#31', '#32', '#33'):
             self.assertNotIn('pull request ' + absent, out)
         code, out = self.run_tool('--paths', 'src/elsewhere.rs', '--issue', '40', pulls=pulls,

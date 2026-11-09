@@ -155,13 +155,17 @@ checks that rest on it, named as the skill files name them.
 before without it. The script pins the release (`OSV_SCANNER_PIN`, 2.7.0) and says when the
 installed version differs. The user installs it; a review never does. Take the asset for the
 machine from the [v2.7.0 release](https://github.com/google/osv-scanner/releases/tag/v2.7.0),
-check it against the release's `osv-scanner_SHA256SUMS`, and put it on PATH as `osv-scanner`.
-Two of those checksums, which matched GitHub's own asset digest on 2026-11-08:
+check it, and put it on PATH as `osv-scanner`. Two checksums are recorded here; they matched the
+release's `osv-scanner_SHA256SUMS` and GitHub's own asset digest on 2026-11-08:
 
 | Asset of v2.7.0 | SHA-256 |
 |---|---|
 | `osv-scanner_darwin_arm64` (55,336,530 bytes) | `d4926ef8da134332543be276dff157e4c170f99ad91fc48e89448a8816bdf70b` |
 | `osv-scanner_linux_arm64` (53,870,752 bytes) | `4061ef4c021ed3c47f203b818f337e351336cc5cd67c0274fc36bd1dfc728dd7` |
+
+Every other asset (Linux on amd64, Windows, Intel Macs) has no checksum recorded here. For those,
+checking against the release's own `osv-scanner_SHA256SUMS` catches a corrupted download, not a
+replaced release, since both come from the same place.
 
 ```bash
 gh release download v2.7.0 -R google/osv-scanner -p osv-scanner_darwin_arm64 -D <new empty folder>
@@ -170,14 +174,16 @@ install -m 0755 <folder>/osv-scanner_darwin_arm64 ~/.local/bin/osv-scanner
 osv-scanner --version
 ```
 
-On Linux the same with the `linux_amd64` or `linux_arm64` asset and `sha256sum -c`. The release
-also carries SLSA provenance (`multiple.intoto.jsonl`); checking it needs `slsa-verifier`, so the
+On Linux on arm64 the same with the `linux_arm64` asset and `sha256sum -c`. The release also
+carries SLSA provenance (`multiple.intoto.jsonl`); checking it needs `slsa-verifier`, so the
 checksum is the check here. `--reachability` (Rust call analysis) works on Linux only: the row
 above says why. Inside Claude Code's sandbox, osv-scanner needs `api.osv.dev` in
-`sandbox.network.allowedDomains`, the one host it shares with the script; on macOS it also needs
-`sandbox.enableWeakerNetworkIsolation: true`, because it verifies certificates through the
-system's trust service (without it: `x509: OSStatus -26276`, exit 127, reported as skipped;
-measured 2026-11-08). A newer release is a change for this plugin's maintainers: read its notes,
+`sandbox.network.allowedDomains`, the one host it shares with the script. On macOS it also
+verifies certificates through the system's trust service, which the sandbox closes: without
+`sandbox.enableWeakerNetworkIsolation: true` it fails (`x509: OSStatus -26276`, exit 127) and the
+audit reports it as skipped (measured 2026-11-08). That setting weakens network isolation for
+every sandboxed command, not only this one, so it is the user's decision; a review never changes
+it, and runs without the second opinion instead. A newer release is a change for this plugin's maintainers: read its notes,
 change the pin in the script and this section together, and run the repository's
 `tests/audit_dependencies.py`.
 

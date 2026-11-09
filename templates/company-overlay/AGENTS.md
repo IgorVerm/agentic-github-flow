@@ -28,7 +28,8 @@ Its owner: <role or team>. In short, for agents:
 
 Approved clients and services: <Claude Code / Codex under which plans; other services>.
 The dependency audit of the security plugin sends package names and versions to osv.dev, the
-public npm registry (`npm audit`) and the PyPI registry: <allowed / not allowed>.
+public npm registry (`npm audit`) and the PyPI registry, and with `--reachability` fetches crates
+from crates.io while it builds the repository: <allowed / not allowed>.
 
 ## GitHub organisation
 

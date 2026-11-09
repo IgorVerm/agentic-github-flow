@@ -43,15 +43,17 @@ were read, are in [sources.md](sources.md).
    api.osv.dev, and lists what only one side found: an `only-osv-scanner` advisory is checked
    like any finding of the script, whose exit code stays the verdict (on a requirement the
    script lists as unaudited it is for the lower bound, not an installed version). For a Rust
-   repository on Linux, an audit may add `--reachability`: it builds the repository, overwriting
-   its `target/release` and running build scripts, and marks each advisory that names functions
-   reachable or not; that is context for the report, never a reason to suppress.
+   repository on Linux, an audit may add `--reachability`, which marks each advisory that names
+   functions reachable or not: context for the report, never a reason to suppress. It runs
+   `cargo build`, which executes the branch's build scripts and procedural macros, fetches from
+   crates.io and writes `target/release`, so ask the user first, naming that, and run it on an
+   exported copy of the branch (as for the base below), not on the checkout.
    For a change, run it with `--json` on the branch and on the default branch's lockfiles, and
    compare advisory id and package: what both show already stood on the base (`checklist.md`
    §Severity says what that means for the merge). The base needs no checkout: list its
-   lockfiles with `git ls-tree -r --name-only origin/HEAD`, export them with
-   `git archive origin/HEAD -- <those paths> | tar -x -C <new empty folder outside every checkout>`
-   and run the audit there with `--no-npm`. A worktree of the default branch instead would have
+   lockfiles with `git ls-tree -r --name-only origin/HEAD`, export them into a new empty folder
+   outside every checkout with `git archive -o <folder>/base.tar origin/HEAD -- <those paths>`
+   and `tar -xf <folder>/base.tar -C <folder>`, and run the audit there with `--no-npm`. A worktree of the default branch instead would have
    to be removed again, and in a large repository it copies every asset.
 4. **The client's own review.** In Claude Code, `/security-review` on the branch. In Codex,
    `/review` with the focus text in `checklist.md` §Focus for a client review. Their findings

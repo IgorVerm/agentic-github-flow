@@ -232,7 +232,10 @@ and Info have none. The issue says `due: YYYY-MM-DD`. The user, or a maintainer 
 names, accepts a finding on its issue with `accepted until YYYY-MM-DD`; after that date the
 acceptance has lapsed and the finding is open again. A release or a deploy blocks on every open
 Critical or High that is not under a current acceptance; the due date says when its owner must
-have fixed it, not when it starts to block. A merge that deploys nothing does not block on them.
+have fixed it, not when it starts to block. A merge that deploys (a production deploy on merge)
+counts as a deploy: an existing Critical or High blocks only what deploys, while for a Critical
+the review stops and tells the user at once; an unrelated merge that deploys nothing does not
+block on them.
 
 **Continuous scanning.** A repository with a lockfile has GitHub's Dependabot alerts on (a
 repository setting its owner turns on; a review never changes it). Whoever keeps the overview of

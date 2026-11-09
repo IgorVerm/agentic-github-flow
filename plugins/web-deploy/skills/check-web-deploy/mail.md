@@ -15,7 +15,8 @@ limit on every endpoint that sends mail in `review-security/checklist.md` §3.
 ## The domain's DNS records
 
 DNS is public: the agent reads the records with `dig +short TXT <name>` (and `MX` for the
-return-path name), as it may read the live headers on [dashboard.md](dashboard.md); a lookup of
+return-path name; on Windows `Resolve-DnsName -Type TXT <name>` or `nslookup -type=TXT <name>`,
+and `MX` likewise), as it may read the live headers on [dashboard.md](dashboard.md); a lookup of
 a public record carries no personal data. The report names each record and whether it passes,
 not its reporting address.
 

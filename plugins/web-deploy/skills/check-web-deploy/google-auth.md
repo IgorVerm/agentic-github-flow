@@ -9,9 +9,9 @@ practices and Cross-Account Protection pages, the OWASP OAuth cheat sheet
 (read 2026-10-25).
 
 A site that verifies Google's ID token itself, without Supabase, gets the token checks of
-`review-security/checklist.md` §2; the console lines below apply to it all the same. Service
-accounts for calls to Google APIs: `review-security/checklist.md` §4 and
-[dashboard.md](dashboard.md).
+`review-security/checklist.md` §Stack notes, *Google sign-in without Supabase*; the console lines
+below apply to it all the same. Service accounts for calls to Google APIs: the same section's
+*Google Cloud service accounts* and [dashboard.md](dashboard.md).
 
 ## The flow, in one paragraph
 

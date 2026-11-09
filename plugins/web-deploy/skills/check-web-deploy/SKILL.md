@@ -11,6 +11,9 @@ Advisor, Vercel environment variables and Deployment Protection, the Google OAut
 read by the agent: it becomes a list the user confirms. The agent never logs in to Supabase,
 Vercel or Google, runs no `vercel`, `supabase` or `gcloud` command that writes, changes no
 environment variable, rotates no key, deploys nothing and pushes nothing. The user deploys.
+Besides the dependency audit of step 2, its only network reads are two public, read-only
+lookups: the sending domain's DNS records ([mail.md](mail.md)) and the response headers of the
+public production URL ([dashboard.md](dashboard.md) §Vercel).
 
 The checks per area, each with its source, are in [supabase.md](supabase.md),
 [vercel.md](vercel.md), [mail.md](mail.md), [privacy.md](privacy.md) and

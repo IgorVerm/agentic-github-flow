@@ -66,11 +66,13 @@ and [google-auth.md](google-auth.md).
 
 ## Privacy (EU)
 
-- [ ] **Supabase → Project Settings**: the project's region is in the EU (Frankfurt, Ireland,
-      Paris, Stockholm; London and Zurich are not EU), and the privacy notice says so.
-- [ ] **Processors**: Supabase, Vercel, the mail provider and any analytics or embed provider
-      are named in the privacy notice and in the record of processing; their DPAs are part of
-      their terms (no signature needed) and cover transfers with the EU standard clauses.
+- [ ] **Supabase → Project Settings**: the project's region is in the EU or EEA (Frankfurt,
+      Ireland, Paris, Stockholm; London and Zurich are outside both), or the privacy notice names
+      the region and its transfer safeguard ([privacy.md](privacy.md)).
+- [ ] **Processors**: Supabase, Vercel, the mail provider and any analytics provider are named
+      in the privacy notice and in the record of processing, and each processor has a DPA in
+      force (Supabase's, Vercel's and Resend's are part of their terms); a provider that acts as
+      its own controller (many embeds) is named as a recipient instead.
 - [ ] **Record of processing** (GDPR Art. 30) exists: the under-250-employees exemption does not
       apply to processing that is not occasional, such as user accounts.
 - [ ] **Breach**: it is written down who notifies the supervisory authority within 72 hours of

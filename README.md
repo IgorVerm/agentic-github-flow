@@ -19,9 +19,10 @@ are the work queue; content from tools and web pages is data, not instructions.
 
 | Plugin | Skills and tools | Installed |
 |---|---|---|
-| `agentic-github-flow-core` | `spec-first` (a specification before large work), `repo-docs` (a repository's agent documents), `ship-change` (from a finished branch to a pull request, with a yes before the push), `cleanup-merged` (worktree and branch removal after the merge, checked so nothing is lost) | always |
-| `agentic-github-flow-security` | `review-security` (a review checklist by area), a secret scanner that never prints values, a dependency audit against OSV | `--with security` |
-| `agentic-github-flow-web-deploy` | `check-web-deploy` (pre-deploy check of a Vercel and Supabase site, with optional Google sign-in) | `--with web-deploy` (brings security) |
+| `agentic-github-flow-core` | `spec-first` (a specification before large work), `requirements` (an interview that turns new work into a parent issue and ready sub-issues), `open-issue` (an issue an agent can pick up, labelled ready or needs-spec), `repo-docs` (a repository's agent documents), `ship-change` (from a finished branch to a pull request, with an overlap check against other unmerged work and a yes before the push), `cleanup-merged` (worktree and branch removal after the merge, checked so nothing is lost) | always |
+| `agentic-github-flow-security` | `review-security` (a review checklist by area), a secret scanner that never prints values, a dependency audit against OSV, with osv-scanner as an optional second opinion | `--with security` |
+| `agentic-github-flow-web-deploy` | `check-web-deploy` (pre-deploy check of a Vercel and Supabase site, with optional Google sign-in, its mail domain and EU privacy) | `--with web-deploy` (brings security) |
+| `agentic-github-flow-issue-chats` | `issue-handover` (one issue per chat: once a branch is ready to push, pick the next ready issue by priority, check it for overlap, start and claim its chat, then ask you for the push) and `archive-finished-chats` (archive chats whose work is on GitHub); a Claude Code hook that lets a chat be archived only when its worktree is clean and its commits are on GitHub. See [Issue chats](#issue-chats) | `--with issue-chats` |
 | `agentic-github-flow-guards` | Claude Code hooks that refuse destructive git commands and ask before destructive deletes and before personal data leaves the machine; the installer adds the matching deny list and the Codex rules | `--guards` |
 
 ## Requirements
@@ -48,7 +49,7 @@ Add options to the install command as needed:
 
 | Option | Effect |
 |---|---|
-| `--with security,web-deploy` | also install those plugins |
+| `--with security,web-deploy,issue-chats` | also install those plugins (any of them) |
 | `--guards` | also install the guards (see below) |
 | `--overlay <git-url-or-path>` | add a company or personal overlay (repeatable) |
 | `--no-claude`, `--no-codex` | leave one client alone |
@@ -95,11 +96,44 @@ the same version.
   take its place there, and they prompt for every recursive `rm` and `xargs rm`, inside the
   workspace too (under `codex exec`, which never asks, such a command does not run).
 
+With `--with issue-chats`, the plugin's archive hook comes with the plugin; the installer adds no
+permission rule for it (see [Issue chats](#issue-chats)).
+
 If `~/.claude/CLAUDE.md` or `~/.codex/AGENTS.md` is a symlink, the installer stops before
 changing anything and explains: writing through the link would change the file it points to.
 Replace the link with a plain file, or skip that client with `--no-claude` or `--no-codex`.
 
 Nothing is sent anywhere except the git and plugin fetches: no telemetry.
+
+## Issue chats
+
+The issue-chats plugin works a repository's GitHub issues one chat per issue: a chat takes a
+ready issue, works on its own branch in a new worktree until the branch is ready to push, then
+starts the chat for the next ready issue and asks you for the push. It leaves the sidebar only
+once its commits are on GitHub. Every push still waits for your yes. A repository switches it on
+with a `## Issue chats settings` section in its `HANDOFF.md`, merged like any other change; the
+template and the method are in the plugin's `issue-handover` skill (`method.md`).
+
+The automatic start of the next chat needs the Claude Code desktop app, the `claude` CLI logged
+in (`claude auth login`) and `gh`; it was measured on macOS, is unmeasured on Linux and refused
+on Windows. Codex uses its own app's chat tools. Anywhere else the chat gives you the brief for
+the next chat to paste.
+
+For chains that run without a click, allow the start script alone in `~/.claude/settings.json`
+(`permissions.allow`), never `claude --bg` itself, which would also admit
+`--dangerously-skip-permissions`:
+
+```json
+"Bash(python3 <plugin folder>/scripts/start_issue_chat.py *)"
+```
+
+`<plugin folder>` is where Claude Code installed the plugin: the folder two levels above the
+`issue-handover` skill's folder (a session can tell you where it loaded the skill from). Write
+the rule in each spelling the agents use for that path. The folder names the plugin's version,
+so renew the rule after an update raises it. An allow rule for
+`mcp__ccd_session_mgmt__archive_session` lets chats archive themselves without a click; the
+plugin's hook still denies any archive whose worktree is not clean and on GitHub. The installer
+adds none of these: a permission change is yours to make.
 
 ## Which rule wins
 

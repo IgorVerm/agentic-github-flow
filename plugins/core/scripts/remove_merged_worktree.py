@@ -24,9 +24,10 @@ the worktree is KEPT and the reasons, files and processes are printed:
             and the reflog of a branch that will be deleted) is reachable from a ref that
             survives, or from the merged pull request's head; no per-worktree refs and no git
             operation in progress. A commit made on a detached HEAD, or dropped by a reset or a
-            branch recreation, keeps the worktree: give it a branch (`git branch <name> <sha>`)
-            if it matters, then rerun. Only a commit that `commit --amend` replaced, and that
-            was not restored as a tip since, is exempt
+            branch recreation, keeps the worktree: give it a branch, then rerun:
+            `git branch scratch/<issue>-<what> <sha>` for a probe, which a sweep deletes once
+            the issue is closed; a task branch for work that must stay. Only a commit that
+            `commit --amend` replaced, and that was not restored as a tip since, is exempt
   unlocked  `git worktree list --porcelain` shows no lock
   idle      no other process has an open file or its working directory inside (`lsof`). On
             Windows there is no lsof; Windows itself refuses to delete an open file, and a
@@ -36,7 +37,53 @@ the worktree is KEPT and the reasons, files and processes are printed:
 a sweep also needs reflog evidence that the branch has commits of its own (a `commit…`,
 `cherry-pick`, `revert` or non-fast-forward `merge …` entry). A fresh, fast-forwarded or
 detached worktree, or one whose reflog has expired, is kept and named. Kept worktrees are normal
-in a sweep; it exits 1 when a removal fails or the default branch cannot be established.
+in a sweep; it exits 1 when a removal fails, the default branch cannot be established or the
+branches cannot be listed.
+
+After the worktrees, --sweep deletes each local branch `scratch/<issue>-<what>` (a probe that
+must not be merged) whose issue origin's GitHub reports closed (`gh issue view <n> -R <origin>`)
+and that no worktree has checked out. It prints each one's head SHA: `git branch <name> <sha>`
+restores it until git prunes the commit. A scratch branch with no issue number, with an issue
+that is open or cannot be read (no gh, no origin, no answer), or checked out stays and is named.
+So does one whose reflog does not show it was that issue's: any `Branch: renamed` entry from a
+name without that number as a whole token (so a second rename changes nothing), or a reflog that
+is missing or no longer runs unbroken from the `branch: Created from` entry to the tip. A branch
+created directly under its scratch name stays deletable: that leaves its source branch standing.
+When the default branch cannot be established, or a removal in this sweep failed, all of them
+stay. Remote scratch branches are outside this. The deletion is `git branch -D`, because a
+scratch branch is never merged, once its tip is read again and is still the one checked; this
+pass is the one route the cleanup gives it.
+
+Last, --sweep deletes every other local branch that has been merged, whoever left it and whether
+or not a worktree ever had it: left by a `git switch` in a living worktree, or by a worktree
+removed without it. A branch goes when all of these hold; no age counts:
+  - it is not protected: `main`, `master`, the default branch, or the target of origin/HEAD
+    (the names templates/pre-push refuses to delete);
+  - it is not `scratch/*` (the pass above owns those) and not `claude/*` (Claude Code
+    desktop-app session branches: a resumed session checks its branch out again);
+  - no worktree has it checked out. One whose directory is gone holds it until `git worktree
+    prune`, and the KEPT line says so;
+  - it is merged, as in the merged check above: its tip is in the default branch, or is exactly
+    the head of a pull request merged into the default branch (asked of gh only for a branch
+    whose tip is not in it; without gh such a branch is only counted, and the count says why);
+  - every id in its reflog, but for a commit `commit --amend` replaced, is in the default branch
+    or in that pull request's head (`rev-list <ids> --not <default> [<head>]` is empty):
+    deleting the branch deletes that reflog, and a tracking ref is no proof. A branch without a
+    reflog has nothing there to lose.
+The deletion is `git branch -D` once the tip is read again and is still the one proven: `-d`
+compares a branch without upstream against HEAD, and after a merge on GitHub the local default
+branch is usually behind, so it would refuse nearly every merged branch and every squash-merged
+one. -D still refuses a branch a worktree has checked out, is rebasing or bisecting; a refusal
+is KEPT and no failure. Each deletion prints the name, the head SHA, `git branch <name> <sha>`
+to restore it until git prunes the commit, and, when origin has the branch, either `remote
+copy: origin/<name> (pull request #<n>)` when a pull request of origin merged into the default
+branch has that tip as its head, which the cleanup-merged skill then offers to delete, or
+`remote copy kept: origin/<name> (no merged pull request)`: a long-lived branch such as
+`develop` whose tip merely sits in the default branch keeps its remote copy. A merged branch
+that stays is KEPT with the reason; one that is not merged is only counted. The pass deletes
+nothing when the default branch cannot be established, a removal in this sweep failed, or under
+--no-fetch. With --dry-run it runs too and deletes nothing; a branch of a worktree that the
+same run would remove shows as KEPT there, and the removal takes it.
 
 Proof that an ignored entry is regenerable. Default deny: nothing lists known data, so a file
 type added to .gitignore later is protected without any change here.
@@ -75,9 +122,10 @@ Limit: a process that starts writing ignored files between these checks and the 
 seen; the checks run immediately before `git worktree remove`.
 
 --approved waives only the merged check, for one worktree the user decided to abandon; every
-other check still holds and the branch is never deleted in that mode. It refuses more than one
-path. It does not rely on options newer git added (`--path-format=absolute`,
-`--show-ref-format`): git before 2.31 and 2.45 echoes them instead of applying them.
+other check still holds and the branch is never deleted in that mode; a later sweep takes it
+if it has been merged, an unmerged one stays. It refuses more than one path. It does not rely
+on options newer git added (`--path-format=absolute`, `--show-ref-format`): git before 2.31
+and 2.45 echoes them instead of applying them.
 Removal: `git worktree remove <path>` (never --force), then the local branch is deleted with
 `git update-ref -d refs/heads/<branch> <proven tip>`, which refuses if the branch moved since the
 check; a branch still checked out in another worktree is kept. The remote branch and the issue
@@ -110,6 +158,10 @@ ANNOTATION = re.compile(r'^(\S+)\s+#\s*[^#\s][^#]*?\s+\d{4}-\d{2}-\d{2}\s+#\d+\b
 # a literal directory name or root path; a literal file name or `*.<ext>`
 DIR_PATTERN = re.compile(r'^[^*?\[\]]+/$')
 FILE_PATTERN = re.compile(r'^(?:[^*?\[\]/]*/)*(?:[^*?\[\]/]+|\*\.[^*?\[\]/.]+)$')
+SCRATCH = re.compile(r'^scratch/([1-9][0-9]*)-.')  # scratch/<issue>-<what>
+RENAMED = re.compile(r'^Branch: renamed refs/heads/(.+) to refs/heads/')  # git's reflog entry
+# Claude Code desktop-app session branches: a resumed session checks its branch out again
+SESSION_BRANCHES = 'claude/'
 
 
 def git(cwd, *args):
@@ -397,13 +449,19 @@ def gh_command():
 
 
 def merged_pull_request(primary, branch, tip, base=None):
-    """(number, problem): a pull request merged into `base` whose head commit is exactly `tip`.
-    A pull request merged into another branch (a stacked one) proves nothing about `base`."""
+    """(number, problem): a pull request of origin merged into `base` whose head commit is
+    exactly `tip`. A pull request merged into another branch (a stacked one) proves nothing
+    about `base`."""
     gh = gh_command()
     if not gh:
         return None, 'gh is not installed, so a squash or rebase merge cannot be proven'
+    # the repository named outright: gh alone would prefer a remote `upstream`
+    origin = git(primary, 'remote', 'get-url', 'origin')
+    if origin.returncode:
+        return None, 'no remote origin, so no pull request can be read'
     try:
-        result = subprocess.run(gh + ['pr', 'list', '--head', branch, '--state', 'merged',
+        result = subprocess.run(gh + ['pr', 'list', '-R', origin.stdout.strip(), '--head', branch,
+                                      '--state', 'merged',
                                       '--json', 'number,headRefOid,baseRefName',
                                       '--limit', '50'],
                                 cwd=primary, capture_output=True, text=True, timeout=60)
@@ -437,6 +495,33 @@ def sweep_evidence(primary, branch):
     return None
 
 
+def recorded_ids(log, ids, amended):
+    """Add every old and new id of the reflog file `log` to `ids`, and to `amended` the commits
+    `commit --amend` replaced and no later entry restored as a tip. No file adds nothing."""
+    try:
+        with open(log, encoding='utf-8', errors='replace') as handle:
+            lines = handle.read().splitlines()
+    except FileNotFoundError:
+        return
+    for line in lines:  # oldest first
+        head, _, message = line.partition('\t')
+        old, new = (head.split(' ') + ['', ''])[:2]
+        ids.update((old, new))
+        amended.discard(new)  # restored as a tip: no longer superseded
+        if message.startswith('commit (amend)'):
+            amended.add(old)
+
+
+def existing_commits(primary, ids):
+    """([those of `ids` that are commits here], whether git could tell): an id already gone has
+    nothing to lose."""
+    known = subprocess.run(['git', '-C', primary, 'cat-file', '--batch-check'], text=True,
+                           input=''.join(f'{i}\n' for i in sorted(ids) if i.strip('0')),
+                           capture_output=True)
+    return ([line.split()[0] for line in known.stdout.splitlines()
+             if line.split()[1:2] == ['commit']], not known.returncode)
+
+
 def stranded_commits(primary, tree, branch_goes, merged_head=None):
     """(reason to keep or None): commits only this worktree's own history still holds.
 
@@ -462,31 +547,16 @@ def stranded_commits(primary, tree, branch_goes, merged_head=None):
                                     if branch and branch_goes else [])
     ids, amended = set(), set()
     for cwd, name in logs:
-        log = git_path(cwd, name)
         try:
-            with open(log, encoding='utf-8', errors='replace') as handle:
-                lines = handle.read().splitlines()
-        except FileNotFoundError:
-            continue
+            recorded_ids(git_path(cwd, name), ids, amended)
         except OSError as error:
             return f'cannot read {name}: {error}'
-        for line in lines:  # oldest first
-            head, _, message = line.partition('\t')
-            old, new = (head.split(' ') + ['', ''])[:2]
-            ids.update((old, new))
-            amended.discard(new)  # restored as a tip: no longer superseded
-            if message.startswith('commit (amend)'):
-                amended.add(old)
     ids -= amended
     for name in ('HEAD', 'ORIG_HEAD'):  # current tips are never exempt
         tip = git(path, 'rev-parse', '-q', '--verify', f'{name}^{{commit}}')
         if not tip.returncode:
             ids.add(tip.stdout.strip())
-    known = subprocess.run(['git', '-C', primary, 'cat-file', '--batch-check'], text=True,
-                           input=''.join(f'{i}\n' for i in sorted(ids) if i.strip('0')),
-                           capture_output=True)
-    commits = [line.split()[0] for line in known.stdout.splitlines()
-               if line.split()[1:2] == ['commit']]  # an id already gone has nothing to lose
+    commits, read = existing_commits(primary, ids)
     if not commits:
         return None
     # for --branches the pattern is relative to refs/heads/ (measured)
@@ -494,7 +564,7 @@ def stranded_commits(primary, tree, branch_goes, merged_head=None):
     merged = [merged_head] if merged_head else []
     left = git(primary, 'rev-list', *commits, '--not', *merged, *exclude,
                '--branches', '--tags', '--remotes')
-    if known.returncode or left.returncode:
+    if not read or left.returncode:
         return 'cannot establish which commits stay reachable: ' + left.stderr.strip()[:200]
     lost = set(left.stdout.split())
     stranded = [commit[:12] for commit in commits if commit in lost]
@@ -629,6 +699,271 @@ def check(primary, tree, ref, patterns, approved):
     return reasons, proofs, sha
 
 
+def not_closed(primary, number):
+    """Why issue `number` of origin does not count as closed; None when GitHub says it is.
+
+    Default deny, and the repository named outright: gh alone would prefer a remote `upstream`.
+    """
+    cannot = f'issue #{number} cannot be read'
+    origin = git(primary, 'remote', 'get-url', 'origin')
+    if origin.returncode:
+        return f'{cannot}: no remote origin'
+    gh = gh_command()
+    if not gh:
+        return f'{cannot}: gh is not installed'
+    try:
+        read = subprocess.run(gh + ['issue', 'view', number, '-R', origin.stdout.strip(),
+                                    '--json', 'state,url'], cwd=primary, stdin=subprocess.DEVNULL,
+                              text=True, capture_output=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as error:
+        return f'{cannot}: {error}'
+    if read.returncode:
+        return f'{cannot}: ' + (read.stderr or read.stdout or 'gh failed').strip()[:200]
+    try:
+        issue = json.loads(read.stdout)
+        state, url = issue['state'], issue['url']
+    except (ValueError, KeyError, TypeError):
+        return f'{cannot}: gh gave no state'
+    # a pull request shares the numbers; `/issues/` anywhere would pass one in a repository of
+    # that name, and an issue moved to another repository has another number there
+    if not str(url).endswith(f'/issues/{number}'):
+        return f'#{number} is not an issue'
+    return None if state == 'CLOSED' else f'issue #{number} is {str(state).lower()}'
+
+
+def not_its_own(primary, branch, tip, number):
+    """Why the reflog does not show `branch` as issue `number`'s scratch branch; None if it does.
+
+    A rename moves the only name a branch has, so a task branch renamed to a closed issue's
+    scratch name would go with its commits; a direct creation leaves its source standing. Every
+    rename counts, because a rename keeps the reflog: a name with the number in between proves
+    nothing. git gc expires a rename's entry by age while newer entries stay, and from the middle
+    of the log once the tip no longer reaches its commit, while the creation stays: only a log
+    unbroken from the creation to `tip` rules a rename out. So the file and not `git reflog
+    show`, which gives no old ids.
+    """
+    try:
+        # split on \n alone: a name may hold what splitlines takes for a line end
+        with open(git_path(primary, f'logs/refs/heads/{branch}'), encoding='utf-8',
+                  errors='replace', newline='\n') as handle:
+            lines = [line for line in handle.read().split('\n') if line]
+    except OSError:
+        lines = []
+    if not lines:
+        return 'no reflog to show how it was made (expired or missing)'
+    # a whole token: agent/1470-x or a hash ending in 47 is not issue 47
+    carries = re.compile(rf'(?<![0-9A-Za-z]){number}(?![0-9A-Za-z])')
+    ids, messages = [], []
+    for line in lines:
+        head, _, message = line.partition('\t')
+        ids.append((head.split(' ') + ['', ''])[:2])
+        messages.append(message)
+        renamed = RENAMED.match(message)
+        if renamed and not carries.search(renamed.group(1)):
+            return f'renamed from {renamed.group(1)}, a name without #{number}'
+        if not renamed and message.startswith('Branch: renamed'):
+            return f'a rename it cannot read: {message}'
+    if not messages[0].startswith('branch: Created from '):
+        return 'its reflog no longer reaches its creation, so a rename cannot be ruled out'
+    if ids[-1][1] != tip or any(new != old for (_, new), (old, _) in zip(ids, ids[1:])):
+        return 'its reflog has a gap, so a rename cannot be ruled out'
+    return None
+
+
+def sweep_scratch(primary, blocked, dry_run):
+    """Delete the scratch branches of closed issues; returns how many deletions failed.
+
+    Runs after the worktrees: a scratch branch may be what still holds a removed worktree's
+    commits. `git branch -D`, because a scratch branch never merges, so `-d` would always refuse;
+    the tip is read again right before it and must still be the one checked. -D still refuses
+    a branch a worktree has checked out, is rebasing or bisecting (HEAD detached, so
+    `worktrees` does not show it), and clears the branch's configuration. `blocked` is why
+    nothing may go in this sweep, or None.
+    """
+    listed = git(primary, 'for-each-ref', '--format=%(objectname) %(refname)',
+                 'refs/heads/scratch/')
+    if listed.returncode:
+        print(f'scratch branches not read: {listed.stderr.strip()}')
+        return 1
+    if not blocked and not gh_command():
+        blocked = 'gh is not installed, so no issue can be read as closed'
+    held = {t['branch']: t['path'] for t in worktrees(primary) if t['branch']}
+    deleted = kept = failed = 0
+    for line in listed.stdout.splitlines():
+        sha, ref = line.split(' ', 1)
+        branch = ref[len('refs/heads/'):]
+        found = SCRATCH.match(branch)
+        if blocked:
+            reason = blocked
+        elif not found:
+            reason = 'no issue number: the form is scratch/<issue>-<what>'
+        elif branch in held:
+            reason = f'checked out in {held[branch]}'
+        else:
+            reason = (not_its_own(primary, branch, sha, found.group(1))
+                      or not_closed(primary, found.group(1)))
+        if not reason and not dry_run:
+            if git(primary, 'rev-parse', '-q', '--verify',
+                   f'refs/heads/{branch}').stdout.strip() != sha:
+                reason = 'it moved since the check'
+            else:
+                result = git(primary, 'branch', '-D', branch)
+                if result.returncode:
+                    failed += 1
+                    reason = f'git branch -D refused: {result.stderr.strip()}'
+        if reason:
+            kept += 1
+            print(f'KEPT {branch} at {sha}: {reason}')
+            continue
+        deleted += 1
+        if dry_run:
+            print(f'WOULD DELETE {branch} at {sha} (issue #{found.group(1)} closed)')
+        else:
+            print(f'DELETED {branch} at {sha} (issue #{found.group(1)} closed); '
+                  f'back: git branch {branch} {sha}')
+    if deleted or kept:
+        verb = 'would be deleted' if dry_run else 'deleted'
+        print(f'scratch branches {verb}: {deleted}; kept: {kept}')
+    return failed
+
+
+def protected_branches(primary, ref):
+    """The names the pre-push template refuses to delete, and the default branch itself."""
+    names = {'main', 'master', re.sub(r'^refs/(remotes/[^/]+|heads)/', '', ref)}
+    head = git(primary, 'symbolic-ref', '-q', 'refs/remotes/origin/HEAD').stdout.strip()
+    if head.startswith('refs/remotes/origin/'):
+        names.add(head[len('refs/remotes/origin/'):])
+    return names
+
+
+def on_origin(primary):
+    """The branch names on origin now, or None when that cannot be read: a tracking ref outlives
+    its branch, and the skill's next step acts on this list."""
+    if 'origin' not in git(primary, 'remote').stdout.split():
+        return set()
+    heads = git(primary, 'ls-remote', '--heads', 'origin')
+    if heads.returncode:
+        return None
+    return {line.split('\trefs/heads/', 1)[1] for line in heads.stdout.splitlines()
+            if '\trefs/heads/' in line}
+
+
+def reflog_beyond(primary, branch, ref, merged_head=None):
+    """Why `branch` still holds more than `ref`, from its reflog; None when it does not.
+
+    Deleting a branch deletes its reflog, the last record of a commit a reset or a rebase
+    dropped. Only `ref` counts, and the head of the pull request that merged it (GitHub keeps
+    that): the --remotes of stranded_commits would also trust a stale tracking ref. A commit
+    `commit --amend` replaced is superseded, as there; no reflog holds nothing to lose.
+    """
+    ids, amended = set(), set()
+    try:
+        recorded_ids(git_path(primary, f'logs/refs/heads/{branch}'), ids, amended)
+    except OSError as error:
+        return f'cannot read its reflog: {error}'
+    commits, read = existing_commits(primary, ids - amended)
+    if not commits:
+        return None if read else 'cannot read the commits of its reflog'
+    merged = [merged_head] if merged_head else []
+    left = git(primary, 'rev-list', *commits, '--not', ref, *merged)
+    if not read or left.returncode:
+        return 'cannot read the commits of its reflog: ' + left.stderr.strip()[:200]
+    outside = left.stdout.split()
+    if outside:
+        return (f'its reflog holds commits that are not in {ref}: '
+                + ', '.join(commit[:12] for commit in outside[:5])
+                + (' …' if len(outside) > 5 else ''))
+    return None
+
+
+def sweep_merged(primary, ref, blocked, dry_run):
+    """Delete the local branches that have been merged; returns how many passes failed (0 or 1).
+
+    Runs last, so that the worktrees removed in this sweep no longer hold a branch. `blocked` is
+    why nothing may go, or None. The proof is this function's, not git's: `git branch -d`
+    compares a branch without upstream against HEAD, and after a merge on GitHub the local
+    default branch is usually behind, so -d would refuse nearly every merged branch, and always
+    a squash-merged one. So the tip is read again and the branch deleted with `git branch -D`,
+    which still refuses a branch that a worktree has checked out, is rebasing or bisecting. A
+    refusal is KEPT and no failure.
+    """
+    if blocked:
+        print(f'merged branches: none deleted: {blocked}')
+        return 0
+    listed = git(primary, 'for-each-ref', '--format=%(objectname) %(refname)', 'refs/heads/')
+    if listed.returncode:
+        print(f'merged branches not read: {listed.stderr.strip()}')
+        return 1
+    if ref_format(primary) != 'files':
+        print('merged branches: none deleted: cannot read reflogs (ref format is not `files`)')
+        return 0
+    protected = protected_branches(primary, ref)
+    base = re.sub(r'^refs/(remotes/[^/]+|heads)/', '', ref)
+    held = {t['branch']: t for t in worktrees(primary) if t['branch']}
+    remote = on_origin(primary)
+    if remote is None:
+        print('merged branches: copies on origin not read: check them before the remote step')
+    deleted = kept = unmerged = 0
+    gh_problem = None
+    for line in listed.stdout.splitlines():
+        sha, full = line.split(' ', 1)
+        branch = full[len('refs/heads/'):]
+        if branch in protected or branch.startswith('scratch/'):
+            continue
+        merged_head, number, how = None, None, f'in {ref}'
+        if git(primary, 'merge-base', '--is-ancestor', sha, ref).returncode:
+            if gh_problem is None:
+                number, gh_problem = merged_pull_request(primary, branch, sha, base)
+            if number is None:
+                unmerged += 1
+                continue
+            merged_head, how = sha, f'the head of merged pull request #{number}'
+        tree = held.get(branch)
+        if branch.startswith(SESSION_BRANCHES):
+            reason = (f'{SESSION_BRANCHES}* belongs to a desktop-app session, which checks it '
+                      'out again when resumed')
+        elif tree and tree['prunable']:
+            reason = (f"held by {tree['path']}, whose directory is gone: stays until "
+                      '`git worktree prune`')
+        elif tree:
+            reason = f"checked out in {tree['path']}"
+        else:
+            reason = reflog_beyond(primary, branch, ref, merged_head)
+        if not reason and not dry_run:
+            if git(primary, 'rev-parse', '-q', '--verify',
+                   f'refs/heads/{branch}').stdout.strip() != sha:
+                reason = 'it moved since the check'
+            else:
+                result = git(primary, 'branch', '-D', branch)
+                if result.returncode:
+                    why = result.stderr.strip().splitlines() or ['failed']
+                    reason = f'git branch -D refused: {why[0]}'
+        if reason:
+            kept += 1
+            print(f'KEPT {branch} at {sha}: {reason}')
+            continue
+        deleted += 1
+        copy = ''
+        if remote and branch in remote:
+            # only a branch a pull request merged is offered for remote deletion: a long-lived
+            # branch (develop) whose tip merely sits in the default branch keeps its remote copy
+            problem = None
+            if number is None:
+                number, problem = merged_pull_request(primary, branch, sha, base)
+            copy = (f'; remote copy: origin/{branch} (pull request #{number})'
+                    if number is not None else
+                    f'; remote copy kept: origin/{branch} (no merged pull request'
+                    + (f' known: {problem})' if problem else ')'))
+        if dry_run:
+            print(f'WOULD DELETE {branch} at {sha} ({how}){copy}')
+        else:
+            print(f'DELETED {branch} at {sha} ({how}); back: git branch {branch} {sha}{copy}')
+    verb = 'would be deleted' if dry_run else 'deleted'
+    print(f'merged branches {verb}: {deleted}; kept: {kept}; not merged, left alone: {unmerged}'
+          + (f' (squash merges not checked: {gh_problem})' if gh_problem else ''))
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('worktrees', nargs='*')
@@ -639,6 +974,9 @@ def main(argv=None):
     parser.add_argument('--approved', metavar='WORDS',
                         help="the user's words approving removal of unmerged work (waives 'merged')")
     args = parser.parse_args(argv)
+    # each line as it is decided: a sweep through a pipe can run long, and a block-buffered run
+    # shows nothing at all until it ends, not even which worktree it stands on
+    sys.stdout.reconfigure(line_buffering=True)
     if args.approved is not None and not args.approved.strip():
         print("--approved needs the user's words", file=sys.stderr)
         return 2
@@ -724,6 +1062,10 @@ def main(argv=None):
           f'{len(targets) - kept if args.dry_run else removed}; kept: {kept}'
           + (f' (sweep of {len(targets)})' if args.sweep else ''))
     if args.sweep:
+        blocked = error or ('a removal failed in this sweep' if failed else None)
+        failed += sweep_scratch(primary, blocked, args.dry_run)
+        fresh = '--no-fetch: the pass needs a fresh default branch' if args.no_fetch else None
+        failed += sweep_merged(primary, ref, blocked or fresh, args.dry_run)
         return 1 if failed or error else 0
     return 1 if kept else 0
 

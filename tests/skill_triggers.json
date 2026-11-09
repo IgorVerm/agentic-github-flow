@@ -46,5 +46,37 @@
     "should_not": [
       "Deploy the current branch to Vercel production now."
     ]
+  },
+  "open-issue": {
+    "should": [
+      "While fixing the parser I noticed the CSV export drops the last row. Open an issue for it so someone can pick it up later."
+    ],
+    "should_not": [
+      "List the open issues labelled bug and summarise them for me."
+    ]
+  },
+  "requirements": {
+    "should": [
+      "Issue 30 is labelled needs-spec. Interview me about it and split it into ready issues the agents can pick up."
+    ],
+    "should_not": [
+      "The CSV export drops the last row. Open an issue for that defect."
+    ]
+  },
+  "issue-handover": {
+    "should": [
+      "The branch for issue 14 passes its checks and the pull request text is written. Hand this chat over: pick the next ready issue and start its chat."
+    ],
+    "should_not": [
+      "Push my branch and open the pull request for issue 14."
+    ]
+  },
+  "archive-finished-chats": {
+    "should": [
+      "The sidebar is full of old issue chats whose work was pushed. Archive the finished ones."
+    ],
+    "should_not": [
+      "Remove the worktrees and branches of the pull requests that were merged yesterday."
+    ]
   }
 }

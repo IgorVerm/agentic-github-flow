@@ -5,8 +5,9 @@
 # One exception: deleting a refs/heads/* branch that is not main, master or the remote's default
 # branch (refs/remotes/<remote>/HEAD, else <remote>/main), whose remote tip is already in that
 # default branch as last fetched, or is the head commit of a pull request merged into that
-# default branch (`gh pr list --head <branch> --base <default> --state merged`, when gh is
-# installed): a merged task branch, as the cleanup-merged skill deletes it. main and master are
+# default branch (`gh pr list -R <the remote's URL> --head <branch> --base <default> --state
+# merged`, when gh is installed and the remote has a URL; gh alone would prefer a remote
+# `upstream`): a merged task branch, as the cleanup-merged skill deletes it. main and master are
 # refused by name even when the default branch is another one.
 # Install per repository (worktrees share it): cp pre-push "$(git rev-parse --git-path hooks)/pre-push"
 # and chmod +x it; an existing pre-push hook is chained by hand, never overwritten. On Windows,
@@ -26,9 +27,10 @@ while read lref lsha rref rsha; do
       continue
     fi
     branch=${rref#refs/heads/}
-    if command -v gh >/dev/null 2>&1 &&
-       gh pr list --head "$branch" --base "${default#"refs/remotes/$remote/"}" --state merged \
-         --json headRefOid --jq '.[].headRefOid' 2>/dev/null | grep -qx "$rsha"; then
+    url=$(git remote get-url "$remote" 2>/dev/null)
+    if [ -n "$url" ] && command -v gh >/dev/null 2>&1 &&
+       gh pr list -R "$url" --head "$branch" --base "${default#"refs/remotes/$remote/"}" \
+         --state merged --json headRefOid --jq '.[].headRefOid' 2>/dev/null | grep -qx "$rsha"; then
       continue
     fi
     echo "pre-push: refusing to DELETE $rref: its tip is not in $default and is not the head" >&2

@@ -43,6 +43,18 @@
         "authentication": "ON_INSTALL"
       },
       "category": "Coding"
+    },
+    {
+      "name": "agentic-github-flow-issue-chats",
+      "source": {
+        "source": "local",
+        "path": "./plugins/issue-chats"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Coding"
     }
   ]
 }

@@ -27,7 +27,9 @@ above this skill's folder ([new_worktree.py](../../scripts/new_worktree.py)); a 
   deployment also gets the `review-security` skill when it is installed. The repository's own
   required reviewers still review the pull request on GitHub.
 
-One sentence on the issue is enough: the route and why.
+One sentence on the issue is enough: the route and why. When you start work on an issue that
+has no assignee, assign it to the account you post under (`gh issue edit <n> --add-assignee
+@me`) and say so on the issue: that is the claim the overlap check of step 5 reads.
 
 ## 2. Bring the default branch in
 
@@ -51,13 +53,34 @@ Write the title and body to a file outside the repository. The body starts with
 and `Closes #<n>` for the issue it finishes (a closing keyword is right here: the merge is the
 verified publication). Draft or ready: draft while an independent review is still open.
 
-## 5. Ask
+## 5. The overlap check
 
-One message to the user: the branch, how many commits, the checks and their results, the pull
-request title, draft or ready. Wait for an explicit yes for this push. A yes for an earlier push
-does not cover this one.
+Other sessions may have unmerged work in the same files. Run
+`python3 <plugin>/scripts/overlap_check.py --branch <your task branch> --issue <n>`
+([overlap_check.py](../../scripts/overlap_check.py)), `<n>` the issue it works on. It only reads git and `gh`, compares
+against the default branch as fetched in step 2, and lists the local branches, open pull
+requests and claimed (assigned) open issues that share a path with yours; `--no-github` in a
+repository without a GitHub remote.
 
-## 6. Push and open the pull request
+- Exit 0: nothing to do.
+- Exit 1: for every hit that is older than your work or claimed, read the design note (or
+  newest signed comment) it names, and add one line per hit to the pull request body of
+  step 4: the two agree, or what the later one must change. A conflict of design goes to its
+  authors or to the user, not into this pull request.
+- Exit 2: nothing was judged. Fix the call, or fetch, and run it again; never report it as
+  no overlap.
+- Exit 3 (GitHub not read; any branch hits it lists count as for exit 1): run it again; go on
+  without the pull requests and claims only with that limitation stated in the body.
+
+It does not block by itself: the merge on GitHub is where the branches meet.
+
+## 6. Ask
+
+One message to the user: the branch, how many commits, the checks and their results, the
+overlap check's result, the pull request title, draft or ready. Wait for an explicit yes for
+this push. A yes for an earlier push does not cover this one.
+
+## 7. Push and open the pull request
 
 On the yes:
 

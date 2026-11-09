@@ -1,0 +1,17 @@
+{
+  "description": "agentic-github-flow issue chats: archive a desktop chat only when its worktree is clean and its commits are on GitHub",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^mcp__ccd_session_mgmt__archive_session$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-guard.sh\" \"${CLAUDE_PLUGIN_ROOT}/scripts/archive_guard.py\" || exit 2",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

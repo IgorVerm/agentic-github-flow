@@ -14,7 +14,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TESTS = ['skills_format.py', 'repo_checks.py', 'claude_permissions.py', 'git_guard.py',
          'personal_data_guard.py', 'scan_secrets.py', 'audit_dependencies.py',
          'skill_triggers_offline.py', 'worktree_tools.py', 'installer.py', 'codex_policy.py',
-         'overlap_check.py', 'plugin_validate.py']
+         'overlap_check.py', 'next_issue.py', 'start_issue_chat.py', 'chat_archivable.py',
+         'archive_guard.py', 'plugin_validate.py']
 
 
 def main():

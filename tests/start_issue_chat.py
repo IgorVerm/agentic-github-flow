@@ -329,7 +329,16 @@ else:
     case('a reply on another model of the alias\'s family name refused', 1,
          args=[wt, '#12 · next', '--model', 'opus'], stub={'reply_model': 'claude-sonnet-5-5'},
          check=not_opened)
+    case('an alias answered by a model of its family', 0,
+         args=[wt, '#12 · next', '--model', 'opus'], stub={'reply_model': 'claude-opus-5-5'})
+    case('an id answered by its dated form', 0,
+         args=[wt, '#12 · next', '--model', 'claude-sonnet-4-5'],
+         stub={'reply_model': 'claude-sonnet-4-5-20250929'})
+    case('another alias refused, never a false ok', 1,
+         args=[wt, '#12 · next', '--model', 'default'], stub={'reply_model': 'claude-opus-5-5'},
+         check=not_opened)
     case('idle before the reply: waits for it, then ok', 0, stub={'reply_after_polls': 3},
+         env_extra={'AGENTIC_GITHUB_FLOW_START_WAIT_S': '20'},
          check=lambda log, out: order_ok(log, out) or (
              None if sum(c[:2] == ['agents', '--json'] and '--cwd' in c for c in log) >= 3
              else 'stopped before the reply: %s' % log))

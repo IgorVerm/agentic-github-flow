@@ -34,14 +34,15 @@ the user's default. AGENTIC_GITHUB_FLOW_GH, a JSON list, replaces the `gh` comma
 AGENTIC_GITHUB_FLOW_START_WAIT_S the 120 s (tests).
 
 Why the reply and its model are checked: `idle` can be listed before the session has answered.
-Stopped then, the ready prompt stays unanswered; the desktop open fills in a `<synthetic>`
-record ("No response requested.") and the chat's next turn runs on the app's default model, not
---model (measured in one user's transcripts, 2026-11-09: 15 of 184 started chats had that
+Stopped then, the ready prompt stays unanswered; a `<synthetic>` record ("No response
+requested.") follows it in the transcript (when it is written is not known; seen 1.6 s to 281 s
+after the prompt) and the chat's next turn runs on the app's default model, not --model (measured in one user's transcripts, 2026-11-09: 15 of 184 started chats had that
 record first, the 11 of them since 2026-10-30 continued on another model; none of the 169 with
 a real first reply changed model). So a chat whose ready reply is missing, or came from another
 model, is stopped and never opened. A model alias (`opus`, `sonnet`, `haiku`, `fable`) matches
-a model id of its family, and a context suffix such as `[1m]` is ignored; any other --model must
-equal the reply's model.
+a model id of its family, a context suffix such as `[1m]` is ignored, and an id matches its
+dated form (`<id>-YYYYMMDD`); any other --model must equal the reply's model, so another alias
+(`default`, `opusplan`) always ends in exit 1: pass a model id.
 
 Last line and exit code, for the caller:
   0  `ok local_<sessionId>`: open in the app; hand it the brief with `send_message` to that id.
@@ -305,7 +306,7 @@ def same_model(requested: str, got: str) -> bool:
     got = re.sub(r"\[[^\]]*\]$", "", got).lower()
     if want in ALIASES:
         return f"-{want}-" in f"-{got}-"
-    return want == got
+    return want == got or re.fullmatch(re.escape(want) + r"-[0-9]{8}", got) is not None
 
 
 def after_start(wt: str, title: str, short: str, model: str) -> tuple[int, str]:

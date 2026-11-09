@@ -17,9 +17,14 @@ repository's primary checkout, not from inside the worktree that goes.
    linked worktree of the repository, `--dry-run` to only report. It fetches, runs the checks
    below and then removes; what fails a check is kept and named. After the worktrees, a sweep
    also deletes local branches that nothing holds any more (below), printing for each
-   `DELETED <branch> at <sha>`, the `git branch <branch> <sha>` that restores it, and
-   `remote copy: origin/<branch>` when origin still has one.
-3. **The remote branch,** and each `remote copy` the sweep named.
+   `DELETED <branch> at <sha>`, the `git branch <branch> <sha>` that restores it, and, when
+   origin still has the branch, `remote copy: origin/<branch> (pull request #<n>)` or
+   `remote copy kept: origin/<branch> (no merged pull request)`. The sweep deletes with
+   `git branch -D`, and only after it proved the branch merged (or a scratch branch's issue
+   closed) and read its tip again; agents never run `git branch -D` themselves.
+3. **The remote branch** of the merged pull request, and each `remote copy: … (pull request
+   #<n>)` the sweep named; never a `remote copy kept` (a long-lived branch such as `develop`
+   whose tip merely sits in the default branch).
    `python3 <plugin>/scripts/delete_merged_branch.py <branch> --dry-run`
    says whether GitHub already deleted it and, if not, whether its tip on the remote is still
    the merged commit. Deleting it is a push, so ask the user first, like every other push. On a
@@ -30,11 +35,12 @@ repository's primary checkout, not from inside the worktree that goes.
 4. **The issue.** `gh issue view <n> --json state`. A closing keyword in the pull request closed
    it at the merge. Still open and fully resolved: close it with a signed comment naming the pull
    request and the merge commit. Resolved in part: comment what remains and leave it open.
-   Put every branch the sweep printed as DELETED, name and head SHA, in a signed comment on
-   that issue, whichever issue the branch belonged to: nothing else records them, and the SHA
-   is the way back until git prunes the commit. A cleanup without an issue puts them on a new
-   one.
-5. **Report** what was removed and what was kept, with the reasons.
+   Record in that signed comment each branch the sweep printed as DELETED that had a remote
+   copy or belongs to that issue, with its head SHA: the SHA is the way back until git prunes
+   the commit. Branches that existed only locally and belong to no such issue are not
+   published; they go in the report. Open no issue just to hold SHAs.
+5. **Report** what was removed and what was kept, with the reasons, and every DELETED branch
+   with its SHA and restore command.
 
 A worktree or branch the script keeps stays with its owner or the user: never remove a worktree
 or delete a kept branch by hand, never delete ignored files on judgement. Work the user decided

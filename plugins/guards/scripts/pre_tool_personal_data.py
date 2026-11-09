@@ -46,10 +46,12 @@ per line in
 `${XDG_CONFIG_HOME:-~/.config}/agentic-github-flow/personal-data` (outside every repository, so it
 cannot be committed; lines may start with `email:`, `phone:` or `name:`). The first name alone is
 not matched: "<first name>'s ruling" in an issue comment is routine. Paths under the home folder
-are routine too. The gh login is not matched when the call only reaches GitHub (the configured
-identity on pushes and issue posts is outside the rule). Any other e-mail address in an outbound
-call is someone's personal data and is asked too, except placeholder, no-reply and git-host
-addresses (NOT_PERSONAL).
+are routine too. The gh login is not matched when the call only reaches GitHub: through git or
+gh, by GitHub URLs alone, or through Codex's GitHub connector (GITHUB_MCP), whose repository
+fields hold `<login>/<repo>` (the configured identity on pushes and issue posts is outside the
+rule; the user's name and addresses in a connector body are not). Any other e-mail address in
+an outbound call is someone's personal data and is asked too, except placeholder, no-reply and
+git-host addresses (NOT_PERSONAL).
 
 An input it cannot read passes, as with the git guard: a fault must not stop all work.
 
@@ -80,7 +82,9 @@ FILE_FLAGS = {'--body-file', '-F', '--input', '-T', '--upload-file', '--attach'}
 STDIN_PROGRAMS = {'ssh', 'nc', 'ncat', 'netcat', 'telnet', 'mail', 'mailx', 'sendmail', 'msmtp',
                   'mutt', 'websocat'}  # they send what a pipe hands them without a flag
 GITHUB_HOSTS = ('github.com', 'githubusercontent.com', 'githubassets.com', 'github.io')
-GITHUB_PROGRAMS = {'git', 'gh'}
+GITHUB_PROGRAMS = {'git', 'gh', 'github-connector'}
+# Codex's GitHub connector (the ChatGPT app `GitHub` on the MCP server codex_apps), measured
+GITHUB_MCP = ('mcp__codex_apps__github__',)
 HTTP_CLIENTS = {'curl', 'wget', 'http', 'https', 'xh'}
 LOCAL_MCP = ('mcp__ccd_', 'mcp__visualize__', 'mcp__Claude_Code_iOS_Simulator__',
              'mcp__terminal__', 'mcp__scheduled-tasks__list', 'mcp__mcp-registry__')
@@ -435,7 +439,8 @@ def outbound(tool, tool_input, cwd):
         return 'this Artifact publish', [(set(), t) for t in texts]
     if tool in ARTIFACT_TOOLS or tool in CODEX_WEB or (tool.startswith('mcp__') and (
             tool.startswith(CLOUD_CCD) or not tool.startswith(LOCAL_MCP))):
-        return 'this %s call' % tool, [(set(), t) for t in strings(tool_input)]
+        programs = {'github-connector'} if tool.startswith(GITHUB_MCP) else set()
+        return 'this %s call' % tool, [(programs, t) for t in strings(tool_input)]
     return None
 
 

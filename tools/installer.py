@@ -19,8 +19,15 @@ What it does, per client (Claude Code, Codex):
   plugin, plus those named with --with (web-deploy brings security; issue-chats builds on core,
   which is always installed, and brings a Claude Code hook that guards archiving a chat).
 - Guards (--guards): the guards plugin (Claude hooks), the ask and deny lists merged into
-  ~/.claude/settings.json (a backup is kept), the Codex execpolicy rules linked into
-  ~/.codex/rules/ and the git guard added to ~/.codex/hooks.json.
+  ~/.claude/settings.json (a backup is kept), the Codex execpolicy rules (git safety and delete
+  prompts) copied into ~/.codex/rules/ and the git guard added to ~/.codex/hooks.json. The rules
+  are copies, never links, because Codex skips a symlinked .rules file without a warning;
+  --update refreshes a copy and --uninstall removes it only while it is unchanged since the
+  installer wrote it (a link recorded by 0.1, or a copy holding the rules 0.1 shipped, counts
+  as unchanged and is replaced). An
+  edited copy is left, with a note, and recorded in .state/codex-rules-left.json so that a
+  later --guards keeps it instead of refusing it. Copies under an earlier CODEX_HOME are
+  removed by the next install or --update while unchanged.
 - Overlays (--overlay): a folder with an AGENTS.md, or a git URL cloned into overlays/ here
   (a second URL with the same name gets a suffix); their text follows the core rules in both
   blocks.
@@ -368,19 +375,100 @@ def guard_command():
     return '"%s" "%s"' % (sys.executable, script)
 
 
+CODEX_RULES = (('git-safety.rules', 'agentic-github-flow-git-safety.rules'),
+               ('delete-guard.rules', 'agentic-github-flow-delete-guard.rules'))
+
+
+def file_hash(path):
+    try:
+        with open(path, 'rb') as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        return None
+
+
+def rules_targets():
+    """[(source, target)] for the Codex rules files."""
+    folder = os.path.join(codex_dir(), 'rules')
+    return [(os.path.join(CLONE, 'plugins', 'guards', 'policy', name), os.path.join(folder, copy))
+            for name, copy in CODEX_RULES]
+
+
+LEGACY = 'legacy'  # a rules file recorded by its path alone (0.1: a link, a copy on Windows)
+# sha256 of git-safety.rules as 0.1.0 to 0.1.2 shipped it (d0edd54), with LF and CRLF endings
+LEGACY_HASHES = {'629d996685e78035d47a801b7903e6df273d6a62f113b1f8a0e06db22a722903',
+                 '735d3d6a1ffb5cb69708e6228d65f0b54cad4ebd7919505f21c167a21cd184ce'}
+
+
+def left_path():
+    """Rules copies an --uninstall left because they were edited, so that a later install
+    recognises them instead of refusing them as foreign."""
+    return os.path.join(CLONE, '.state', 'codex-rules-left.json')
+
+
+def rules_record(state):
+    """{target: sha256 of the copy this installer wrote, or LEGACY}, with the copies a
+    previous --uninstall left behind."""
+    record = state.get('codex_rules') or {}
+    record = {record: LEGACY} if isinstance(record, str) else dict(record)
+    try:
+        with open(left_path(), encoding='utf-8') as f:
+            for target, digest in json.load(f).items():
+                record.setdefault(target, digest)
+    except (OSError, ValueError, AttributeError):
+        pass
+    return record
+
+
+def own_rules_file(target, source, digest):
+    """True when the installer may replace or remove target: its own link from 0.1, a copy
+    recorded by 0.1 by its path alone that still holds the rules 0.1 shipped, or a copy
+    unchanged since it was written; a copy equal to the current source counts too."""
+    if os.path.islink(target):
+        return os.path.realpath(target) == os.path.realpath(source)
+    current = file_hash(target)
+    if digest == LEGACY:
+        return current is not None and current in LEGACY_HASHES | {file_hash(source)}
+    return current is not None and current in (digest, file_hash(source))
+
+
+def source_of(target):
+    names = {copy: os.path.join(CLONE, 'plugins', 'guards', 'policy', name)
+             for name, copy in CODEX_RULES}
+    return names.get(os.path.basename(target), '')
+
+
 def codex_guards(state):
-    rules_dir = os.path.join(codex_dir(), 'rules')
-    target = os.path.join(rules_dir, 'agentic-github-flow-git-safety.rules')
-    source = os.path.join(CLONE, 'plugins', 'guards', 'policy', 'git-safety.rules')
-    os.makedirs(rules_dir, exist_ok=True)
-    if os.path.lexists(target):
-        os.remove(target)
-    if WINDOWS:
+    # Copies, never links: Codex skips a symlinked .rules file without a warning.
+    record, copied = rules_record(state), {}
+    current = [target for _, target in rules_targets()]
+    for target, digest in record.items():  # copies under an earlier CODEX_HOME
+        if target in current or not os.path.lexists(target):
+            continue
+        if own_rules_file(target, source_of(target), digest):
+            os.remove(target)
+            say('ok', 'codex: removed %s, a copy outside the current rules folder' % target)
+        else:
+            copied[target] = digest
+            say('skip', 'codex: %s changed since the install; left as it is, and Codex keeps '
+                        'loading it while CODEX_HOME points there' % target)
+    for source, target in rules_targets():
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        if os.path.lexists(target) and not own_rules_file(target, source, record.get(target)):
+            say('skip', 'codex: %s changed since the install; left as it is (remove or replace '
+                        'it by hand to get the current rules)' % target)
+            copied[target] = record.get(target)
+            continue
+        if os.path.lexists(target):
+            os.remove(target)
         shutil.copyfile(source, target)
-    else:
-        os.symlink(source, target)
-    state['codex_rules'] = target
-    say('ok', 'codex: execpolicy rules %s at %s' % ('copied' if WINDOWS else 'linked', target))
+        copied[target] = file_hash(target)
+        say('ok', 'codex: execpolicy rules copied to %s' % target)
+    state['codex_rules'] = copied
+    try:
+        os.remove(left_path())  # the record above now holds what an uninstall left
+    except FileNotFoundError:
+        pass
 
     path = os.path.join(codex_dir(), 'hooks.json')
     data = load_json(path)
@@ -405,16 +493,21 @@ def codex_guards(state):
 
 
 def remove_codex_guards(state):
-    target = state.get('codex_rules')
-    source = os.path.join(CLONE, 'plugins', 'guards', 'policy', 'git-safety.rules')
-    if target and os.path.lexists(target):
-        ours = (os.path.islink(target) and os.path.realpath(target) == os.path.realpath(source)) \
-            or (not os.path.islink(target) and read_text(target) == read_text(source))
-        if ours:
+    left = {}
+    for target, digest in rules_record(state).items():
+        if not os.path.lexists(target):
+            continue
+        if own_rules_file(target, source_of(target), digest):
             os.remove(target)
             say('ok', 'codex: removed %s' % target)
         else:
-            say('skip', 'codex: %s changed since the install; left as it is' % target)
+            left[target] = digest
+            say('skip', 'codex: %s changed since the install, so it is left as it is. Codex '
+                        'keeps loading it; delete that file to remove it' % target)
+    if left:
+        os.makedirs(os.path.dirname(left_path()), exist_ok=True)
+        with open(left_path(), 'w', encoding='utf-8') as f:
+            json.dump(left, f, indent=2, sort_keys=True)
     hook = state.get('codex_hook')
     path = os.path.join(codex_dir(), 'hooks.json')
     if not hook or linked(path, 'the git guard entry'):
@@ -472,9 +565,12 @@ def resolve_overlays(sources, updating, failures):
 
 def preflight(plan, guards, state):
     """Refuse before any change when a file this run would edit is a symlink or unreadable."""
-    rules = os.path.join(codex_dir(), 'rules', 'agentic-github-flow-git-safety.rules')
-    if guards and 'codex' in plan and os.path.lexists(rules) and not state.get('codex_rules'):
-        raise Refused('%s exists and was not made by this installer; move it away first' % rules)
+    if guards and 'codex' in plan:
+        record = rules_record(state)
+        for _, rules in rules_targets():
+            if os.path.lexists(rules) and rules not in record:
+                raise Refused('%s exists and was not made by this installer; move it away first'
+                              % rules)
     files = []
     if 'claude' in plan:
         files.append(os.path.join(claude_dir(), 'CLAUDE.md'))

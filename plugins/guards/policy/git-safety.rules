@@ -1,6 +1,6 @@
 # Git safety for Codex (execpolicy), from agentic-github-flow. Owner of the rule text: the core
-# rules (rules/core.md §Git). The installer links it into ~/.codex/rules/ with --guards (Codex loads
-# every *.rules file there).
+# rules (rules/core.md §Git). The installer copies it into ~/.codex/rules/ with --guards (Codex loads
+# every regular *.rules file there; a symlinked one is skipped without a warning, so never link it).
 # Test: codex execpolicy check --pretty --rules git-safety.rules -- git push --force
 # Prefix rules match only the START of a command: a flag after another argument
 # (`git add x -A`, `git commit -m x --no-verify`) and every `git -C <dir>` form are NOT caught;

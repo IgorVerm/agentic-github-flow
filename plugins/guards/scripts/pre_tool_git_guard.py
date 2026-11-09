@@ -18,7 +18,8 @@ cannot decode (`$'…'` strings are decoded first), or is nested deeper than MAX
 eval in …). Hook input that is JSON but not an object is blocked too. A command the user asks for
 by name the user runs in their own terminal.
 
-pre_tool_personal_data.py reuses its shell parsing: run tests/personal_data_guard.py too.
+pre_tool_personal_data.py and pre_tool_delete_guard.py reuse its shell parsing: run
+tests/personal_data_guard.py and tests/delete_guard.py too.
 
 Usage as a hook: reads JSON on stdin. For tests: `pre_tool_git_guard.py --check '<command>'`
 prints the reason and exits 2, or exits 0.

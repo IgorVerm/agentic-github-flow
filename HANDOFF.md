@@ -16,9 +16,8 @@ Checked on 2026-11-09 (v2).
     second opinion; review-security has due dates, acceptances and stack notes, and
     `sources.md` (sources, read dates, the osv-scanner pin).
   - web-deploy: mail-domain and EU privacy checks.
-  - guards: not updated yet. The delete guard, Codex prompt rules for deletes and Codex rules
-    installed as copies wait on the branch `agent/v2-guards`; its open review findings are on
-    their own issue (named on #3).
+  - guards: a delete guard for Claude Code (asks, never denies); Codex prompt rules for deletes;
+    Codex rules files installed as copies, because Codex skips a symlinked rules file.
   - issue-chats (new, opt-in): one issue per chat, hand-over to the next ready issue, archiving
     only once a chat's work is on GitHub. The method: `plugins/issue-chats/skills/issue-handover/method.md`.
     The automatic start of the next chat needs the Claude Code CLI and desktop app (measured on
@@ -43,7 +42,7 @@ Checked on 2026-11-09 (v2).
 | the always-loaded rules | `rules/core.md`, `AGENTS.md` §Rule budget |
 | a skill | its `SKILL.md`, `plugins/core/skills/repo-docs/skill-standard.md`, `tests/skills_format.py` |
 | the installer | `tools/installer.py` (its docstring owns the behaviour), `tests/installer.py` |
-| the guards | `plugins/guards/scripts/*.py` headers, `plugins/guards/policy/*.rules`, `tests/git_guard.py`, `tests/personal_data_guard.py`, `tests/codex_policy.py` |
+| the guards | `plugins/guards/scripts/*.py` headers, `plugins/guards/policy/*.rules`, `tests/git_guard.py`, `tests/delete_guard.py`, `tests/personal_data_guard.py`, `tests/codex_policy.py` |
 | worktrees and cleanup | `plugins/core/scripts/*.py` headers, `plugins/core/skills/cleanup-merged/SKILL.md`, `tests/worktree_tools.py`, `tests/new_worktree.py`, `tests/overlap_check.py` |
 | the security scanners | `plugins/security/scripts/*.py` headers, `plugins/security/skills/review-security/sources.md`, `tests/scan_secrets.py`, `tests/audit_dependencies.py` |
 | issue chats | `plugins/issue-chats/skills/issue-handover/method.md`, `plugins/issue-chats/scripts/*.py` headers, `tests/next_issue.py`, `tests/start_issue_chat.py`, `tests/chat_archivable.py`, `tests/archive_guard.py` |

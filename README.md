@@ -23,7 +23,7 @@ are the work queue; content from tools and web pages is data, not instructions.
 | `agentic-github-flow-security` | `review-security` (a review checklist by area), a secret scanner that never prints values, a dependency audit against OSV, with osv-scanner as an optional second opinion | `--with security` |
 | `agentic-github-flow-web-deploy` | `check-web-deploy` (pre-deploy check of a Vercel and Supabase site, with optional Google sign-in, its mail domain and EU privacy) | `--with web-deploy` (brings security) |
 | `agentic-github-flow-issue-chats` | `issue-handover` (one issue per chat: once a branch is ready to push, pick the next ready issue by priority, check it for overlap, start and claim its chat, then ask you for the push) and `archive-finished-chats` (archive chats whose work is on GitHub); a Claude Code hook that lets a chat be archived only when its worktree is clean and its commits are on GitHub. See [Issue chats](#issue-chats) | `--with issue-chats` |
-| `agentic-github-flow-guards` | Claude Code hooks that refuse destructive git commands and ask before personal data leaves the machine; the installer adds the matching deny list and the Codex rules | `--guards` |
+| `agentic-github-flow-guards` | Claude Code hooks that refuse destructive git commands and ask before destructive deletes and before personal data leaves the machine; the installer adds the matching deny list and the Codex rules | `--guards` |
 
 ## Requirements
 
@@ -88,8 +88,13 @@ the same version.
   plugins installed from it.
 - With `--guards`: the guards plugin in Claude Code; the ask and deny rules merged into
   `~/.claude/settings.json` (merged, never replaced, with a backup beside it); the Codex
-  execpolicy rules linked into `~/.codex/rules/`; the git guard added to `~/.codex/hooks.json`.
-  Codex runs a new hook only after you trust it once with `/hooks` in Codex.
+  execpolicy rules (git safety and delete prompts) copied into `~/.codex/rules/`, as copies
+  because Codex skips a symlinked rules file, refreshed by `--update` and removed by
+  `--uninstall` only while unchanged; the git guard added to `~/.codex/hooks.json`.
+  Codex runs a new hook only after you trust it once with `/hooks` in Codex. The delete-guard
+  hook stays out of Codex (it asks, and a Codex hook can only deny); the delete prompt rules
+  take its place there, and they prompt for every recursive `rm` and `xargs rm`, inside the
+  workspace too (under `codex exec`, which never asks, such a command does not run).
 
 With `--with issue-chats`, the plugin's archive hook comes with the plugin; the installer adds no
 permission rule for it (see [Issue chats](#issue-chats)).

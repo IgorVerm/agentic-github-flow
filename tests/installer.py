@@ -11,8 +11,10 @@ point at them), still in the temporary homes, and checks the plugins they report
 Cases: install over existing files, an idempotent second run, --update after a change in the
 source, --uninstall leaving CLAUDE.md and AGENTS.md byte-identical (or absent when they were),
 a symlinked ~/.codex/AGENTS.md refused before any change, a missing client skipped, --guards
-merging and removing the settings, rules and hook, --with issue-chats installed beside core in
-both clients and kept on a plain rerun, an unknown plugin refused, and an overlay in both blocks.
+merging and removing the settings, rules and hook, the Codex rules as regular copies (refreshed by
+--update, a link of an earlier version replaced, a changed copy left by --uninstall), --with
+issue-chats installed beside core in both clients and kept on a plain rerun, an unknown plugin
+refused, and an overlay in both blocks.
 """
 import json
 import os
@@ -346,6 +348,8 @@ class InstallerTests(unittest.TestCase):
         hooks = json.loads(self.read('.codex', 'hooks.json'))
         command = hooks['hooks']['PreToolUse'][0]['hooks'][0]['command']
         self.assertIn('pre_tool_git_guard.py', command)
+        # the delete guard can only ask, which Codex hooks cannot: it stays out of Codex
+        self.assertNotIn(b'pre_tool_delete_guard.py', self.read('.codex', 'hooks.json'))
         rules = self.path('.codex', 'rules', 'agentic-github-flow-git-safety.rules')
         self.assertTrue(os.path.exists(rules))
         self.assertTrue(any(n.startswith('settings.json.agentic-github-flow-backup-')
@@ -359,6 +363,131 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(after, settings)
         self.assertIsNone(self.read('.codex', 'hooks.json'))
         self.assertFalse(os.path.lexists(rules))
+
+    def rules_copies(self):
+        folder = self.path('.codex', 'rules')
+        return [(os.path.join(folder, 'agentic-github-flow-' + name),
+                 os.path.join(self.source, 'plugins', 'guards', 'policy', name))
+                for name in ('git-safety.rules', 'delete-guard.rules')]
+
+    def test_codex_rules_are_copies_refreshed_and_removed_only_unchanged(self):
+        # Codex skips a symlinked .rules file without a warning: both must be regular copies
+        os.makedirs(self.path('.codex'))
+        code, out = self.install('--guards')
+        self.assertEqual(code, 0, out)
+        (git_copy, git_source), (delete_copy, delete_source) = self.rules_copies()
+        for copy, source in self.rules_copies():
+            self.assertTrue(os.path.isfile(copy) and not os.path.islink(copy), copy)
+            with open(copy, 'rb') as a, open(source, 'rb') as b:
+                self.assertEqual(a.read(), b.read())
+        with open(delete_source, encoding='utf-8') as f:
+            text = f.read()
+        try:
+            with open(delete_source, 'w', encoding='utf-8', newline='\n') as f:
+                f.write(text + '# UPDATED-RULES-MARKER\n')
+            self.sgit('commit', '-q', '-m', 'change the rules', '--',
+                      'plugins/guards/policy/delete-guard.rules')
+            code, out = self.install('--update')
+            self.assertEqual(code, 0, out)
+            with open(delete_copy, 'rb') as f:
+                self.assertIn(b'UPDATED-RULES-MARKER', f.read())
+            self.assertFalse(os.path.islink(delete_copy))
+        finally:
+            with open(delete_source, 'w', encoding='utf-8', newline='\n') as f:
+                f.write(text)
+            self.sgit('commit', '-q', '-m', 'restore the rules', '--',
+                      'plugins/guards/policy/delete-guard.rules')
+        with open(git_copy, 'ab') as f:
+            f.write(b'# a line the user added\n')
+        code, out = self.install('--uninstall')
+        self.assertEqual(code, 0, out)
+        self.assertTrue(os.path.isfile(git_copy), 'a changed copy must stay')
+        self.assertIn('changed since the install', out)
+        self.assertIn('Codex keeps loading it', out)
+        self.assertFalse(os.path.lexists(delete_copy))
+        # a later install recognises the copy it left, keeps the edit, and does not refuse
+        code, out = self.install('--guards')
+        self.assertEqual(code, 0, out)
+        with open(git_copy, 'rb') as f:
+            self.assertIn(b'a line the user added', f.read())
+        self.assertTrue(os.path.isfile(delete_copy))
+
+    def legacy_install(self, content):
+        """An install whose record names the git rules by path alone, as 0.1 wrote it, with
+        content in that copy (0.1 copied the file on Windows) and no delete rules yet."""
+        os.makedirs(self.path('.codex'))
+        code, out = self.install('--guards')
+        self.assertEqual(code, 0, out)
+        (git_copy, _), (delete_copy, _) = self.rules_copies()
+        record = self.path('.agentic-github-flow', '.state', 'install.json')
+        with open(record, encoding='utf-8') as f:
+            state = json.load(f)
+        state['codex_rules'] = git_copy
+        with open(record, 'w', encoding='utf-8') as f:
+            json.dump(state, f)
+        with open(git_copy, 'wb') as f:
+            f.write(content)
+        os.remove(delete_copy)
+
+    def rules_of_0_1(self):
+        r = subprocess.run(['git', '-C', ROOT, 'show',
+                            'd0edd54:plugins/guards/policy/git-safety.rules'],
+                           capture_output=True)
+        if r.returncode != 0:
+            self.skipTest('the 0.1 rules need the history (commit d0edd54)')
+        return r.stdout
+
+    def test_rules_copy_recorded_by_path_alone_is_refreshed_and_removed(self):
+        # 0.1 recorded the git rules by path and copied them on Windows: a copy that still
+        # holds the 0.1 rules is the installer's own
+        self.legacy_install(self.rules_of_0_1())
+        (git_copy, git_source), (delete_copy, _) = self.rules_copies()
+        code, out = self.install('--update')
+        self.assertEqual(code, 0, out)
+        with open(git_copy, 'rb') as a, open(git_source, 'rb') as b:
+            self.assertEqual(a.read(), b.read())
+        self.assertTrue(os.path.isfile(delete_copy))
+        code, out = self.install('--uninstall')
+        self.assertEqual(code, 0, out)
+        self.assertFalse(os.path.lexists(git_copy))
+        self.assertFalse(os.path.lexists(delete_copy))
+
+    def test_edited_rules_copy_recorded_by_path_alone_survives(self):
+        edited = self.rules_of_0_1() + b'# a line the user added\n'
+        self.legacy_install(edited)
+        (git_copy, _), (delete_copy, _) = self.rules_copies()
+        code, out = self.install('--update')
+        self.assertEqual(code, 0, out)
+        self.assertIn('changed since the install', out)
+        with open(git_copy, 'rb') as f:
+            self.assertEqual(f.read(), edited)
+        self.assertTrue(os.path.isfile(delete_copy))
+        code, out = self.install('--uninstall')
+        self.assertEqual(code, 0, out)
+        with open(git_copy, 'rb') as f:
+            self.assertEqual(f.read(), edited)
+        self.assertFalse(os.path.lexists(delete_copy))
+
+    @unittest.skipIf(WINDOWS, 'creating a symlink needs extra rights on Windows')
+    def test_rules_link_of_an_earlier_version_becomes_a_copy(self):
+        os.makedirs(self.path('.codex'))
+        code, out = self.install('--guards')
+        self.assertEqual(code, 0, out)
+        (git_copy, _), _ = self.rules_copies()
+        record = self.path('.agentic-github-flow', '.state', 'install.json')
+        with open(record, encoding='utf-8') as f:
+            state = json.load(f)
+        state['codex_rules'] = git_copy  # the earlier record: one linked file
+        with open(record, 'w', encoding='utf-8') as f:
+            json.dump(state, f)
+        os.remove(git_copy)
+        os.symlink(self.path('.agentic-github-flow', 'plugins', 'guards', 'policy',
+                             'git-safety.rules'), git_copy)
+        os.remove(self.rules_copies()[1][0])
+        code, out = self.install('--guards')
+        self.assertEqual(code, 0, out)
+        for copy, _ in self.rules_copies():
+            self.assertTrue(os.path.isfile(copy) and not os.path.islink(copy), copy)
 
     @unittest.skipIf(WINDOWS, 'creating a symlink needs extra rights on Windows')
     def test_uninstall_does_not_write_through_symlinked_settings(self):

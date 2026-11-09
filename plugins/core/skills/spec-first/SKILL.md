@@ -6,6 +6,8 @@ description: Turn a large or loosely defined request into a written specificatio
 # Specification before large work
 
 Time spent making the specification precise pays back more than time spent watching the build.
+When the work should become several issues that agents pick up one at a time, the
+`requirements` skill runs this as a chat of its own and opens ready issues.
 
 1. Read what already exists for this area: the code, the issue, the design document.
 2. Interview the user. Ask about the hard parts they may not have considered: implementation

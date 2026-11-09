@@ -20,7 +20,8 @@ policy is and which data may go into a prompt, and follow the answer.
   a real problem with the task, say so in a sentence and continue under a stated assumption,
   unless continuing needs something on the ask-first list.
 - **Local, reversible work inside that scope needs no approval:** reading, editing files in your
-  own worktree, running builds and tests, committing, creating branches, worktrees and issues.
+  own worktree, running builds and tests, committing, creating branches, worktrees and issues,
+  commenting on and assigning issues.
 - **Ask the user first for anything outside that,** and prepare it before you ask, so that the
   approval is the last step:
   - what leaves the machine or reaches other people: a push, a pull request, a deployment, a
@@ -32,7 +33,8 @@ policy is and which data may go into a prompt, and follow the answer.
   - changes to these rules, to permission or security settings, to hooks.
 - **When the user describes a problem or asks a question, the deliverable is your assessment.**
   Report what you found; apply a fix when asked for one.
-- **Large work with open requirements starts with a specification:** the `spec-first` skill.
+- **Large work with open requirements starts with a specification:** the `spec-first` skill;
+  `requirements` splits it into ready issues.
 - **Before long or unattended work, write down when it is done:** the end state, the command
   that proves it, and when you stop and report that no defensible way forward is left.
 - **After two failed corrections of the same problem, stop.** Tell the user what you tried and

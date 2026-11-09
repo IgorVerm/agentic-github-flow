@@ -44,6 +44,10 @@ for d in (os.path.join(AS, 'Foo', 'cache'), os.path.join(HOME, 'Library', 'Cache
           SESSION_TMP):
     os.makedirs(d, exist_ok=True)
 subprocess.run(['git', 'init', '-q', REPO], check=True)
+DEEP = os.path.join(HOME, 'a', 'b', 'deep')  # a repository three levels below the home folder
+SCRIPTS = os.path.join(REPO, 'plugins', 'guards', 'scripts')
+os.makedirs(SCRIPTS)
+subprocess.run(['git', 'init', '-q', DEEP], check=True)
 try:
     os.symlink(os.path.join(HOME, 'Library'), os.path.join(REPO, 'liblink'))
     LINK = True
@@ -185,6 +189,22 @@ ASK = [
     ("trap 'rm -rf ~/Library' EXIT", REPO), ('/bin/r[m] -rf ~/Library', REPO),
     ('rm -rf ~/{a,b,c,d,e,f,g,h}{1,2,3,4,5,6,7,8,9}', REPO),
     ("ls | xargs -d '\\n' rm", REPO), ('ls | xargs --unknown-flag rm -rf', REPO),
+    # the third review: a brace expansion over the cap that leads out of the folder
+    ('rm -rf {.,.}{,}{,}{,}{,}{,}{,}/../../../Documents', DEEP),
+    ('rm -rf {a,b}{c,d}{e,f}{g,h}{i,j}{k,l}{m,n}/../../../../Documents', DEEP),
+    ('find {.,.}{,}{,}{,}{,}{,}{,}/../Documents -delete', DEEP),
+    ('find .{.,%s} -delete' % ','.join('a%d' % n for n in range(70)), DEEP),
+    ('rm -rf .{.,%s}' % ','.join('a%d' % n for n in range(70)), DEEP),
+    ('rm -rf ..{%s}' % ','.join('%d' % n for n in range(70)), DEEP),
+    # a cd in a loop or a function
+    ('for i in 1 2 3 4 5 6; do cd ..; done; rm -rf Documents', SCRIPTS),
+    ('for i in 1 2 3 4 5 6; do cd .. && true; done && rm -rf Documents', SCRIPTS),
+    ('f() { cd ..; }; f; f; f; f; f; f; rm -rf Documents', SCRIPTS),
+    ('while true; do cd .. || break; done; rm -rf Documents', SCRIPTS),
+    # xargs options read letter by letter, and options the guard does not know
+    ('ls | xargs -0n 1 -r rm -rf', REPO), ('ls | xargs -rL 1 -- rm -rf', REPO),
+    ('ls | xargs -0P 4 -n1 rm -rf', REPO), ('ls | xargs -tL 1 -r rm -rf', REPO),
+    ('ls | xargs -0n 1 -r sh -c "rm -rf $0"', REPO), ('ls | xargs --max-a 1 -r rm -rf', REPO),
 ]
 if LINK:
     ASK.append(('rm -rf "%s/liblink/"' % R, REPO))

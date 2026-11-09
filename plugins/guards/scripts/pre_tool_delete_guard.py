@@ -58,8 +58,9 @@ command (or a `run_in_terminal` call) that:
   names a delete, takes longer than DEADLINE seconds to judge or blocks in a call (a hung
   mount) past HARD_DEADLINE, after which the hook answers without waiting for it (the hook's
   timeout in hooks.json is 10 s).
-Working folders: a `cd` is trusted for the rest of its list when what follows runs only on
-its success (`cd x && …`, `cd x || exit`). When the list ends (`;`, a newline, `&`), and after
+Working folders: a `cd` in a loop, or anywhere once the command defines a function, makes the
+folder unknown. Otherwise a `cd` is trusted for the rest of its list when what follows runs
+only on its success (`cd x && …`, `cd x || exit`). When the list ends (`;`, a newline, `&`), and after
 any other `cd`, relative paths are judged against both the folder before and the one after
 the `cd`, and the command asks if either is protected (`cd /tmp/x; rm -rf build` from a
 repository passes, `cd /tmp/gone && echo; rm -rf *` from the home folder asks). A subshell's
@@ -133,9 +134,9 @@ WRAPPERS = {'env', 'command', 'builtin', 'exec', 'nohup', 'time', 'sudo', 'doas'
             'pkexec', 'runuser'}
 RUNS = DELETERS | WRAPPERS | SHELLS | {'find', 'xargs', 'eval', 'su'}
 FIND_EXEC = {'-exec', '-execdir', '-ok', '-okdir'}
-# xargs options that take the next word as their value; `-i`, `-l`, `-e`, `--replace`,
-# `--max-lines` and `--eof` take theirs only attached (`-i{}`, `--eof=x`), never the next word
-XARGS_VALUE_OPTS = {'-n', '-I', '-L', '-P', '-s', '-d', '-E', '-J', '-R', '-S', '-a'}
+# xargs long options that take a value (attached with `=` or the next word), and long options
+# without a separate value (`--replace`, `--max-lines`, `--eof` take theirs only attached);
+# short options: xargs_options
 XARGS_LONG_VALUE = {'--max-args', '--max-procs', '--max-chars', '--delimiter', '--arg-file',
                     '--process-slot-var'}
 XARGS_FLAGS = {'-i', '-l', '-e', '--replace', '--max-lines', '--eof', '--null',
@@ -764,15 +765,23 @@ TOO_MANY_BRACES = 'uses a brace expansion of more than %d paths (%%s)' % MAX_BRA
 
 def brace_as_glob(text):
     """For a brace expansion over MAX_BRACES: the text with everything from its first `{` read
-    as a glob (`out/file{1..100}.txt` stays in `out`), or None when an alternative holds `/` or
-    `..` and could lead elsewhere."""
-    for m in re.finditer(r'\{([^{}]*)\}', text):
+    as a glob (`out/file{1..100}.txt` stays in `out`), or None (ask) when the expansion could
+    lead elsewhere: a `/` anywhere from the first `{` on, an alternative holding `..`, or a last
+    path component that could become `.` or `..` (an alternative that is empty or only dots,
+    or literal text in that component that is only dots)."""
+    k = text.find('{')
+    if k < 0 or '/' in text[k:]:
+        return None
+    component = text[text.rfind('/', 0, k) + 1:]
+    for m in re.finditer(r'\{([^{}]*)\}', component):
         inner = m.group(1)
         alternatives = inner.split(',') if ',' in inner else []
-        if '/' in inner or any('..' in a for a in alternatives):
+        if any('..' in a or not a.strip('.') for a in alternatives):
             return None
-    k = text.find('{')
-    return text[:k] + '*' if k >= 0 else None
+    literal = re.sub(r'\{[^{}]*\}', '', component)
+    if literal and not literal.strip('.'):
+        return None
+    return text[:k] + '*'
 
 
 def judge_targets(targets, recursive, state, program):
@@ -926,41 +935,58 @@ def judge_find(words, state):
     return None
 
 
-def xargs_known_option(raw):
-    """True for an xargs option this guard knows, without a separate value."""
-    return (raw in XARGS_FLAGS or re.fullmatch(r'-[0rtxpo]+', raw) is not None
-            or re.fullmatch(r'-[iel].+|-[nILPsdEJRSa].+|--[a-z-]+=.*', raw) is not None)
+def xargs_options(args):
+    """(index of the command xargs runs, sure): its options read letter by letter. A letter in
+    `nILPsdEJRSa` takes the rest of its cluster or the next word, one in `iel` the rest of its
+    cluster; sure is False after an option the guard does not fully know (an abbreviated long
+    option such as `--max-a`, a letter it has no rule for)."""
+    k = 0
+    while k < len(args):
+        raw = args[k].raw()
+        if not raw.startswith('-') or raw == '-':
+            return k, True
+        if raw == '--':
+            return k + 1, True
+        if raw.startswith('--'):
+            stem = raw.split('=', 1)[0]
+            if stem in XARGS_LONG_VALUE:
+                k += 1 if '=' in raw else 2
+            elif stem in XARGS_FLAGS:
+                k += 1
+            else:
+                return k, False
+            continue
+        letters, step = raw[1:], 1
+        for j, ch in enumerate(letters):
+            if ch in 'nILPsdEJRSa':
+                step = 2 if j == len(letters) - 1 else 1
+                break
+            if ch in 'iel':
+                break
+            if ch not in '0rtxpo':
+                return k, False
+        k += step
+    return k, True
 
 
 def judge_xargs(args, state, depth):
-    k, unknown_last = 0, False
-    while k < len(args) and args[k].raw().startswith('-') and args[k].raw() != '-':
-        raw = args[k].raw()
-        if raw == '--':
-            k += 1
-            break
-        if raw in XARGS_VALUE_OPTS or raw in XARGS_LONG_VALUE:
-            k, unknown_last = k + 2, False
-        else:
-            k, unknown_last = k + 1, not xargs_known_option(raw)
-    # the command xargs runs; after an option it does not know, the next word may be it too
-    for start in [k] + ([k + 1] if unknown_last else []):
-        rest = unwrap(args[start:])
-        if not rest:
-            continue
-        name = name_of(rest[0])
-        if name in DELETERS:
-            return ('deletes what xargs hands over (%s): xargs splits paths on spaces, so the '
-                    'targets are not the paths that were listed'
-                    % ' '.join(w.raw() for w in args))
-        if name in SHELLS:
-            return ('hands what xargs reads to a shell (%s), which may run it as commands'
-                    % ' '.join(w.raw() for w in args))
-        if deletes_inside(rest):
-            return ('hands what xargs reads to a program that deletes (%s)'
-                    % ' '.join(w.raw() for w in rest))
+    k, sure = xargs_options(args)
+    named = [name_of(w) for w in args] if not sure else []
     rest = unwrap(args[k:])
-    return judge_command(rest, state, depth + 1) if rest else None
+    if rest and sure:
+        named = [name_of(rest[0])]
+    if DELETERS & set(named):
+        return ('deletes what xargs hands over (%s): xargs splits paths on spaces, so the '
+                'targets are not the paths that were listed' % ' '.join(w.raw() for w in args))
+    if SHELLS & set(named):
+        return ('hands what xargs reads to a shell (%s), which may run it as commands'
+                % ' '.join(w.raw() for w in args))
+    if not rest:
+        return None
+    if deletes_inside(rest):
+        return ('hands what xargs reads to a program that deletes (%s)'
+                % ' '.join(w.raw() for w in rest))
+    return judge_command(rest, state, depth + 1)
 
 
 def shell_script(args, state):
@@ -1225,16 +1251,28 @@ def judge(text, state, depth=0):
             return reason
     saved = []    # (working folders, variables, list start) at each `(`, restored at its `)`
     before = None  # the working folders before the current `&&`/`||` list, once a cd changed them
+    loops = 0      # loops open: a cd in one may run any number of times
+    functions = False  # a function was defined: its cds run wherever it is called
     for k, (words, op) in enumerate(commands):
         if words:
+            first = words[0].raw()
+            if first in ('for', 'while', 'until', 'select'):
+                loops += 1
+            following = commands[k + 1] if k + 1 < len(commands) else ([], '')
+            if first == 'function' or (len(words) == 1 and op == '(' and not following[0]
+                                       and following[1] == ')'):
+                functions = True
             reason = judge_in_each_folder(words, state, depth)
             if reason:
                 return reason
-            following = commands[k + 1][0] if k + 1 < len(commands) else []
             folders = state.folders()
-            if track(words, state, op == '&&' or (op == '||' and bool(following) and
-                                                   following[0].raw() in ('exit', 'return'))):
+            if track(words, state, op == '&&' or (op == '||' and bool(following[0]) and
+                                                   following[0][0].raw() in ('exit', 'return'))):
                 before = folders if before is None else before
+                if loops or functions:
+                    state.set_folders([None])  # where it ends up is unknown
+            if first == 'done':
+                loops = max(0, loops - 1)
         if op in LIST_ENDS and before is not None:
             # the list is over: its cds may not have happened
             state.set_folders(before + state.folders())

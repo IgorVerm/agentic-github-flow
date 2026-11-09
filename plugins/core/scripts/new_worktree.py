@@ -5,7 +5,8 @@ Usage: python3 new_worktree.py <task> [--branch <name>] [--base <ref>] [--no-fet
 
 Run it from the primary checkout of a repository. It fetches origin (unless --no-fetch), then
 creates `../<repo>-worktrees/<task>` on a new branch (default `agent/<task>`) from <base>
-(default: origin's default branch as fetched, else local main or master). It refuses a task that
+(default: the landing branch, the row `landing branch` of HANDOFF.md's `## Landing settings`
+(landing.py), else origin's default branch as fetched, else local main or master). It refuses a task that
 is not a plain name, an existing path or branch, a linked worktree as the starting point, and a
 checkout inside a cloud-synced folder (iCloud Drive, OneDrive, Dropbox, Google Drive), where
 sync clients corrupt git's files. When the repository's post-checkout hook fails, git still
@@ -19,6 +20,9 @@ import re
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from landing import SettingError, landing_setting  # noqa: E402  (owner of the setting)
+
 SYNCED = ('/Library/Mobile Documents/', '/Library/CloudStorage/', '/OneDrive', '/Dropbox/',
           '/Google Drive/', '\\OneDrive', '\\Dropbox\\', '\\Google Drive\\')
 
@@ -28,10 +32,15 @@ def git(*args, cwd=None):
 
 
 def default_base(primary):
-    """origin's default branch as last fetched, else local main or master."""
-    head = git('symbolic-ref', '-q', 'refs/remotes/origin/HEAD', cwd=primary).stdout.strip()
-    candidates = [head, 'refs/remotes/origin/main', 'refs/remotes/origin/master',
-                  'refs/heads/main', 'refs/heads/master']
+    """The landing branch when HANDOFF.md sets one (landing.py), as fetched, else local;
+    otherwise origin's default branch as last fetched, else local main or master."""
+    setting = landing_setting(primary)
+    if setting:
+        candidates = ['refs/remotes/origin/' + setting, 'refs/heads/' + setting]
+    else:
+        head = git('symbolic-ref', '-q', 'refs/remotes/origin/HEAD', cwd=primary).stdout.strip()
+        candidates = [head, 'refs/remotes/origin/main', 'refs/remotes/origin/master',
+                      'refs/heads/main', 'refs/heads/master']
     for ref in candidates:
         if ref and git('rev-parse', '-q', '--verify', ref, cwd=primary).returncode == 0:
             return ref
@@ -101,7 +110,11 @@ def main(argv: list[str]) -> int:
             print('new_worktree: git fetch origin failed: ' + fetched.stderr.strip(),
                   file=sys.stderr)
             return 1
-    base = base or default_base(primary)
+    try:
+        base = base or default_base(primary)
+    except SettingError as e:
+        print(f'new_worktree: {e}', file=sys.stderr)
+        return 2
     if not base:
         print('new_worktree: no base found (origin/HEAD, origin/main, main or master); '
               'pass --base', file=sys.stderr)

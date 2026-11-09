@@ -327,6 +327,67 @@ class Landing(unittest.TestCase):
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
 
 
+class Consumers(unittest.TestCase):
+    """The scripts that count "merged" or start from the default branch follow the setting."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.bare = os.path.join(self.tmp.name, 'origin.git')
+        self.repo = os.path.join(self.tmp.name, 'repo')
+        subprocess.run(['git', 'init', '-q', '--bare', '-b', 'main', self.bare], check=True)
+        os.makedirs(self.repo)
+        for args in (('init', '-q', '-b', 'main'), ('config', 'user.email', 'test@example.com'),
+                     ('config', 'user.name', 'Test')):
+            self.git(*args)
+        with open(os.path.join(self.repo, 'HANDOFF.md'), 'w') as f:
+            f.write(settings([('landing branch', '`editor`')]))
+        self.git('add', '--', 'HANDOFF.md')
+        self.git('commit', '-q', '-m', 'base')
+        self.git('switch', '-q', '-c', 'editor')
+        self.git('commit', '-q', '--allow-empty', '-m', 'editor only')
+        self.editor = self.git('rev-parse', 'HEAD')
+        self.git('switch', '-q', 'main')
+        self.git('remote', 'add', 'origin', self.bare)
+        self.git('push', '-q', 'origin', 'main', 'editor')
+        self.git('fetch', '-q', 'origin')
+        self.git('remote', 'set-head', 'origin', 'main')
+
+    def git(self, *args):
+        r = subprocess.run(['git', '-C', self.repo, *args], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout.strip()
+
+    def module(self, name):
+        sys.path.insert(0, os.path.dirname(TOOL))
+        try:
+            return __import__(name)
+        finally:
+            sys.path.pop(0)
+
+    def test_new_worktree_starts_from_the_landing_branch(self):
+        self.assertEqual(self.module('new_worktree').default_base(self.repo),
+                         'refs/remotes/origin/editor')
+
+    def test_overlap_check_compares_with_the_landing_branch(self):
+        self.assertEqual(self.module('overlap_check').default_base(self.repo),
+                         'refs/remotes/origin/editor')
+
+    def test_cleanup_counts_against_the_landing_branch(self):
+        ref, error = self.module('remove_merged_worktree').default_ref(self.repo, fetch=False)
+        self.assertEqual((ref, error), ('refs/remotes/origin/editor', None))
+        self.assertIn('editor', self.module('remove_merged_worktree').protected_branches(
+            self.repo, ref))
+
+    def test_the_landing_branch_is_never_deleted(self):
+        script = os.path.join(os.path.dirname(TOOL), 'delete_merged_branch.py')
+        r = subprocess.run([sys.executable, script, 'editor', '--dry-run'], cwd=self.repo,
+                           capture_output=True, text=True,
+                           env=dict(os.environ, AGENTIC_GITHUB_FLOW_GH='["false"]'))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn('never deleted', r.stdout)
+
+
 class Copy(unittest.TestCase):
     def test_issue_chats_copy_is_identical(self):
         with open(TOOL, 'rb') as a, open(COPY, 'rb') as b:

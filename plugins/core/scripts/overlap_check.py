@@ -6,7 +6,8 @@ Usage: python3 overlap_check.py [-C <checkout>] (--branch <name> | --paths <path
 
 The ship-change skill runs it with the task branch (`--branch`) right before it proposes the
 push; a chat that picks up an issue can run it with the paths the issue names (`--paths`, and
-`--issue` the issue being picked). <base> is the default branch: `refs/remotes/origin/HEAD` as
+`--issue` the issue being picked). <base> is the landing branch when HANDOFF.md's
+`## Landing settings` names one (landing.py), else the default branch: `refs/remotes/origin/HEAD` as
 last fetched (else origin/main, origin/master), or local main or master in a repository without
 origin. "Unmerged" means not merged into <base>. It lists:
 
@@ -48,6 +49,9 @@ import subprocess
 import sys
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from landing import SettingError, landing_setting  # noqa: E402  (owner of the setting)
+
 GENERIC = {
     "mod.rs", "lib.rs", "main.rs", "build.rs", "__init__.py", "README.md", "SKILL.md",
     "Cargo.toml", "package.json", "index.ts", "index.tsx", "index.js", "index.html",
@@ -86,7 +90,13 @@ def verified(cwd, ref):
 def default_base(cwd):
     """The default branch as a full ref, the way the other scripts of this plugin read it."""
     remotes = git(cwd, "remote").split()
-    if "origin" in remotes:
+    try:
+        setting = landing_setting(cwd)
+    except SettingError as e:
+        raise Usage(f"error: {e}")
+    if setting:  # the landing branch HANDOFF.md names (landing.py)
+        candidates = [("refs/remotes/origin/" if "origin" in remotes else "refs/heads/") + setting]
+    elif "origin" in remotes:
         head = run(["git", "symbolic-ref", "-q", "refs/remotes/origin/HEAD"], cwd).stdout.strip()
         candidates = [head, "refs/remotes/origin/main", "refs/remotes/origin/master"]
     else:

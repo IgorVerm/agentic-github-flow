@@ -118,13 +118,20 @@ def row(text: str | None, name: str) -> str | None:
     return None
 
 
+def landing_setting(path: str = ".") -> str | None:
+    """The row `landing branch` when it is set, else None; SettingError when it is no branch
+    name. The other scripts call this and keep their own default without the row."""
+    value = row(settings_text(path), "landing branch")
+    if value and (value.startswith("-") or
+                  git(path, "check-ref-format", "--branch", value).returncode != 0):
+        raise SettingError(f"`landing branch` in HANDOFF.md is not a branch name: {value!r}")
+    return value
+
+
 def landing_branch(path: str = ".") -> str:
     """The branch work lands on: the setting, else origin's default branch, else main."""
-    value = row(settings_text(path), "landing branch")
+    value = landing_setting(path)
     if value:
-        if git(path, "check-ref-format", "--branch", value).returncode != 0 or \
-                value.startswith("-"):
-            raise SettingError(f"`landing branch` in HANDOFF.md is not a branch name: {value!r}")
         return value
     head = out(path, "symbolic-ref", "-q", "refs/remotes/origin/HEAD") or ""
     if head.startswith("refs/remotes/origin/"):

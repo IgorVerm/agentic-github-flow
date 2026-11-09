@@ -7,7 +7,9 @@ Usage: python3 remove_merged_worktree.py [--dry-run] [--no-fetch]
 
 Run it from the repository's primary checkout, outside the worktrees it removes. Raw
 `git worktree remove` deletes ignored files without asking, so the guards refuse it and this
-script is the agents' way to remove a worktree. Per worktree, every check must hold, otherwise
+script is the agents' way to remove a worktree. "The default branch" below is the landing branch
+when HANDOFF.md's `## Landing settings` names one (landing.py): in local-main mode work is merged
+once the pushed landing branch holds it. Per worktree, every check must hold, otherwise
 the worktree is KEPT and the reasons, files and processes are printed:
 
   merged    its branch tip (or detached HEAD) is in the default branch: origin's after a fetch
@@ -141,6 +143,9 @@ import re
 import shutil
 import subprocess
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from landing import SettingError, landing_setting  # noqa: E402  (owner of the setting)
 
 CACHEDIR_SIGNATURE = b'Signature: 8a477f597d28d172789f06886806bc55'
 PACKAGE_STATE = {'.package-lock.json', '.modules.yaml', '.yarn-state.yml'}
@@ -592,17 +597,29 @@ def worktrees(primary):
 
 
 def default_ref(primary, fetch):
-    """(ref, error): the fetched default branch of origin, else local main/master."""
+    """(ref, error): the fetched default branch of origin, else local main/master; the landing
+    branch instead when HANDOFF.md's `## Landing settings` names one (landing.py)."""
+    try:
+        setting = landing_setting(primary)
+    except SettingError as e:
+        return None, str(e)
     if 'origin' in git(primary, 'remote').stdout.split():
         if fetch:
             result = git(primary, 'fetch', '--quiet', 'origin')
             if result.returncode:
                 return None, 'git fetch origin failed: ' + result.stderr.strip()
+            setting = landing_setting(primary)  # as the fetched default branch holds it now
         head = git(primary, 'symbolic-ref', '-q', 'refs/remotes/origin/HEAD').stdout.strip()
-        for ref in (head, 'refs/remotes/origin/main'):
+        refs = ['refs/remotes/origin/' + setting] if setting else [head, 'refs/remotes/origin/main']
+        for ref in refs:
             if ref and not git(primary, 'rev-parse', '-q', '--verify', ref).returncode:
                 return ref, None
-        return None, 'origin has no default branch (refs/remotes/origin/HEAD or origin/main)'
+        return None, ('origin has no landing branch %s' % setting if setting else
+                      'origin has no default branch (refs/remotes/origin/HEAD or origin/main)')
+    if setting:
+        if not git(primary, 'rev-parse', '-q', '--verify', 'refs/heads/' + setting).returncode:
+            return 'refs/heads/' + setting, None
+        return None, 'no landing branch %s' % setting
     for ref in ('refs/heads/main', 'refs/heads/master'):
         if not git(primary, 'rev-parse', '-q', '--verify', ref).returncode:
             return ref, None

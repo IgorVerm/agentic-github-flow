@@ -54,8 +54,8 @@ policy is and which data may go into a prompt, and follow the answer.
 
 ## Git
 
-Branch protection guards the server; these rules guard the local work it cannot see. Agents
-have destroyed hours of uncommitted work with `reset --hard` and `checkout -- .`.
+These rules guard the local work no server protection sees: agents have destroyed hours of
+uncommitted work with `reset --hard` and `checkout -- .`.
 
 - **Never, unless the user asks for that exact operation:** force-push; delete or move a tag;
   rewrite or discard history (`reset --hard`, rebase, amending a pushed commit, `filter-repo`,
@@ -69,17 +69,18 @@ have destroyed hours of uncommitted work with `reset --hard` and `checkout -- .`
 - **Outside a repository, delete with the system's trash, not `rm -rf`;** a recursive delete
   takes only literal, quoted, absolute paths you listed and checked, never paths built from
   command output.
-- **Work on a branch in a worktree, never on `main`** (the `ship-change` skill makes it).
+- **Work on a branch in a worktree, never directly on `main`.** The `ship-change` skill lands
+  it in the mode it detects: a pull request, or local `main` in one person's unprotected
+  repository.
 - **Commit freely:** small commits of verified work, staged by explicit path
   (`git commit -m "…" -- <paths>`, never `add -A`, `add .`, `add -f` or `commit -a`), the
   subject ending in the issue reference `(#n)`, with a `Co-Authored-By` trailer naming the
   agent. Never commit a file over 50 MB.
-- **Ask before every push.** Prepare the branch, the checks and the pull request text, then ask.
-  On a yes, push your own task branch and open the pull request (the `ship-change` skill). Never
-  push `main` and never merge; mark a draft ready, or merge, only when the user says so for that
-  pull request.
-- **After the merge,** the `cleanup-merged` skill removes the worktree and branch and makes
-  sure the issue is closed.
+- **Ask before every push** (a task branch, or `main` in local-main mode), with the checks and
+  the pull request text prepared. Never merge a pull request or mark a draft ready unless the
+  user says so for that pull request.
+- **After the merge or the push of `main`,** the `cleanup-merged` skill removes the worktree and
+  branch and closes the issue.
 - **Never commit, print or log a secret.** Real configuration lives in ignored `.env` files;
   read key names, not values. If a secret was committed, stop and tell the user the file and the
   commit; it is revoked first.
@@ -94,8 +95,8 @@ have destroyed hours of uncommitted work with `reset --hard` and `checkout -- .`
 ## Work and documents
 
 - **GitHub issues are the work queue.** New work becomes an issue; the agent that starts it says
-  so on the issue. A pull request body may close its issue with a closing keyword, because the
-  merge is the verified publication.
+  so on the issue. A pull request body may close its issue with a closing keyword: the merge is
+  the verified publication.
 - **Agents post under the user's account, so sign every comment** and every issue or pull
   request body with `🤖 <agent> (<role>):`. An unsigned comment is the human's.
 - **Read what the task needs:** the repository's `AGENTS.md` and `HANDOFF.md`, the issue, and

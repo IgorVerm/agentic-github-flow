@@ -18,9 +18,10 @@ The order: `priority: critical`, then `priority: high`, then the rest, oldest fi
 `spread over areas` says yes, the rest goes first from the areas no running chain works in yet:
 an area is taken when an open issue with its label is assigned (the claim) and its newest claim
 or hand-off comment, right after the signature `🤖 <agent> (<role>):`, is a claim (`claimed for
-chat`), not `ready to push:` or `pull request opened:`. A chat whose branch waits for the push,
-or whose pull request waits for review, no longer works in the area; its issue stays assigned
-until the merge closes it. Critical and high stay first even in a taken area; an issue counts as
+chat`), not `ready to push:`, `pull request opened:` or, in local-main mode, `landed on local
+<branch> at`. A chat whose branch waits for the push, whose pull request waits for review, or
+whose work landed on local main and waits for the push of it, no longer works in the area; its
+issue stays assigned until the merge or the verified push closes it. Critical and high stay first even in a taken area; an issue counts as
 in a free area when it has one of the spread-over area labels and none of them is taken; then all
 others, oldest first, so with every area taken the order is the normal one. An area without
 ready work is simply absent. With `--area` (a chain limited to one area), `--no-spread`, or the
@@ -44,9 +45,11 @@ LIMIT = "1000"
 TICKED = re.compile(r"`([^`]+)`")
 SECTION = re.compile(r"^## Issue chats settings[ \t]*$(.*?)(?=^## |\Z)", re.M | re.S)
 # A claim or hand-off comment: the signature, then the fixed opening the skill issue-handover
-# gives it (claim, ready to push, pull request opened), optionally in bold.
+# gives it (claim, ready to push, pull request opened, landed on local <branch> at), optionally
+# in bold.
 MARK = re.compile(r"\A\s*\N{ROBOT FACE}[^\n]*?\):\s*(?:\*\*)?"
-                  r"(claimed for chat\b|ready to push:|pull request opened:)", re.IGNORECASE)
+                  r"(claimed for chat\b|ready to push:|pull request opened:|landed on local \S+ at\b)",
+                  re.IGNORECASE)
 
 
 class Unread(Exception):
@@ -138,7 +141,8 @@ def normal_order(ready: list[dict]) -> list[dict]:
 
 def handed_off(comments: list[dict]) -> bool:
     """Whether the newest claim or hand-off comment (oldest first in <comments>) is a hand-off:
-    the branch is ready to push or its pull request is open, so no chat works there now."""
+    the branch is ready to push, its pull request is open, or it landed on local main, so no
+    chat works there now."""
     last = None
     for c in comments:
         m = MARK.match(c.get("body") or "")

@@ -5,7 +5,8 @@ Usage: python3 chat_archivable.py <worktree path> [--no-fetch]
 
 Archiving a chat in the Claude Code desktop app removes the worktree the app made for it, and a
 chat whose work is only on this machine must not leave the sidebar, so the answer is "ok" only
-when nothing in the worktree can be lost and every commit of it is on GitHub:
+when nothing in the worktree can be lost and every commit of it is on GitHub, or, in local-main
+mode, on the local landing branch:
 
   ok        the worktree is gone already; or it is the top of its own git worktree and clean (no
             tracked change, no untracked file in any directory whatever status.showUntrackedFiles
@@ -13,7 +14,10 @@ when nothing in the worktree can be lost and every commit of it is on GitHub:
             outside a sparse checkout, skip-worktree, no git operation in progress; ignored
             files are build output), and its HEAD is in a remote-tracking branch of origin
             after a fetch: the default branch (`refs/remotes/origin/HEAD`, else origin/main,
-            origin/master) or the branch's own `origin/<branch>` (pushed by ship-change)
+            origin/master), the landing branch HANDOFF.md names, or the branch's own
+            `origin/<branch>` (pushed by ship-change)
+  ok        in local-main mode (landing.py beside this file, asked only then): clean as above,
+            and its HEAD is in the local landing branch, where the landing put it
   keep: ... the reason, one line (not a worktree of its own, for example a folder whose .git
             link is missing inside another checkout; changes, untracked or hidden files, a git
             operation in progress, no remote origin, commits that are not on GitHub); the chat
@@ -33,9 +37,13 @@ import os
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import landing  # noqa: E402  (beside this file: the landing mode and branch)
+
 OPERATIONS = ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply",
               "BISECT_LOG")
 FETCH_TIMEOUT_S = 25  # archive_guard.py waits at most 40 s for the whole check
+GH_TIMEOUT_S = 6  # per GitHub call of the landing-mode check, which runs only for local landings
 
 
 def git(wt: str, *args: str, timeout: int = 30) -> subprocess.CompletedProcess:
@@ -67,6 +75,28 @@ def hidden_paths(wt: str) -> list[str] | None:
     return hidden
 
 
+def landed_locally(wt: str, head: str) -> str | None:
+    """The ok line when HEAD is in the local landing branch and the repository lands on local
+    main (landing.py beside this file decides); else None. Asked only when GitHub does not hold
+    HEAD, so the GitHub calls run only for a chat whose work landed locally."""
+    landing.TIMEOUT_S = GH_TIMEOUT_S
+    try:
+        branch = landing.landing_branch(wt)
+    except landing.SettingError:
+        return None
+    ref = f"refs/heads/{branch}"
+    if not out(wt, "rev-parse", "-q", "--verify", ref + "^{commit}") or \
+            git(wt, "merge-base", "--is-ancestor", head, ref).returncode != 0:
+        return None
+    try:
+        mode, _, checks = landing.decide(wt)
+    except landing.SettingError:
+        return None
+    if mode != landing.LOCAL:
+        return None
+    return f"ok (clean, HEAD {head[:8]} landed on local {branch}; local-main mode)"
+
+
 def verdict(wt: str, fetch: bool = True) -> tuple[int, str]:
     if not os.path.lexists(wt):
         return 0, "ok (worktree gone)"
@@ -92,7 +122,13 @@ def verdict(wt: str, fetch: bool = True) -> tuple[int, str]:
     if hidden:
         return 1, (f"keep: {len(hidden)} path(s) hidden from git status (assume-unchanged or "
                    f"skip-worktree), e.g. {hidden[0]}")
+    head = out(wt, "rev-parse", "--verify", "HEAD")
+    if not head:
+        return 1, "keep: HEAD does not resolve"
     if "origin" not in (out(wt, "remote") or "").split():
+        local = landed_locally(wt, head)
+        if local:
+            return 0, local
         return 1, "keep: no remote origin, so nothing of this worktree is on GitHub"
     note = ""
     if fetch:
@@ -103,13 +139,15 @@ def verdict(wt: str, fetch: bool = True) -> tuple[int, str]:
             failed = f"timed out after {FETCH_TIMEOUT_S} s"
         if failed:
             note = f"; fetch failed ({failed}): refs as last fetched"
-    head = out(wt, "rev-parse", "--verify", "HEAD")
-    if not head:
-        return 1, "keep: HEAD does not resolve"
     candidates = []
     default = out(wt, "symbolic-ref", "-q", "refs/remotes/origin/HEAD")
     candidates += [default] if default else []
     candidates += ["refs/remotes/origin/main", "refs/remotes/origin/master"]
+    try:
+        setting = landing.landing_setting(wt)
+    except landing.SettingError as e:
+        return 1, f"keep: {e}"
+    candidates += [f"refs/remotes/origin/{setting}"] if setting else []
     branch = out(wt, "symbolic-ref", "-q", "--short", "HEAD")
     if branch:
         candidates.append(f"refs/remotes/origin/{branch}")
@@ -121,6 +159,9 @@ def verdict(wt: str, fetch: bool = True) -> tuple[int, str]:
         if git(wt, "merge-base", "--is-ancestor", head, ref).returncode == 0:
             short = ref[len("refs/remotes/"):]
             return 0, f"ok (clean, HEAD {head[:8]} in {short}{note})"
+    local = landed_locally(wt, head)
+    if local:
+        return 0, local
     if not seen:
         return 1, ("keep: no remote-tracking branch to compare with (origin/HEAD, origin/main, "
                    f"origin/master{', origin/' + branch if branch else ''}){note}")

@@ -5,9 +5,10 @@ python3 tests/chat_archivable.py.
 The repository has a bare origin whose default branch is main, and worktrees in each state a
 finished chat can leave behind. Every "keep" case is a way archiving a chat could lose work or
 take work off the sidebar that is only on this machine (changes, untracked files, a merge in
-progress, commits never pushed, no origin at all); every "ok" case is a finished chat that would
+progress, commits never pushed, a local landing in pull-request mode); every "ok" case is a finished chat that would
 otherwise clutter the sidebar for good (the worktree gone, HEAD in the default branch, the
-branch pushed, a merge on GitHub seen only after the fetch). Offline: origin is a local folder.
+branch pushed, a merge on GitHub seen only after the fetch, a landing on local main in local-main
+mode, with the setting or without a remote). Offline: origin is a local folder.
 """
 import os
 import shutil
@@ -179,11 +180,50 @@ class ChatArchivable(unittest.TestCase):
                        env=self.env)  # conflicts on f.txt
         self.assertKeep(wt, 'in progress (MERGE_HEAD)')
 
-    def test_no_origin_keeps(self):
+    def test_no_origin_lands_on_local_main(self):
+        # without a remote the repository lands on local main (landing.py rule 2): landed work
+        # may leave the sidebar, unlanded work keeps its chat
         lone = os.path.join(self.root, 'lone')
         self.git(self.root, 'init', '-q', '-b', 'main', lone)
         self.git(lone, 'commit', '-q', '--allow-empty', '-m', 'x')
-        self.assertKeep(lone, 'no remote origin')
+        self.assertIn('landed on local main', self.assertOk(lone))
+        wt = os.path.join(self.root, 'lone-worktrees', 'task')
+        self.git(lone, 'worktree', 'add', '-q', '-b', 'agent/task', wt, 'main')
+        self.git(wt, 'commit', '-q', '--allow-empty', '-m', 'unlanded')
+        self.assertKeep(wt, 'no remote origin')
+        self.git(lone, 'merge', '-q', '--ff-only', 'agent/task')
+        self.assertIn('landed on local main', self.assertOk(wt))
+
+    def test_local_main_setting(self):
+        # a landing on local main that is not pushed yet: ok only in local-main mode
+        origin = os.path.join(self.root, 'lm-origin.git')
+        repo = os.path.join(self.root, 'lm')
+        self.git(self.root, 'init', '-q', '--bare', '-b', 'main', origin)
+        self.git(self.root, 'init', '-q', '-b', 'main', repo)
+        self.git(repo, 'remote', 'add', 'origin', origin)
+        with open(os.path.join(repo, 'HANDOFF.md'), 'w') as f:
+            f.write('# H\n\n## Landing settings\n\n| Setting | Value |\n|---|---|\n'
+                    '| landing | `local main` |\n')
+        self.git(repo, 'add', 'HANDOFF.md')
+        self.git(repo, 'commit', '-q', '-m', 'init')
+        self.git(repo, 'push', '-q', 'origin', 'main')
+        self.git(repo, 'fetch', '-q', 'origin')
+        self.git(repo, 'remote', 'set-head', 'origin', 'main')
+        wt = os.path.join(self.root, 'lm-worktrees', 'task')
+        self.git(repo, 'worktree', 'add', '-q', '-b', 'agent/task', wt, 'main')
+        self.git(wt, 'commit', '-q', '--allow-empty', '-m', 'work')
+        self.assertKeep(wt, 'not on GitHub')
+        self.git(repo, 'merge', '-q', '--ff-only', 'agent/task')
+        self.assertIn('landed on local main', self.assertOk(wt))
+        with open(os.path.join(repo, 'HANDOFF.md'), 'w') as f:
+            f.write('# H\n')
+        self.git(repo, 'commit', '-q', '-am', 'auto: a folder remote is not GitHub, so PR')
+        self.git(repo, 'push', '-q', 'origin', 'main')
+        wt2 = os.path.join(self.root, 'lm-worktrees', 'task2')
+        self.git(repo, 'worktree', 'add', '-q', '-b', 'agent/task2', wt2, 'main')
+        self.git(wt2, 'commit', '-q', '--allow-empty', '-m', 'work')
+        self.git(repo, 'merge', '-q', '--ff-only', 'agent/task2')
+        self.assertKeep(wt2, 'not on GitHub')
 
     def test_not_a_worktree_and_usage(self):
         plain = os.path.join(self.root, 'plain')

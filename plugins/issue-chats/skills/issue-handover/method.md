@@ -3,7 +3,7 @@
 A method for a repository whose work is its GitHub issues: each chat takes one ready issue,
 claims it, works on its own branch in a new worktree until the branch is ready to push, picks
 the next ready issue, starts the chat for it, and archives itself once the user has said push
-and its work is on GitHub. Several such chains run at once, at most five (§1). *The guide*
+and its work is on GitHub, or, in local-main mode, once its work has landed on local main. Several such chains run at once, at most five (§1). *The guide*
 below is Anthropic's <https://code.claude.com/docs/en/best-practices>, cited by section.
 
 This file owns the method, the repository settings, the chat title form and the limit of five
@@ -22,6 +22,14 @@ the user's word for that pull request. So a chat's task ends when its branch is 
 not when it is merged; the chat hands over without waiting for the push, and it leaves the
 sidebar only once its commits are on GitHub.
 
+**In local-main mode** (the core plugin's `landing.py` decides per repository, `ship-change`
+step 1): a chat's task ends when its work has *landed* on the local landing branch (the
+`ship-change` skill's `local-main.md`, §1, or §2 where an agent that did not write it reviews and
+lands it). The chat records the landing, hands over and archives itself in that same turn: its
+commits are on local main, where the primary checkout keeps them, so the archive loses nothing.
+The push of the landing branch stays the user's word, given in any chat (`local-main.md` §5);
+its cleanup closes the landed issues.
+
 ## 1. The settings section switches it on
 
 A repository works by this method when its `HANDOFF.md` has a section `## Issue chats settings`.
@@ -30,8 +38,9 @@ like any other, merged by the people who decide for the repository, and it appli
 
 That section is also the **standing permission** for the repository: a chat picks and claims
 the next ready issue, starts the chat for it and archives chats that pass the worktree check,
-without asking again. It never covers a push, a merge or marking a pull request ready: those
-stay on the user's word for each pull request. Deleting the section switches all of it off.
+without asking again, and in local-main mode lands the chat's work on local main (local work).
+It never covers a push, a merge or marking a pull request ready: those stay on the user's word
+for each push and each pull request. Deleting the section switches all of it off.
 
 The skills read their values from it; a row left out takes its default:
 
@@ -53,14 +62,15 @@ The skills read their values from it; a row left out takes its default:
 
 **Chains at once is not a repository setting:** at most five issue chats work at the same time
 in a repository, counted with those already working. A chat whose branch waits for the push,
-or whose pull request waits for review, no longer counts.
+whose pull request waits for review, or whose work landed on local main no longer counts.
 
 **Spreading over areas.** With `spread over areas` set to yes, a chain that picks prefers the
 most important ready issue from an area no working chat is in yet. An area is taken while an
 open issue with its label is assigned (the claim) and its newest claim or hand-off comment
-(right after the signature: `claimed for chat`, `ready to push:` or `pull request opened:`,
-skill `issue-handover`) is a claim. An issue whose branch is ready to push stays assigned until
-the merge closes it, but no chat works on it any more. `priority: critical` and
+(right after the signature: `claimed for chat`, `ready to push:`, `pull request opened:` or
+`landed on local <branch> at`, skill `issue-handover`) is a claim. An issue whose branch is ready
+to push, or whose work landed on local main, stays assigned until the merge or the verified push
+closes it, but no chat works on it any more. `priority: critical` and
 `priority: high` still go first, even in a taken area. An issue counts as in a free area when it
 carries one of the listed labels and none of them is taken. When every area with ready work is
 taken, the pick is the normal one; an area without ready work is skipped, never waited on. A
@@ -101,9 +111,10 @@ goes once its worktree passes the worktree check.
 
 ## 3. One issue, one chat
 
-1. **A task is one issue, ready to push:** committed, reviewed by an agent that did not write it
-   where `ship-change` asks for that, the overlap check run, the checks green, the pull request
-   text prepared (`ship-change` steps 1 to 5). It runs in its own chat, which starts with an
+1. **A task is one issue, ready to push or, in local-main mode, landed:** committed, reviewed by
+   an agent that did not write it where `ship-change` asks for that, the overlap check run, the
+   checks green, the pull request text prepared (`ship-change` steps 1 to 5), or in local-main
+   mode the work landed (`local-main.md` §1 or §2). It runs in its own chat, which starts with an
    empty context. Unrelated work never shares a chat (the guide, *Manage context aggressively*,
    *The kitchen sink session*). Inside the task the context may grow; at the context limit the
    chat finishes the step it is on and hands over instead of starting a new step.
@@ -157,12 +168,15 @@ Each issue chat runs this:
    5. **The requirements stop:** a task that turns out to have open requirements is not built
       (§3 item 4).
 2. **Work:** the one task, with its check, to a branch ready to push (`ship-change` steps 1 to
-   5, the overlap check included), in the foreground of the turn the start brief began.
+   5, the overlap check included), or in local-main mode landed on local main, in the
+   foreground of the turn the start brief began.
 3. **Hand over** (skill `issue-handover`), in that same turn: comment `ready to push:` on the
    issue (it stays open and assigned until the merge closes it); pick the next ready issue
    (`next_issue.py`) and run the overlap check on its paths; start the next chat on the
    settings' model and effort, claim its issue and hand it a complete brief; then ask the user
-   for the push of this chat's branch (`ship-change` step 6) and end the turn.
+   for the push of this chat's branch (`ship-change` step 6) and end the turn. In local-main
+   mode the comment opens `landed on local <branch> at <commit>`, the chat tells the user what
+   landed in place of asking for a push, and archives itself (item 4 does not apply).
 4. **Push and leave:** when the user says yes, in a later turn, the chat pushes and opens the
    pull request (`ship-change` step 7), comments `pull request opened: #<n>` on the issue,
    checks that its worktree passes the worktree check and archives itself. Without a yes it
@@ -174,7 +188,9 @@ is not this chat's child: archiving this chat does not take it along and nothing
 (a session that `start_session` starts hangs under its starter until detached, and archiving a
 session also archives its finished side sessions). Archiving removes the chat's app-made
 worktree, so the worktree check comes right before it, and the check passes only once the
-branch is on GitHub: a chat whose work exists only on this machine never leaves the sidebar.
+branch is on GitHub: a chat whose work exists only in its worktree never leaves the sidebar. In
+local-main mode it passes once the work is on the local landing branch, which the archive does
+not touch.
 
 ### The next chat starts in the background
 
@@ -332,5 +348,6 @@ That chat runs `issue-handover` steps 3 and 5 once per chain: pick, check the ov
 claim, brief. With `spread over areas` on, each claim takes its area before the next pick, so
 the chains start one per area with the most important ready work (critical and high first).
 From then on every chat starts its successor itself; the user reads along in the sidebar section
-and says push in each chat whose branch is ready. New work whose requirements are open is not
+and says push in each chat whose branch is ready; in local-main mode they say push of the
+landing branch in any chat when they want the landings published. New work whose requirements are open is not
 started: it gets the requirements label and a requirements chat (skill `requirements`).

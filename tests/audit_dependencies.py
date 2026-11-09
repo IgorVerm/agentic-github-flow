@@ -708,11 +708,11 @@ class OsvScannerTests(unittest.TestCase):
         self.assertNotIn('Traceback', r.stderr)
 
     def test_reachability_runs_on_linux_only(self):
-        with self.fake(), unittest.mock.patch.object(audit.sys, 'platform', 'darwin'):
+        with self.fake(), unittest.mock.patch.object(audit, 'PLATFORM', 'darwin'):
             answer = audit.run_osv_scanner(self.repo, True)
         self.assertNotIn('--call-analysis=rust', self.calls()[-1])
         self.assertIn('reads ELF binaries only', answer['notes'][0])
-        with self.fake(), unittest.mock.patch.object(audit.sys, 'platform', 'linux'):
+        with self.fake(), unittest.mock.patch.object(audit, 'PLATFORM', 'linux'):
             answer = audit.run_osv_scanner(self.repo, True)
         self.assertIn('--call-analysis=rust', self.calls()[-1])
         self.assertEqual(answer['notes'], [])

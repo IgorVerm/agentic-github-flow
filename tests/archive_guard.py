@@ -90,7 +90,7 @@ def bash(uid: str, text: str, ts: str) -> list[dict]:
 
 def run(tmp: str, name: str, records: list[dict], target, extra: dict | None = None,
         raw: str | None = None, sub: bool = False) -> int:
-    d = os.path.join(tmp, name.replace(" ", "_").replace("/", "_"))
+    d = os.path.join(tmp, re.sub(r"[^A-Za-z0-9._-]", "_", name))  # no ":" and the like (Windows)
     os.makedirs(os.path.join(d, SID, "subagents"))
     tpath = os.path.join(d, SID, "subagents", "agent-x.jsonl") if sub else os.path.join(d, SID + ".jsonl")
     with open(tpath, "w") as fh:

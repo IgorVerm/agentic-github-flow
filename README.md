@@ -87,9 +87,12 @@ the same version.
   plugins installed from it.
 - With `--guards`: the guards plugin in Claude Code; the ask and deny rules merged into
   `~/.claude/settings.json` (merged, never replaced, with a backup beside it); the Codex
-  execpolicy rules linked into `~/.codex/rules/`; the git guard added to `~/.codex/hooks.json`.
-  Codex runs a new hook only after you trust it once with `/hooks` in Codex. The delete guard
-  stays out of Codex: it asks rather than denies, and a Codex hook can only deny.
+  execpolicy rules (git safety and delete prompts) copied into `~/.codex/rules/`, as copies
+  because Codex skips a symlinked rules file, refreshed by `--update` and removed by
+  `--uninstall` only while unchanged; the git guard added to `~/.codex/hooks.json`.
+  Codex runs a new hook only after you trust it once with `/hooks` in Codex. The delete-guard
+  hook stays out of Codex (it asks, and a Codex hook can only deny); the delete prompt rules
+  take its place there.
 
 If `~/.claude/CLAUDE.md` or `~/.codex/AGENTS.md` is a symlink, the installer stops before
 changing anything and explains: writing through the link would change the file it points to.

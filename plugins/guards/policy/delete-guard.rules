@@ -1,0 +1,88 @@
+# Delete prompts for Codex (execpolicy), from agentic-github-flow. Owner of the rule: the core
+# rules (rules/core.md §Git): "Outside a repository, delete with the system's trash, not
+# `rm -rf`". A guarded delete asks and runs on the user's approval; nothing is forbidden.
+# The installer copies it into ~/.codex/rules/ with --guards: a copy, never a symlink, because
+# Codex skips a symlinked .rules file without a warning. Test: python3 tests/codex_policy.py.
+#
+# This is Codex's share of the delete guard: the delete-guard hook (pre_tool_delete_guard.py)
+# can only ask, and a Codex hook can only deny, so Codex gets these prompt rules instead. They add
+# what Codex's own check of `rm -f` leaves: recursive deletes without -f, and `xargs … rm`.
+# A prompt reaches the user only where Codex can ask (an approval policy other than "never";
+# `codex exec` runs with "never", so a prompted command does not run there). Codex's sandbox
+# (workspace-write) is the layer for writes outside the workspace.
+# Prefix rules see only the start of a command, and only when Codex can split the script into
+# plain words. The flag lists below are every cluster of r or R with up to two of f, v, i, I, d,
+# and common xargs flags; tests/codex_policy.py pins examples of what stays unseen (DELETE_GAPS).
+
+RECURSIVE = [
+    "-IR", "-IRd", "-IRf", "-IRi", "-IRv", "-IdR", "-Idr", "-IfR", "-Ifr", "-IiR", "-Iir", "-Ir",
+    "-Ird", "-Irf", "-Iri", "-Irv", "-IvR", "-Ivr", "-R", "-RI", "-RId", "-RIf", "-RIi", "-RIv",
+    "-Rd", "-RdI", "-Rdf", "-Rdi", "-Rdv", "-Rf", "-RfI", "-Rfd", "-Rfi", "-Rfv", "-Ri", "-RiI",
+    "-Rid", "-Rif", "-Riv", "-Rv", "-RvI", "-Rvd", "-Rvf", "-Rvi", "-dIR", "-dIr", "-dR", "-dRI",
+    "-dRf", "-dRi", "-dRv", "-dfR", "-dfr", "-diR", "-dir", "-dr", "-drI", "-drf", "-dri", "-drv",
+    "-dvR", "-dvr", "-fIR", "-fIr", "-fR", "-fRI", "-fRd", "-fRi", "-fRv", "-fdR", "-fdr", "-fiR",
+    "-fir", "-fr", "-frI", "-frd", "-fri", "-frv", "-fvR", "-fvr", "-iIR", "-iIr", "-iR", "-iRI",
+    "-iRd", "-iRf", "-iRv", "-idR", "-idr", "-ifR", "-ifr", "-ir", "-irI", "-ird", "-irf", "-irv",
+    "-ivR", "-ivr", "-r", "-rI", "-rId", "-rIf", "-rIi", "-rIv", "-rd", "-rdI", "-rdf", "-rdi",
+    "-rdv", "-rf", "-rfI", "-rfd", "-rfi", "-rfv", "-ri", "-riI", "-rid", "-rif", "-riv", "-rv",
+    "-rvI", "-rvd", "-rvf", "-rvi", "-vIR", "-vIr", "-vR", "-vRI", "-vRd", "-vRf", "-vRi", "-vdR",
+    "-vdr", "-vfR", "-vfr", "-viR", "-vir", "-vr", "-vrI", "-vrd", "-vrf", "-vri", "--recursive"
+    ]
+
+FIRST = [
+    "-f", "-v", "-i", "-I", "-d", "-fv", "-vf", "--force", "--verbose", "--interactive"
+    ]
+
+XARGS = [
+    "-0", "-r", "-t", "-x", "-p", "-0r", "-r0", "-0t", "-t0", "-rt", "-tr", "--null",
+    "--no-run-if-empty", "--verbose", "-n", "-L", "-I", "-P", "-n1", "-L1", "-I{}", "-I%", "{}",
+    "%", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "16", "20", "32", "50", "64", "100"
+    ]
+
+prefix_rule(
+    pattern = [["rm", "/bin/rm"], RECURSIVE],
+    decision = "prompt",
+    justification = "Recursive delete: the user approves it, or use the system's trash (rules/core.md §Git).",
+    match = ["rm -r build", "rm -R x", "rm -rf x", "/bin/rm -fr x", "rm --recursive x", "rm -Rfv x", "rm -iR x", "rm -dr x"],
+    not_match = ["rm a.txt", "rm -f a.txt", "rmdir x", "trash x"],
+)
+
+prefix_rule(
+    pattern = [["rm", "/bin/rm"], FIRST, RECURSIVE],
+    decision = "prompt",
+    justification = "Recursive delete: the user approves it, or use the system's trash (rules/core.md §Git).",
+    match = ["rm -f -r x", "rm -v -rf x", "rm --force --recursive x", "rm -i -R x"],
+    not_match = ["rm -f a.txt", "rm -f -- -r"],
+)
+
+prefix_rule(
+    pattern = ["xargs", ["rm", "/bin/rm"]],
+    decision = "prompt",
+    justification = "xargs hands computed paths to rm: the user approves it (rules/core.md §Git).",
+    match = ["xargs rm", "xargs rm -rf", "xargs /bin/rm -f"],
+    not_match = ["xargs grep x", "xargs trash"],
+)
+
+prefix_rule(
+    pattern = ["xargs", XARGS, ["rm", "/bin/rm"]],
+    decision = "prompt",
+    justification = "xargs hands computed paths to rm: the user approves it (rules/core.md §Git).",
+    match = ["xargs -0 rm -f", "xargs -n1 rm -rf", "xargs -0r rm", "xargs -I% rm %"],
+    not_match = ["xargs -0 grep x"],
+)
+
+prefix_rule(
+    pattern = ["xargs", XARGS, XARGS, ["rm", "/bin/rm"]],
+    decision = "prompt",
+    justification = "xargs hands computed paths to rm: the user approves it (rules/core.md §Git).",
+    match = ["xargs -n 1 rm -rf", "xargs -n 2 rm", "xargs -P 4 rm", "xargs -I {} rm {}"],
+    not_match = ["xargs -n 1 grep x"],
+)
+
+prefix_rule(
+    pattern = ["xargs", XARGS, XARGS, XARGS, ["rm", "/bin/rm"]],
+    decision = "prompt",
+    justification = "xargs hands computed paths to rm: the user approves it (rules/core.md §Git).",
+    match = ["xargs -0 -n 1 rm -f", "xargs -0 -I {} rm {}"],
+    not_match = ["xargs -0 -n 1 grep x"],
+)

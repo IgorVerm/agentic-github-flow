@@ -18,8 +18,11 @@ What it does, per client (Claude Code, Codex):
 - Plugins: registers this clone as the `agentic-github-flow` marketplace and installs the core
   plugin, plus those named with --with (web-deploy brings security).
 - Guards (--guards): the guards plugin (Claude hooks), the ask and deny lists merged into
-  ~/.claude/settings.json (a backup is kept), the Codex execpolicy rules linked into
-  ~/.codex/rules/ and the git guard added to ~/.codex/hooks.json.
+  ~/.claude/settings.json (a backup is kept), the Codex execpolicy rules (git safety and delete
+  prompts) copied into ~/.codex/rules/ and the git guard added to ~/.codex/hooks.json. The rules
+  are copies, never links, because Codex skips a symlinked .rules file without a warning;
+  --update refreshes a copy and --uninstall removes it only while it is unchanged since the
+  installer wrote it (a link left by an earlier version is replaced).
 - Overlays (--overlay): a folder with an AGENTS.md, or a git URL cloned into overlays/ here
   (a second URL with the same name gets a suffix); their text follows the core rules in both
   blocks.
@@ -366,19 +369,57 @@ def guard_command():
     return '"%s" "%s"' % (sys.executable, script)
 
 
+CODEX_RULES = (('git-safety.rules', 'agentic-github-flow-git-safety.rules'),
+               ('delete-guard.rules', 'agentic-github-flow-delete-guard.rules'))
+
+
+def file_hash(path):
+    try:
+        with open(path, 'rb') as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        return None
+
+
+def rules_targets():
+    """[(source, target)] for the Codex rules files."""
+    folder = os.path.join(codex_dir(), 'rules')
+    return [(os.path.join(CLONE, 'plugins', 'guards', 'policy', name), os.path.join(folder, copy))
+            for name, copy in CODEX_RULES]
+
+
+def rules_record(state):
+    """{target: sha256 of the copy this installer wrote}. An earlier version recorded one
+    linked file by its path alone."""
+    record = state.get('codex_rules') or {}
+    return {record: None} if isinstance(record, str) else dict(record)
+
+
+def own_rules_file(target, source, digest):
+    """True when the installer may replace or remove target: its own link from an earlier
+    version, or a copy unchanged since it was written (or equal to the source)."""
+    if os.path.islink(target):
+        return os.path.realpath(target) == os.path.realpath(source)
+    current = file_hash(target)
+    return current is not None and current in (digest, file_hash(source))
+
+
 def codex_guards(state):
-    rules_dir = os.path.join(codex_dir(), 'rules')
-    target = os.path.join(rules_dir, 'agentic-github-flow-git-safety.rules')
-    source = os.path.join(CLONE, 'plugins', 'guards', 'policy', 'git-safety.rules')
-    os.makedirs(rules_dir, exist_ok=True)
-    if os.path.lexists(target):
-        os.remove(target)
-    if WINDOWS:
+    # Copies, never links: Codex skips a symlinked .rules file without a warning.
+    record, copied = rules_record(state), {}
+    for source, target in rules_targets():
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        if os.path.lexists(target) and not own_rules_file(target, source, record.get(target)):
+            say('skip', 'codex: %s changed since the install; left as it is (remove or replace '
+                        'it by hand to get the current rules)' % target)
+            copied[target] = record.get(target)
+            continue
+        if os.path.lexists(target):
+            os.remove(target)
         shutil.copyfile(source, target)
-    else:
-        os.symlink(source, target)
-    state['codex_rules'] = target
-    say('ok', 'codex: execpolicy rules %s at %s' % ('copied' if WINDOWS else 'linked', target))
+        copied[target] = file_hash(target)
+        say('ok', 'codex: execpolicy rules copied to %s' % target)
+    state['codex_rules'] = copied
 
     path = os.path.join(codex_dir(), 'hooks.json')
     data = load_json(path)
@@ -403,12 +444,12 @@ def codex_guards(state):
 
 
 def remove_codex_guards(state):
-    target = state.get('codex_rules')
-    source = os.path.join(CLONE, 'plugins', 'guards', 'policy', 'git-safety.rules')
-    if target and os.path.lexists(target):
-        ours = (os.path.islink(target) and os.path.realpath(target) == os.path.realpath(source)) \
-            or (not os.path.islink(target) and read_text(target) == read_text(source))
-        if ours:
+    sources = {os.path.basename(t): s for s, t in rules_targets()}
+    for target, digest in rules_record(state).items():
+        if not os.path.lexists(target):
+            continue
+        source = sources.get(os.path.basename(target), '')
+        if own_rules_file(target, source, digest):
             os.remove(target)
             say('ok', 'codex: removed %s' % target)
         else:
@@ -470,9 +511,12 @@ def resolve_overlays(sources, updating, failures):
 
 def preflight(plan, guards, state):
     """Refuse before any change when a file this run would edit is a symlink or unreadable."""
-    rules = os.path.join(codex_dir(), 'rules', 'agentic-github-flow-git-safety.rules')
-    if guards and 'codex' in plan and os.path.lexists(rules) and not state.get('codex_rules'):
-        raise Refused('%s exists and was not made by this installer; move it away first' % rules)
+    if guards and 'codex' in plan:
+        record = rules_record(state)
+        for _, rules in rules_targets():
+            if os.path.lexists(rules) and rules not in record:
+                raise Refused('%s exists and was not made by this installer; move it away first'
+                              % rules)
     files = []
     if 'claude' in plan:
         files.append(os.path.join(claude_dir(), 'CLAUDE.md'))

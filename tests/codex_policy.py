@@ -9,12 +9,15 @@ read). Exits 77 (skipped) when no codex command is found.
   GAPS:  option-order and `git -C` cases prefix rules cannot see. Expected = the ACTUAL decision,
          alone and combined, so the matrix records each gap and fails if it ever changes. The tag
          names what does cover it.
-Run before committing any change to git-safety.rules: one failing match/not_match example stops
+Part 2 checks policy/delete-guard.rules: DELETE_CASES alone and combined with git-safety.rules
+(and default.rules when present), DELETE_GAPS alone (what prefix rules cannot see, pinned).
+Run before committing any change to either rules file: one failing match/not_match example stops
 the whole file from loading.
 """
 import json, os, shlex, shutil, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 RULES = os.path.join(HERE, "..", "plugins", "guards", "policy", "git-safety.rules")
+DELETE_RULES = os.path.join(HERE, "..", "plugins", "guards", "policy", "delete-guard.rules")
 DEFAULT = os.path.expanduser("~/.codex/rules/default.rules")
 BUNDLED = ("/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",)  # macOS app
 CODEX = (os.environ.get("CODEX") or shutil.which("codex")
@@ -71,6 +74,31 @@ GAPS = [
 ("git -C /tmp worktree remove ../wt", "none", "none", "known-gap:Claude deny; git guard hook for Codex"),
 ]
 
+DELETE_CASES = [
+("rm -r build","prompt"),("rm -R build","prompt"),("rm -rf build","prompt"),("rm -fr build","prompt"),("rm -Rf x","prompt"),
+("rm -rfv x","prompt"),("rm --recursive x","prompt"),("/bin/rm -rf x","prompt"),("rm -f -r x","prompt"),("rm -v -rf x","prompt"),
+("rm --force --recursive x","prompt"),("rm -iR x","prompt"),("rm -Rfv x","prompt"),("rm -rI x","prompt"),("rm -dr x","prompt"),
+("xargs -n 2 rm","prompt"),("xargs -P 2 rm","prompt"),("xargs -0r rm","prompt"),("xargs -I% rm %","prompt"),("xargs rm","prompt"),
+("xargs rm -rf","prompt"),("xargs -0 rm -f","prompt"),("xargs -n1 rm -rf","prompt"),("xargs -n 1 rm -rf","prompt"),
+("xargs -I {} rm {}","prompt"),("xargs -0 -n 1 rm -f","prompt"),
+# must stay usable
+("rm a.txt","none"),("rm -f a.txt","none"),("rmdir x","none"),("trash x","none"),("xargs grep x","none"),
+("xargs -0 grep x","none"),("find . -name x","none"),("git rm --cached a.txt","none"),
+]
+
+# (command, decision, what covers it): prefix rules cannot see these; Codex's own check of
+# `rm -f` or its sandbox's write roots do, and the written rule binds where those do not reach.
+DELETE_GAPS = [
+("find . -name x -delete", "none", "known-gap:sandbox write roots only"),
+("find . -name x -exec rm {} +", "none", "known-gap:sandbox write roots only"),
+("rm -i -v -r x", "none", "known-gap:third flag position; sandbox only"),
+("rsync -a --delete src/ dst/", "none", "known-gap:sandbox write roots only"),
+("sudo rm -rf x", "none", "known-gap:unmeasured; sudo needs a password Codex cannot give"),
+("rm -rfvi x", "none", "known-gap:cluster of four letters; sandbox only"),
+("xargs -n 1000 rm", "none", "known-gap:unlisted number; sandbox only"),
+("xargs -s 4096 rm", "none", "known-gap:unlisted flag; sandbox only"),
+]
+
 def decide(rule_files, cmd):
     args = [CODEX, "execpolicy", "check"]
     for r in rule_files:
@@ -102,7 +130,19 @@ def main():
         if alone != alone_exp or comb != comb_exp:
             fails += 1
             print(f"GAP CHANGED  {cmd!r}: expected alone={alone_exp} combined={comb_exp}, got {alone}/{comb} ({tag})")
-    n = len(CASES) + len(GAPS)
+    dl_files = [DELETE_RULES, RULES] + ([DEFAULT] if combined else [])
+    for cmd, expected in DELETE_CASES:
+        alone = decide([DELETE_RULES], cmd)
+        comb = decide(dl_files, cmd)
+        if alone != expected or (comb != expected and not (expected == "none" and comb in ("allow", "none"))):
+            fails += 1
+            print(f"FAIL delete-guard  {cmd!r}: expected {expected}, alone={alone}, combined={comb}")
+    for cmd, expected, tag in DELETE_GAPS:
+        alone = decide([DELETE_RULES], cmd)
+        if alone != expected:
+            fails += 1
+            print(f"GAP CHANGED delete-guard  {cmd!r}: expected {expected}, got {alone} ({tag})")
+    n = len(CASES) + len(GAPS) + len(DELETE_CASES) + len(DELETE_GAPS)
     print(f"{n - fails}/{n} pass" + ("" if combined else " (default.rules absent: alone only)"))
     return 1 if fails else 0
 

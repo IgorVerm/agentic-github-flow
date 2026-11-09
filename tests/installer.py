@@ -372,6 +372,38 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertTrue(os.path.isfile(git_copy), 'a changed copy must stay')
         self.assertIn('changed since the install', out)
+        self.assertIn('Codex keeps loading it', out)
+        self.assertFalse(os.path.lexists(delete_copy))
+        # a later install recognises the copy it left, keeps the edit, and does not refuse
+        code, out = self.install('--guards')
+        self.assertEqual(code, 0, out)
+        with open(git_copy, 'rb') as f:
+            self.assertIn(b'a line the user added', f.read())
+        self.assertTrue(os.path.isfile(delete_copy))
+
+    def test_rules_copy_recorded_by_path_alone_is_refreshed_and_removed(self):
+        # 0.1 recorded the git rules by path and copied them on Windows: still ours
+        os.makedirs(self.path('.codex'))
+        code, out = self.install('--guards')
+        self.assertEqual(code, 0, out)
+        (git_copy, git_source), (delete_copy, _) = self.rules_copies()
+        record = self.path('.agentic-github-flow', '.state', 'install.json')
+        with open(record, encoding='utf-8') as f:
+            state = json.load(f)
+        state['codex_rules'] = git_copy
+        with open(record, 'w', encoding='utf-8') as f:
+            json.dump(state, f)
+        with open(git_copy, 'wb') as f:
+            f.write(b'# the git rules as 0.1 copied them\n')
+        os.remove(delete_copy)
+        code, out = self.install('--update')
+        self.assertEqual(code, 0, out)
+        with open(git_copy, 'rb') as a, open(git_source, 'rb') as b:
+            self.assertEqual(a.read(), b.read())
+        self.assertTrue(os.path.isfile(delete_copy))
+        code, out = self.install('--uninstall')
+        self.assertEqual(code, 0, out)
+        self.assertFalse(os.path.lexists(git_copy))
         self.assertFalse(os.path.lexists(delete_copy))
 
     @unittest.skipIf(WINDOWS, 'creating a symlink needs extra rights on Windows')

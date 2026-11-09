@@ -22,7 +22,10 @@ What it does, per client (Claude Code, Codex):
   prompts) copied into ~/.codex/rules/ and the git guard added to ~/.codex/hooks.json. The rules
   are copies, never links, because Codex skips a symlinked .rules file without a warning;
   --update refreshes a copy and --uninstall removes it only while it is unchanged since the
-  installer wrote it (a link left by an earlier version is replaced).
+  installer wrote it (a link or copy recorded by 0.1 counts as unchanged and is replaced). An
+  edited copy is left, with a note, and recorded in .state/codex-rules-left.json so that a
+  later --guards keeps it instead of refusing it. Copies under an earlier CODEX_HOME are
+  removed by the next install or --update while unchanged.
 - Overlays (--overlay): a folder with an AGENTS.md, or a git URL cloned into overlays/ here
   (a second URL with the same name gets a suffix); their text follows the core rules in both
   blocks.
@@ -388,25 +391,61 @@ def rules_targets():
             for name, copy in CODEX_RULES]
 
 
+LEGACY = 'legacy'  # a rules file recorded by its path alone (0.1: a link, a copy on Windows)
+
+
+def left_path():
+    """Rules copies an --uninstall left because they were edited, so that a later install
+    recognises them instead of refusing them as foreign."""
+    return os.path.join(CLONE, '.state', 'codex-rules-left.json')
+
+
 def rules_record(state):
-    """{target: sha256 of the copy this installer wrote}. An earlier version recorded one
-    linked file by its path alone."""
+    """{target: sha256 of the copy this installer wrote, or LEGACY}, with the copies a
+    previous --uninstall left behind."""
     record = state.get('codex_rules') or {}
-    return {record: None} if isinstance(record, str) else dict(record)
+    record = {record: LEGACY} if isinstance(record, str) else dict(record)
+    try:
+        with open(left_path(), encoding='utf-8') as f:
+            for target, digest in json.load(f).items():
+                record.setdefault(target, digest)
+    except (OSError, ValueError, AttributeError):
+        pass
+    return record
 
 
 def own_rules_file(target, source, digest):
-    """True when the installer may replace or remove target: its own link from an earlier
-    version, or a copy unchanged since it was written (or equal to the source)."""
+    """True when the installer may replace or remove target: its own link or copy from 0.1
+    (recorded by path alone), or a copy unchanged since it was written (or equal to the
+    source)."""
     if os.path.islink(target):
         return os.path.realpath(target) == os.path.realpath(source)
+    if digest == LEGACY:
+        return os.path.isfile(target)
     current = file_hash(target)
     return current is not None and current in (digest, file_hash(source))
+
+
+def source_of(target):
+    names = {copy: os.path.join(CLONE, 'plugins', 'guards', 'policy', name)
+             for name, copy in CODEX_RULES}
+    return names.get(os.path.basename(target), '')
 
 
 def codex_guards(state):
     # Copies, never links: Codex skips a symlinked .rules file without a warning.
     record, copied = rules_record(state), {}
+    current = [target for _, target in rules_targets()]
+    for target, digest in record.items():  # copies under an earlier CODEX_HOME
+        if target in current or not os.path.lexists(target):
+            continue
+        if own_rules_file(target, source_of(target), digest):
+            os.remove(target)
+            say('ok', 'codex: removed %s, a copy outside the current rules folder' % target)
+        else:
+            copied[target] = digest
+            say('skip', 'codex: %s changed since the install; left as it is, and Codex keeps '
+                        'loading it while CODEX_HOME points there' % target)
     for source, target in rules_targets():
         os.makedirs(os.path.dirname(target), exist_ok=True)
         if os.path.lexists(target) and not own_rules_file(target, source, record.get(target)):
@@ -420,6 +459,10 @@ def codex_guards(state):
         copied[target] = file_hash(target)
         say('ok', 'codex: execpolicy rules copied to %s' % target)
     state['codex_rules'] = copied
+    try:
+        os.remove(left_path())  # the record above now holds what an uninstall left
+    except FileNotFoundError:
+        pass
 
     path = os.path.join(codex_dir(), 'hooks.json')
     data = load_json(path)
@@ -444,16 +487,21 @@ def codex_guards(state):
 
 
 def remove_codex_guards(state):
-    sources = {os.path.basename(t): s for s, t in rules_targets()}
+    left = {}
     for target, digest in rules_record(state).items():
         if not os.path.lexists(target):
             continue
-        source = sources.get(os.path.basename(target), '')
-        if own_rules_file(target, source, digest):
+        if own_rules_file(target, source_of(target), digest):
             os.remove(target)
             say('ok', 'codex: removed %s' % target)
         else:
-            say('skip', 'codex: %s changed since the install; left as it is' % target)
+            left[target] = digest
+            say('skip', 'codex: %s changed since the install, so it is left as it is. Codex '
+                        'keeps loading it; delete that file to remove it' % target)
+    if left:
+        os.makedirs(os.path.dirname(left_path()), exist_ok=True)
+        with open(left_path(), 'w', encoding='utf-8') as f:
+            json.dump(left, f, indent=2, sort_keys=True)
     hook = state.get('codex_hook')
     path = os.path.join(codex_dir(), 'hooks.json')
     if not hook or linked(path, 'the git guard entry'):

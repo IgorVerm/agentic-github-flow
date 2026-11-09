@@ -92,7 +92,8 @@ the same version.
   `--uninstall` only while unchanged; the git guard added to `~/.codex/hooks.json`.
   Codex runs a new hook only after you trust it once with `/hooks` in Codex. The delete-guard
   hook stays out of Codex (it asks, and a Codex hook can only deny); the delete prompt rules
-  take its place there.
+  take its place there, and they prompt for every recursive `rm` and `xargs rm`, inside the
+  workspace too (under `codex exec`, which never asks, such a command does not run).
 
 If `~/.claude/CLAUDE.md` or `~/.codex/AGENTS.md` is a symlink, the installer stops before
 changing anything and explains: writing through the link would change the file it points to.

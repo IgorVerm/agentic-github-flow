@@ -97,6 +97,7 @@ DELETE_GAPS = [
 ("rm -rfvi x", "none", "known-gap:cluster of four letters; sandbox only"),
 ("xargs -n 1000 rm", "none", "known-gap:unlisted number; sandbox only"),
 ("xargs -s 4096 rm", "none", "known-gap:unlisted flag; sandbox only"),
+("xargs -d '\\n' rm -rf", "none", "known-gap:unlisted flag value; sandbox only"),
 ]
 
 def decide(rule_files, cmd):

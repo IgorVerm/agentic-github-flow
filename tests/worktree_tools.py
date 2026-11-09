@@ -908,11 +908,15 @@ class DeleteMergedTests(Repos):
         self.github_merge('agent/del-squash', squash=True)
         code, out = self.run_tool(DELETE, 'agent/del-squash', '--dry-run')
         self.assertEqual(code, 1, out)  # no merged pull request known yet
+        log = os.path.join(self.dir, 'gh.log')
+        self.env['FAKE_GH_LOG'] = log
         self.env['FAKE_GH_PRS'] = json.dumps([{'number': 4, 'head': 'agent/del-squash',
                                                'headRefOid': tip}])
         code, out = self.run_tool(DELETE, 'agent/del-squash', '--dry-run')
         self.assertEqual(code, 0, out)
         self.assertIn('WOULD DELETE', out)
+        with open(log) as f:  # the repository named outright, never gh's own pick
+            self.assertIn('pr list -R %s --head agent/del-squash ' % self.origin, f.read())
         self.assertTrue(self.remote_has('agent/del-squash'))
         code, out = self.run_tool(DELETE, 'agent/del-squash')
         self.assertEqual(code, 0, out)
@@ -1002,7 +1006,11 @@ class PrePushTests(Repos):
         self.assertNotEqual(self.push('--delete', 'agent/pp-squash').returncode, 0)
         self.env['FAKE_GH_PRS'] = json.dumps([{'number': 9, 'head': 'agent/pp-squash',
                                                'headRefOid': tip}])
+        log = os.path.join(self.dir, 'gh.log')
+        self.env['FAKE_GH_LOG'] = log
         self.assertEqual(self.push('--delete', 'agent/pp-squash').returncode, 0)
+        with open(log) as f:  # the pushed-to remote named outright, never gh's own pick
+            self.assertIn('pr list -R %s --head agent/pp-squash ' % self.origin, f.read())
 
 
 if __name__ == '__main__':

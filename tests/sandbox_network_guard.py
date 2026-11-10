@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.path.join(HERE, '..', 'plugins', 'guards', 'scripts', 'pre_tool_sandbox_network.py')
@@ -231,6 +232,11 @@ def run_all(tmp):
          '"config=@%s/inputs.json"' % repo),
         ('cd %s && gh api repos/{owner}/{repo}/issues -F body=@-' % q, '-F body=@-\n'),
         ('cd %s && gh pr merge 5 --squash' % q, 'gh pr merge -R %s 5 --squash' % O),
+        ('cd %s && gh issue comment 5 -F "$HOME/b.md"' % q,
+         'gh issue comment -R %s 5 -F "$HOME/b.md"' % O),
+        # too long to parse, and holding the start of an entry with a middle `*` (re-review)
+        ('bash "%s/proj/../evil/tools/remote/run.sh" ' % root + 'a' * 32000,
+         'longer than 32000 characters'),
     ]
     if repo.startswith(os.path.expanduser('~') + '/'):
         block.append(('cd "$HOME/%s" && gh issue view 3' % repo[len(os.path.expanduser('~')) + 1:],
@@ -328,6 +334,17 @@ def run_all(tmp):
         'cd %s && gh pr merge 5 -d' % q,
         'bash "%s"/proj*/tools/remote/wait.sh x' % root,
         'cd %s && gh pr list ' % q + 'x' * 40000,
+        # variables whose value is not certain, and more paths (re-review of #20)
+        'f=a.md; declare f=b.md; cd %s && gh pr comment 5 -F "$f"' % q,
+        'f=a.md; unset f; cd %s && gh pr comment 5 -F "$f"' % q,
+        'f=a.md; read -r f < name.txt; cd %s && gh pr comment 5 -F "$f"' % q,
+        'f=b.md; test -e a.md && f=a.md; cd %s && gh pr comment 5 -F "$f"' % q,
+        'f=a; f+=.md; cd %s && gh pr comment 5 -F "$f"' % q,
+        'cd "%s" && tools/remote/wait.sh newfile.txt' % proj_wt,
+        'cd "%s" && tools/remote/wait.sh --input=input.txt' % proj_wt,
+        'cd %s && gh issue comment 5 --body "$(cat \'body.md\')"' % q,
+        'cd %s && scp "$TMPDIR/a.txt" host:/tmp/' % q,
+        'cd %s && gh issue comment 5 -F "$TMPDIR/b.md"' % q,
         # loops, conditionals, other shapes
         'bash "%s/tools/remote/run.sh" lane1 -- \'cd /work/../x && ls\'' % proj_wt,
         'cd %s && for n in 1 2; do gh issue view $n; done' % q,
@@ -403,6 +420,13 @@ def run_all(tmp):
     if result.returncode != 0:
         failures.append('GH_REPO set, still refused: %s' % result.stdout)
     checks += 2
+    # one folder named in many parts costs its git lookups once (re-review: 58 s before)
+    started = time.time()
+    run(['--check', ('cd "%s" && ' % repo) + ' && '.join(['gh pr view 1'] * 1500), '--cwd',
+         elsewhere], full)
+    if time.time() - started > 5:
+        failures.append('1,500 gh parts took %.1f s' % (time.time() - started))
+    checks += 1
 
     # the hook contract
     def hook(payload, claude=full):

@@ -35,8 +35,10 @@ enabled there, or no entries, it does nothing. Two kinds of call are refused:
      `cd`, and `--body "$(cat <file>)"` becomes `--body-file <file>`;
    - `scp`/`rsync` with a remote operand: local paths become absolute (option values only where
      they are files read from the folder); `ssh`: `-F`, `-i`, `-E` and `-S` become absolute.
-     An unquoted `~`, `$HOME/…` and `$TMPDIR/…` stay; a variable assigned a literal earlier in
-     the call is filled in;
+     An unquoted `~` and `$HOME/…` stay. `$TMPDIR` does not: inside the sandbox it names
+     another folder than in an excluded call (measured with Claude Code on macOS,
+     2026-11-10). A variable is filled in when the call assigns it a literal once, in a part
+     that surely runs, and names it nowhere else;
    - `git fetch|pull|push|ls-remote`: loses the `cd` when `<dir>` is the session's folder;
    - a script called by path whose `bash "<absolute path>"` form matches an entry: when `<dir>`
      is the session's folder, or when the script is listed in the user's `sandbox-scripts`
@@ -54,7 +56,7 @@ shown to match:
   leading environment assignment or wrapper, or, after a `cd` to another folder, a glob (`*`,
   `?`, `[`) the shell would expand against the wrong folder;
 - a path it would have to rewrite holds `..` (the shell resolves it through symlinks), is `.`,
-  starts with a quoted `~`, or holds a variable without a literal value;
+  starts with a quoted `~`, or holds a variable without such a literal value, or `$TMPDIR`;
 - its output goes through a pipe to anything other than a display filter (`head`, `tail`,
   `grep`, `jq`, ...), or to one that writes a file;
 - the call has a loop or conditional, a computed `cd` target, `cd -`, `pushd` or `popd`;
@@ -71,8 +73,10 @@ shown to match:
   rsync's `-R`/`--relative` or a filter that reads a rules file, ssh options after the host;
 - a script run with `sh`, through `..`, from a glob, or directly while its first line names
   another interpreter than bash; after a `cd` to another folder, a listed script with an
-  argument that names a file in that folder;
-- input it cannot parse, or longer than MAX_INPUT characters.
+  argument that may name a file (a `/`, an extension, or an existing file in that folder);
+- input it cannot parse, or longer than MAX_INPUT characters. Such a long call is refused
+  instead when it holds the fixed start of an entry with a middle `*`, which it could match
+  only loosely.
 The rewrite drops `2>&1` and display-filter pipes, and the reason says what to use instead
 (`--jq`, filtering on the remote side, `--body-file`). It is a redirect, not a boundary: it does
 not see network commands started by scripts, `sh -c` strings or `ssh` remote commands, nor a
@@ -98,6 +102,7 @@ or exits 0. Test: `python3 tests/sandbox_network_guard.py`.
 from __future__ import annotations
 
 import fnmatch
+import functools
 import importlib.util
 import json
 import os
@@ -387,12 +392,12 @@ def relative_file(value: str) -> bool:
 def local_path(word: Word, directory: str) -> Word:
     """A local path word, written so that it names from any folder what it names in `directory`;
     Unsafe where that cannot be written faithfully. `-` (standard input), absolute paths, an
-    unquoted `~` and `$HOME/…` or `$TMPDIR/…` stay as they are."""
+    unquoted `~` and `$HOME/…` stay as they are."""
     v = word.value
     if not v or v in ("-", "<file>"):  # standard input; the placeholder for a here-document
         return word
     if "$" in word.raw or "`" in word.raw:
-        if re.fullmatch(r'"?\$\{?(HOME|TMPDIR)\}?/[^$`"]*"?', word.raw):
+        if re.fullmatch(r'"?\$\{?HOME\}?/[^$`"]*"?', word.raw):  # not TMPDIR: see the header
             return word
         raise Unsafe("a computed path")
     if v.startswith("~"):
@@ -581,6 +586,7 @@ def matches(text: str, patterns: list[str], strict: bool = False) -> bool:
 
 # --- rewriting one network command -------------------------------------------------------------
 
+@functools.lru_cache(maxsize=256)  # one call can name the same folder hundreds of times
 def git_out(directory: str, *args: str) -> str:
     try:
         return subprocess.run(["git", "-C", directory, *args], capture_output=True, text=True,
@@ -736,10 +742,10 @@ def script_faithful(cmd: list[Word], directory: str, cwd: str) -> bool:
         return False
     if os.path.realpath(directory) == os.path.realpath(cwd):
         return True
-    for w in cmd[at + 1:]:  # arguments that name files in the folder would name others
-        v = w.value
-        if not v.startswith("-") and (("/" in v and relative_file(v)) or (
-                relative_file(v) and os.path.exists(os.path.join(directory, v)))):
+    for w in cmd[at + 1:]:  # arguments that may name files in the folder would name others
+        v = w.value.split("=", 1)[1] if w.value.startswith("-") and "=" in w.value else w.value
+        if relative_file(v) and ("/" in v or re.search(r"\.\w+$", v) or os.path.exists(
+                os.path.join(directory, v))):
             return False
     return any(fnmatch.fnmatchcase(path, pattern) for pattern in listed_scripts())
 
@@ -879,12 +885,12 @@ def rewrite_gh(cmd: list[Word], directory: str, same: bool) -> list[Word]:
     for w in cmd:
         if substituted(w):
             prev = cmd[cmd.index(w) - 1].value
-            m = re.fullmatch(r'"?\$\(cat\s+([^\s)$`]+)\)"?', w.raw)
+            m = re.fullmatch(r'"?\$\(cat\s+([^\s)$`\'"\\]+)\)"?', w.raw)
             if not (m and prev in ("--body", "-b")):
                 raise Unsafe("$(...) in a gh argument")
     out = []
     for i, w in enumerate(cmd):  # --body "$(cat f)" -> --body-file f
-        m = re.fullmatch(r'"?\$\(cat\s+([^\s)$`]+)\)"?', w.raw)
+        m = re.fullmatch(r'"?\$\(cat\s+([^\s)$`\'"\\]+)\)"?', w.raw)
         if m and out and out[-1].value in ("--body", "-b"):
             out[-1] = Word("--body-file", "--body-file")
             path = m.group(1)
@@ -1113,8 +1119,10 @@ def cd_target(tokens: list[str], directory: str) -> str:
 def judge(command: str, cwd: str, patterns: list[str] | None = None) -> str | None:
     """The refusal reason for `command` run from `cwd`, or None when it passes."""
     patterns = excluded_patterns() if patterns is None else patterns
-    if not patterns or len(command) > MAX_INPUT:
+    if not patterns:
         return None
+    if len(command) > MAX_INPUT:
+        return long_input(command, patterns)
     try:
         parts = scan(gg.strip_heredocs(command)[0])
     except Unparsed:
@@ -1138,7 +1146,10 @@ def judge(command: str, cwd: str, patterns: list[str] | None = None) -> str | No
     if i == len(parts):
         return None
     had_cd, rest = i > 0, parts[i:]
-    found, known, lone_all = [], {}, True
+    found, known, lone_all, certain = [], {}, True, True
+
+    def once(name: str) -> bool:  # the name occurs nowhere but in its one assignment
+        return len(re.findall(r"(?<![\w${])" + re.escape(name) + r"(?!\w)", command)) == 1
     try:
         for n, part in enumerate(rest):
             tokens = parse_part(part)
@@ -1150,14 +1161,18 @@ def judge(command: str, cwd: str, patterns: list[str] | None = None) -> str | No
                     raise Unsafe("a cd this hook cannot follow")
                 directory = cd_target([w.value for w in tokens], directory)
                 had_cd, lone_all = True, False
+                certain = certain and part["op"] in CD_OPS
                 continue
-            conditional = part["op"] in ("||", "|", "&") or (
-                n > 0 and rest[n - 1]["op"] in ("||", "|", "&"))
-            for name, value in assignments(tokens).items():
-                if value is None or conditional:
+            # a part surely runs when every part before it is a cd or an assignment joined by
+            # `&&`, `;` or a newline; only such an assignment, of a name used nowhere else, counts
+            assigned_here = assignments(tokens)
+            runs = certain and part["op"] not in ("|", "&")
+            for name, value in assigned_here.items():
+                if value is None or not runs or not once(name):
                     known.pop(name, None)
                 else:
                     known[name] = value
+            certain = runs and bool(assigned_here) and part["op"] in CD_OPS
             prefix, cmd, assigned = split_command(tokens)
             cmd = [fill(w, known) for w in cmd]
             kind = classify(cmd)
@@ -1217,6 +1232,19 @@ def judge(command: str, cwd: str, patterns: list[str] | None = None) -> str | No
     return reason(found, had_cd, directory)
 
 
+def long_input(command: str, patterns: list[str]) -> str | None:
+    """A call too long to parse passes, unless it holds the fixed start of an entry with a `*`
+    in the middle, which it could match only loosely: that one is refused unjudged."""
+    for pattern in patterns:
+        if "*" in re.sub(r"\\\*", "", pattern).rstrip("*"):
+            start = re.sub(r"[ \t]+", " ", pattern.split("*")[0]).strip()
+            if start and start in re.sub(r"[ \t]+", " ", command):
+                return (f"Refused by the {REASON_MARKER}: this call is longer than {MAX_INPUT} "
+                        f"characters and holds the start of the excluded entry `{pattern}`, so "
+                        f"it cannot be checked against it. Split it into shorter calls.")
+    return None
+
+
 def loose_match(parts: list[dict], patterns: list[str]) -> str | None:
     """A part that matches an excluded entry only through `..` or a `*` spanning a quote."""
     patterns = [p for p in patterns if "*" in re.sub(r"\\\*", "", p).rstrip("*")]
@@ -1256,7 +1284,7 @@ def reason(found: list, had_cd: bool, directory: str) -> str:
         lines.append(line)
         filtered = filtered or filters
         needs_value = needs_value or any(
-            re.search(r"\$\{?(?!(HOME|USER|TMPDIR|PATH|PWD)\b)[A-Za-z_]",
+            re.search(r"\$\{?(?!(HOME|USER|PATH|PWD)\b)[A-Za-z_]",
                       re.sub(r"'[^']*'", "", w.raw)) for w in new)
     lines.append("Put nothing else in that call: no `&&`, `cd`, pipe, file redirection, "
                  "here-document or `$(...)`; `2>&1` is fine. Run the other parts as separate "

@@ -31,13 +31,23 @@ the user's word in any chat; steps 2, 6 and 7 below say what changes.
 **Never archive this chat** while any of these holds: its worktree, or a task worktree it
 worked in, fails the worktree check (`python3 <plugin>/scripts/chat_archivable.py <worktree>`
 says `keep:`, as it does while a commit of this chat is not on GitHub or, in local-main
-mode, not landed); a run, subagent or background job of it is still
-running; another session it started is not detached and is running or fails the worktree check
+mode, not landed); a run of it whose result the work still needs is still running (a remote
+gate, a capture; its other live work it ends first, *End your own live work* below); another session it started is not detached and is running or fails the worktree check
 with `--landed` (method.md §4 *Side chats*), because archiving takes its finished side sessions
 along and removes their worktrees; a
 question to the user is unanswered and the next step needs its answer (any other question waits
 on its issue, step 2). Without the settings section there is no standing permission: start the
 next chat only on the user's request or by the card of step 5, and archive nothing unasked.
+
+**End your own live work** before every archive of this chat (step 7 in both modes, and the
+archive at step 6 of a chat with nothing to push), since the app refuses to archive a session
+with live background work: (1) wait for each subagent this chat started to report (its
+completion notification), starting no new work; if the turn ends first, go on in the turn the
+last notification begins; (2) stop each background task of this chat that still runs (a
+background Bash run, a Monitor: `TaskStop`) once its result is no longer needed, or wait for one
+whose result the hand-over needs; (3) then rerun the worktree check and archive as step 7 says.
+A run whose result the work still needs keeps the chat: report and stop. Another session this
+chat started is not its own live work: the side-chat reason above decides.
 
 **A probe that must not be merged** keeps its commits on a local branch
 `scratch/<issue>-<what>` (`git branch scratch/<issue>-<what> <sha>`), named on the issue with
@@ -143,15 +153,17 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
    their word in any chat) in place of the ask, and go on with step 7 in this turn.
 7. **Push and archive,** in the turn of the user's yes: `ship-change` step 7 (push your task
    branch, open the pull request, report its URL and first CI result); a signed comment on the
-   issue whose text after the signature opens with `pull request opened: #<number>`; then rerun
-   the worktree check, call `get_session "self"`, and `archive_session` with `session_id:
+   issue whose text after the signature opens with `pull request opened: #<number>`; then end
+   your own live work (above), rerun the worktree check, call `get_session "self"`, and
+   `archive_session` with `session_id:
    "self"` and a short `reason`. No detach first: the CLI started the next chat, so it is not
    this chat's child. Tell the user before the archive, which ends the conversation. If the
    user wants changes first, they are new commits on this branch and steps 2 and 6 again; if
    anything fails, do not archive: report and stop. A chat with nothing to push (no next issue
-   and no commits, or a task stopped for open requirements) archives at step 6 when the check
-   passes. **In local-main mode** step 7 is the archive alone: rerun the worktree check (`ok`
-   once landed), `get_session "self"`, tell the user, then `archive_session` with
+   and no commits, or a task stopped for open requirements) archives at step 6, after ending its
+   own live work, when the check passes. **In local-main mode** step 7 is the archive alone: end
+   your own live work, rerun the worktree check (`ok` once landed), `get_session "self"`, tell
+   the user, then `archive_session` with
    `session_id: "self"` and a short `reason`; no push and no pull request.
 
 **Starting chains** (a chat the user types in, method.md §7): run steps 3 and 5 once per chain,

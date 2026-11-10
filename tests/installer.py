@@ -422,13 +422,19 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(after, settings)
 
     def test_sandbox_guard_notes_a_sandbox_that_is_off(self):
+        settings = {'hooks': {}, 'model': 'example'}  # an empty hooks object stays
+        self.write(json.dumps(settings).encode(), '.claude', 'settings.json')
         code, out = self.install('--guards=sandbox', clients=['claude'])
         self.assertEqual(code, 0, out)
         self.assertIn('does nothing until', out)
         self.assertEqual(len(self.sandbox_entries()), 1)
         code, out = self.install('--uninstall', clients=['claude'])
         self.assertEqual(code, 0, out)
-        self.assertEqual(self.sandbox_entries(), [])
+        after = json.loads(self.read('.claude', 'settings.json'))
+        for key in ('enabledPlugins', 'extraKnownMarketplaces'):
+            if after.get(key) == {}:
+                del after[key]
+        self.assertEqual(after, settings)
 
     def codex_personal_data_entries(self):
         """The matchers of the ~/.codex/hooks.json entries that run the personal-data hook."""

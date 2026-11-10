@@ -34,7 +34,9 @@ enabled there, or no entries, it does nothing. Two kinds of call are refused:
      release files) become absolute. gh commands that do not depend on the folder lose only the
      `cd`, and `--body "$(cat <file>)"` becomes `--body-file <file>`;
    - `scp`/`rsync` with a remote operand: local paths become absolute (option values only where
-     they are files read from the folder); `ssh`: `-F`, `-i` and `-E` become absolute;
+     they are files read from the folder); `ssh`: `-F`, `-i`, `-E` and `-S` become absolute.
+     An unquoted `~`, `$HOME/…` and `$TMPDIR/…` stay; a variable assigned a literal earlier in
+     the call is filled in;
    - `git fetch|pull|push|ls-remote`: loses the `cd` when `<dir>` is the session's folder;
    - a script called by path whose `bash "<absolute path>"` form matches an entry: when `<dir>`
      is the session's folder, or when the script is listed in the user's `sandbox-scripts`
@@ -51,22 +53,30 @@ shown to match:
   writes output to a file, runs in the background (`&`), contains `$(...)` or a backtick, has a
   leading environment assignment or wrapper, or, after a `cd` to another folder, a glob (`*`,
   `?`, `[`) the shell would expand against the wrong folder;
+- a path it would have to rewrite holds `..` (the shell resolves it through symlinks), is `.`,
+  starts with a quoted `~`, or holds a variable without a literal value;
 - its output goes through a pipe to anything other than a display filter (`head`, `tail`,
   `grep`, `jq`, ...), or to one that writes a file;
 - the call has a loop or conditional, a computed `cd` target, `cd -`, `pushd` or `popd`;
 - a gh command acts on the folder (`pr checkout`, `pr status`, `pr create --fill`,
   `issue develop --checkout`, `repo clone|create|fork|sync|set-default`, downloads without
-  `-D`), changes a pull request chosen by the folder's branch (`pr merge|close|comment|edit…`
-  without a selector: a branch name could match another fork's pull request), or is one this
-  hook does not know; `GH_REPO` or `GH_HOST` is set; the folder's remotes leave gh's choice
-  open, or point to another host than github.com;
+  `-D`, `ruleset check`, `pr merge --delete-branch`), changes a pull request chosen by the
+  folder's branch (`pr merge|close|comment|edit…` without a selector: a branch name could match
+  another fork's pull request), or is one this hook does not know; `GH_REPO` or `GH_HOST` is set
+  in the hook's environment; the folder's remotes leave gh's choice open, or point to another
+  host than github.com; a branch is needed and the folder has several remotes or tracks a branch
+  of another name;
 - scp or rsync are local only, or have an option the hook cannot place: a relative file in an
-  ssh `-o` option, in rsync's `-e` command, scp's `-S` program, `ProxyCommand` and the like;
-- a script called directly whose first line names another interpreter than bash or sh;
-- input it cannot parse.
+  ssh `-o` option, in rsync's `-e` command, scp's `-S` program, `ProxyCommand` and the like,
+  rsync's `-R`/`--relative` or a filter that reads a rules file, ssh options after the host;
+- a script run with `sh`, through `..`, from a glob, or directly while its first line names
+  another interpreter than bash; after a `cd` to another folder, a listed script with an
+  argument that names a file in that folder;
+- input it cannot parse, or longer than MAX_INPUT characters.
 The rewrite drops `2>&1` and display-filter pipes, and the reason says what to use instead
 (`--jq`, filtering on the remote side, `--body-file`). It is a redirect, not a boundary: it does
-not see network commands started by scripts, `sh -c` strings or `ssh` remote commands. An entry
+not see network commands started by scripts, `sh -c` strings or `ssh` remote commands, nor a
+`GH_REPO` the user's shell profile sets for Bash calls (then `-R` overrides it). An entry
 such as `rsync *` also matches local copies, which then run outside the sandbox; that is the
 entry's doing, and this guard does not change it.
 
@@ -106,7 +116,8 @@ GH_REPO_FLAG = {"issue", "pr", "release", "run", "workflow", "label", "cache", "
                 "variable", "secret", "browse"}
 GH_FOLDER_FREE = {"auth", "search", "status", "org", "completion", "alias", "help",
                   "version"}
-GH_FOLDER_BOUND = {("pr", "checkout"), ("pr", "status"), ("repo", "clone"), ("repo", "create"),
+GH_FOLDER_BOUND = {("pr", "checkout"), ("pr", "status"), ("ruleset", "check"), ("repo", "clone"),
+                   ("repo", "create"),
                    ("repo", "fork"), ("repo", "sync"), ("repo", "set-default")}
 GH_PR_SELECTOR = {"view", "checks", "diff", "comment", "merge", "close", "reopen", "edit",
                   "ready", "review", "update-branch", "lock", "unlock"}
@@ -148,10 +159,11 @@ RSYNC_LONG_FLAG = {"--archive", "--verbose", "--compress", "--recursive", "--del
                    "--prune-empty-dirs", "--list-only", "--append", "--append-verify",
                    "--omit-dir-times", "--no-times", "--protect-args", "--relative"}
 DISPLAY_FILTERS = {"head", "tail", "grep", "egrep", "fgrep", "rg", "cut", "wc", "sort", "uniq",
-                   "tr", "cat", "less", "jq", "column", "nl", "fold", "sed"}
+                   "tr", "cat", "less", "jq", "column", "nl", "fold"}  # not sed: it can write
 CONTROL = {"for", "while", "until", "if", "case", "select", "function"}
 WRAPPERS = {"time", "nohup", "command", "builtin", "exec"}
 ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+MAX_INPUT = 32_000  # characters; a longer command passes unjudged (the parsing is not linear)
 HEREDOC_MARKER = re.compile(r"<<-?[ \t]*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 
 _spec = importlib.util.spec_from_file_location(
@@ -372,6 +384,39 @@ def relative_file(value: str) -> bool:
     return bool(value) and not value.startswith(("/", "~", "$", "-", "<"))
 
 
+def local_path(word: Word, directory: str) -> Word:
+    """A local path word, written so that it names from any folder what it names in `directory`;
+    Unsafe where that cannot be written faithfully. `-` (standard input), absolute paths, an
+    unquoted `~` and `$HOME/…` or `$TMPDIR/…` stay as they are."""
+    v = word.value
+    if not v or v in ("-", "<file>"):  # standard input; the placeholder for a here-document
+        return word
+    if "$" in word.raw or "`" in word.raw:
+        if re.fullmatch(r'"?\$\{?(HOME|TMPDIR)\}?/[^$`"]*"?', word.raw):
+            return word
+        raise Unsafe("a computed path")
+    if v.startswith("~"):
+        if word.raw.startswith("~"):
+            return word
+        raise Unsafe("a quoted ~ names a folder called ~")
+    if v.startswith("/"):
+        return word
+    if ".." in v.split("/"):
+        raise Unsafe("`..` in a path: the shell resolves it through symlinks")
+    if v == "." or v.endswith("/."):
+        raise Unsafe("`.` as a path")
+    return quote(absolute(v, directory))
+
+
+def attached_path(word: Word, prefix: str, value: str, directory: str) -> Word:
+    """`--flag=<path>` or `key=@<path>`: the word with its path read as from `directory`."""
+    if "$" in word.raw or "`" in word.raw or value.startswith("~"):
+        raise Unsafe("a computed or ~ path inside an option")
+    if value == "-" or value.startswith("/"):
+        return word
+    return quote(prefix + local_path(Word(value, value), directory).value)
+
+
 def heredoc_part(text: str) -> list[Word]:
     """Words of a part whose here-document sits inside `$(...)`, the usual
     `--body "$(cat <<'EOF' ... EOF\\n)"`: the substitution becomes `--body-file "<file>"` after
@@ -438,8 +483,9 @@ def split_command(tokens: list[Word]) -> tuple[list[Word], list[Word], bool]:
     return prefix, out, assigned
 
 
-def assignments(tokens: list[Word]) -> dict[str, str]:
-    """Literal `NAME=value` words of a part that only assigns (`f=/tmp/x`, `export F=x`)."""
+def assignments(tokens: list[Word]) -> dict[str, str | None]:
+    """`NAME=value` words of a part that only assigns (`f=/tmp/x`, `export F=x`): the literal
+    value, `~` expanded as bash does in an assignment, or None where it is computed."""
     found = {}
     for w in tokens:
         if w.value == "export":
@@ -447,8 +493,12 @@ def assignments(tokens: list[Word]) -> dict[str, str]:
         m = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)=(.*)", w.raw, re.S)
         if not m:
             return {}
-        if not re.search(r"[$`]", m.group(2)):
-            found[m.group(1)] = dequote(m.group(2))
+        raw = m.group(2)
+        value = dequote(raw)
+        if re.search(r"[$`]", raw) or (value.startswith("~") and not raw.startswith("~")):
+            found[m.group(1)] = None
+        else:
+            found[m.group(1)] = os.path.expanduser(value) if raw.startswith("~") else value
     return found
 
 
@@ -514,7 +564,7 @@ def pattern_regex(pattern: str, strict: bool) -> re.Pattern | None:
             continue
         if c == "*":
             stars += 1
-            out.append(".*" if (not strict or i == len(p) - 1) else "[^\"'\\s]*")
+            out.append(".*" if (not strict or i == len(p) - 1) else "[^\"'\\s$`()\\\\;&|<>]*")
         else:
             out.append(re.escape(c))
         i += 1
@@ -551,6 +601,30 @@ def local_url(url: str) -> bool:
     return url.startswith(("/", ".", "~", "file://")) or ":" not in url
 
 
+def remote_urls(directory: str) -> dict[str, str]:
+    urls = {}
+    for line in git_out(directory, "remote", "-v").splitlines():
+        parts = line.split()
+        if len(parts) >= 2:
+            urls.setdefault(parts[0], parts[1])
+    return urls
+
+
+def folder_branch(directory: str, repo: str) -> str:
+    """The folder's current branch, for a rewrite that names it, only where gh in the folder
+    would mean that same branch of `repo`: every remote names `repo` (no fork beside it), and the
+    branch tracks a branch of its own name, if any."""
+    branch = git_out(directory, "branch", "--show-current")
+    if not branch:
+        raise Unsafe("no current branch")
+    if {github_repo(u) for u in remote_urls(directory).values()} != {repo}:
+        raise Unsafe("several remotes: gh would name the branch with its fork")
+    merge = git_out(directory, "config", "--get", f"branch.{branch}.merge")
+    if merge and merge != f"refs/heads/{branch}":
+        raise Unsafe("the branch tracks another branch name")
+    return branch
+
+
 def gh_repo(directory: str) -> str | None:
     """The repository gh picks in `directory`, when that is certain: the remote marked
     `gh-resolved` (`gh repo set-default`), else the one github.com repository every remote names.
@@ -558,11 +632,7 @@ def gh_repo(directory: str) -> str | None:
     another host (gh may be signed in there)."""
     if os.environ.get("GH_REPO") or os.environ.get("GH_HOST"):
         return None
-    urls = {}
-    for line in git_out(directory, "remote", "-v").splitlines():
-        parts = line.split()
-        if len(parts) >= 2:
-            urls.setdefault(parts[0], parts[1])
+    urls = remote_urls(directory)
     resolved = git_out(directory, "config", "--get-regexp", r"^remote\..*\.gh-resolved$")
     for line in resolved.splitlines():
         key, _, value = line.partition(" ")
@@ -649,7 +719,7 @@ def shell_script(path: str) -> bool:
     words_ = first[2:].split()
     if words_ and os.path.basename(words_[0]) == "env":
         words_ = [w for w in words_[1:] if not w.startswith("-") and "=" not in w]
-    return bool(words_) and os.path.basename(words_[0]) in SHELL_INTERPRETERS
+    return bool(words_) and os.path.basename(words_[0]) == "bash"
 
 
 def script_faithful(cmd: list[Word], directory: str, cwd: str) -> bool:
@@ -657,12 +727,34 @@ def script_faithful(cmd: list[Word], directory: str, cwd: str) -> bool:
     the script runs under bash or sh either way, and the folder is the same or the user listed
     the script in `sandbox-scripts` as one that does not depend on its working folder."""
     at = 1 if os.path.basename(cmd[0].value) in SHELL_INTERPRETERS else 0
+    if at and os.path.basename(cmd[0].value) != "bash":
+        return False  # `sh x.sh` would become `bash x.sh`
+    if ".." in cmd[at].value.split("/"):
+        return False  # the shell resolves `..` through symlinks
     path = absolute(cmd[at].value, directory)
     if at == 0 and not shell_script(path):
         return False
     if os.path.realpath(directory) == os.path.realpath(cwd):
         return True
+    for w in cmd[at + 1:]:  # arguments that name files in the folder would name others
+        v = w.value
+        if not v.startswith("-") and (("/" in v and relative_file(v)) or (
+                relative_file(v) and os.path.exists(os.path.join(directory, v)))):
+            return False
     return any(fnmatch.fnmatchcase(path, pattern) for pattern in listed_scripts())
+
+
+def script_forms(cmd: list[Word], directory: str) -> list[list[Word]]:
+    """`bash "<absolute path>" ...`, and `bash <absolute path> ...` where the path needs no
+    quotes: the forms an entry may be written in."""
+    at = 1 if os.path.basename(cmd[0].value) in SHELL_INTERPRETERS else 0
+    path = absolute(cmd[at].value, directory)
+    forms = []
+    if not re.search(r'["$`\\!]', path):
+        forms.append([quote("bash"), Word(f'"{path}"', path)] + cmd[at + 1:])
+    if quote(path).raw == path:
+        forms.append([quote("bash"), Word(path, path)] + cmd[at + 1:])
+    return forms
 
 
 def script_path(cmd: list[Word]) -> Word | None:
@@ -671,7 +763,8 @@ def script_path(cmd: list[Word]) -> Word | None:
     whose `bash "<absolute path>"` form matches an excluded entry."""
     at = 1 if os.path.basename(cmd[0].value) in ("bash", "sh") and len(cmd) > 1 else 0
     v = cmd[at].value
-    return cmd[at] if "/" in v and not v.startswith("-") and "$" not in cmd[at].raw else None
+    return cmd[at] if ("/" in v and not v.startswith("-") and "$" not in cmd[at].raw
+                       and not globbed(cmd[at])) else None
 
 
 GH_VALUE_FLAGS = {"--json", "-q", "--jq", "-t", "--template", "-R", "--repo", "-b", "--body",
@@ -736,21 +829,26 @@ def gh_files(cmd: list[Word], group: str | None, sub: str | None, directory: str
     for i, w in enumerate(cmd):
         v = w.value
         if previous:
-            out.append(quote(absolute(v, directory)) if relative_file(v) else w)
+            out.append(local_path(w, directory))
             previous = None
             continue
         name = v.split("=")[0]
         if v in file_flags:
             previous = v
-        elif name in file_flags and "=" in v and relative_file(v.split("=", 1)[1]):
-            w = quote(f"{name}={absolute(v.split('=', 1)[1], directory)}")
-        elif group == "api" and re.fullmatch(r"[^=]+=@[^/~$].*", v) and cmd[i - 1].value in (
+        elif name in file_flags and "=" in v:
+            w = attached_path(w, name + "=", v.split("=", 1)[1], directory)
+        elif group in ("api", "workflow") and re.fullmatch(r"[^=]+=@.*", v) and cmd[i - 1].value in (
                 "-F", "--field"):
             key, path = v.split("=@", 1)
-            w = quote(f"{key}=@{absolute(path, directory)}")
-        elif i in assets and relative_file(v.split("#")[0]):  # release upload|create TAG files
-            label = "#" + v.split("#", 1)[1] if "#" in v else ""
-            w = quote(absolute(v.split("#")[0], directory) + label)
+            w = attached_path(w, key + "=@", path, directory)
+        elif i in assets:  # release upload|create TAG files, `file#label`
+            path, hashed, label = v.partition("#")
+            if not hashed:
+                w = local_path(w, directory)
+            elif "$" in w.raw or "`" in w.raw or path.startswith("~"):
+                raise Unsafe("a computed release file")
+            elif not path.startswith("/"):
+                w = quote(local_path(Word(path, path), directory).value + "#" + label)
         out.append(w)
     return out
 
@@ -772,6 +870,8 @@ def rewrite_gh(cmd: list[Word], directory: str, same: bool) -> list[Word]:
     if group in ("pr", "issue") and sub == "create" and gh_flag_value(
             cmd, "-T", "--template", "--recover"):
         raise Unsafe("a template or recovery file looked up in the folder")
+    if group == "pr" and sub == "merge" and not same and gh_flag_value(cmd, "-d", "--delete-branch"):
+        raise Unsafe("gh pr merge --delete-branch also deletes the folder's branch")
     if group == "issue" and sub == "develop" and gh_flag_value(cmd, "--checkout", "-c"):
         raise Unsafe("gh issue develop --checkout")
     if sub == "download" and group in ("run", "release") and not gh_flag_value(cmd, "-D", "--dir"):
@@ -787,7 +887,8 @@ def rewrite_gh(cmd: list[Word], directory: str, same: bool) -> list[Word]:
         m = re.fullmatch(r'"?\$\(cat\s+([^\s)$`]+)\)"?', w.raw)
         if m and out and out[-1].value in ("--body", "-b"):
             out[-1] = Word("--body-file", "--body-file")
-            out.append(quote(m.group(1)))
+            path = m.group(1)
+            out.append(quote(os.path.expanduser(path) if path.startswith("~") else path))
         else:
             out.append(w)
     cmd = out
@@ -840,16 +941,10 @@ def rewrite_gh(cmd: list[Word], directory: str, same: bool) -> list[Word]:
     if group == "pr" and sub in GH_PR_SELECTOR and not gh_flags_and_positionals(cmd, at)[1]:
         if sub not in GH_PR_READ:
             raise Unsafe("a change to the pull request of the folder's branch")
-        branch = git_out(directory, "branch", "--show-current")
-        if not branch:
-            raise Unsafe("no current branch")
-        extra.append(quote(branch))
+        extra.append(quote(folder_branch(directory, repo)))
     extra += [quote("-R"), quote(repo)]
     if group == "pr" and sub == "create" and not gh_flag_value(cmd, "-H", "--head"):
-        branch = git_out(directory, "branch", "--show-current")
-        if not branch:
-            raise Unsafe("no current branch")
-        extra += [quote("--head"), quote(branch)]
+        extra += [quote("--head"), quote(folder_branch(directory, repo))]
     return cmd[:at] + extra + cmd[at:]
 
 
@@ -858,13 +953,17 @@ def rewrite_copy(kind: str, cmd: list[Word], directory: str) -> list[Word]:
     out = list(cmd)
     for at, w, role in operands(cmd, value_opts, RSYNC_LONG_VALUE if kind == "rsync" else set()):
         v = w.value
-        if "$" in w.raw:
-            continue
+        if kind == "rsync" and role == "option" and (
+                v == "--relative" or (not v.startswith("--") and "R" in v[1:])):
+            raise Unsafe("rsync --relative keeps the path as written")
+        if kind == "rsync" and (role in ("value:-f", "value:--filter") or v.startswith(
+                "--filter=")) and re.match(r"\s*(merge|dir-merge|[.:])", v.split("=", 1)[-1]
+                                           if role == "option" else v):
+            raise Unsafe("an rsync filter that reads a rules file")
         if role == "operand" and not remote_operand(v):
-            out[at] = quote(absolute(v, directory))
+            out[at] = local_path(w, directory)
         elif role in ("value:-i", "value:-F") or role[6:] in RSYNC_LONG_FILE:
-            if relative_file(v):
-                out[at] = quote(absolute(v, directory))
+            out[at] = local_path(w, directory)
         elif role == "value:-o":
             if not ssh_option_faithful(v):
                 raise Unsafe("an ssh option the rewrite cannot place")
@@ -878,8 +977,8 @@ def rewrite_copy(kind: str, cmd: list[Word], directory: str) -> list[Word]:
             name = v.split("=")[0]
             if name == "--rsh" and "=" in v and not ssh_line_faithful(v.split("=", 1)[1]):
                 raise Unsafe("an rsync remote shell the rewrite cannot place")
-            if "=" in v and name in RSYNC_LONG_FILE and relative_file(v.split("=", 1)[1]):
-                out[at] = quote(f"{name}={absolute(v.split('=', 1)[1], directory)}")
+            if "=" in v and name in RSYNC_LONG_FILE:
+                out[at] = attached_path(w, name + "=", v.split("=", 1)[1], directory)
             elif "=" not in v and name not in RSYNC_LONG_VALUE | RSYNC_LONG_FLAG:
                 raise Unsafe(f"unknown rsync option {name}")
     return out
@@ -961,12 +1060,14 @@ def rewrite_ssh(cmd: list[Word], directory: str) -> list[Word]:
         if option == "-o" and not ssh_option_faithful(text):
             raise Unsafe("an ssh option the rewrite cannot place")
         if option in SSH_FILE_OPTS and ssh_file_value(option, text):
-            if attached or "$" in value.raw:
+            if attached:
                 raise Unsafe("a relative ssh file the rewrite cannot place")
-            value = quote(absolute(value.value, directory))
+            value = local_path(value, directory)
         if value is not None:
             out.append(value)
             end = i + 2
+    if end + 1 < len(cmd) and cmd[end + 1].value.startswith("-"):
+        raise Unsafe("ssh reads options after the destination too")
     return out + cmd[end:]
 
 
@@ -976,8 +1077,10 @@ def rewrite(kind: str, cmd: list[Word], directory: str, cwd: str) -> list[Word]:
     if kind == "gh":
         return rewrite_gh(cmd, directory, same)
     if kind == "script":
-        at = 1 if os.path.basename(cmd[0].value) in ("bash", "sh") else 0
-        return [quote("bash"), quote(absolute(cmd[at].value, directory))] + cmd[at + 1:]
+        forms = script_forms(cmd, directory)
+        if not forms:
+            raise Unsafe("a script path that cannot be quoted plainly")
+        return forms[0]
     if same:
         return cmd
     if kind in ("scp", "rsync"):
@@ -1010,7 +1113,7 @@ def cd_target(tokens: list[str], directory: str) -> str:
 def judge(command: str, cwd: str, patterns: list[str] | None = None) -> str | None:
     """The refusal reason for `command` run from `cwd`, or None when it passes."""
     patterns = excluded_patterns() if patterns is None else patterns
-    if not patterns:
+    if not patterns or len(command) > MAX_INPUT:
         return None
     try:
         parts = scan(gg.strip_heredocs(command)[0])
@@ -1048,13 +1151,24 @@ def judge(command: str, cwd: str, patterns: list[str] | None = None) -> str | No
                 directory = cd_target([w.value for w in tokens], directory)
                 had_cd, lone_all = True, False
                 continue
-            known.update(assignments(tokens))
+            conditional = part["op"] in ("||", "|", "&") or (
+                n > 0 and rest[n - 1]["op"] in ("||", "|", "&"))
+            for name, value in assignments(tokens).items():
+                if value is None or conditional:
+                    known.pop(name, None)
+                else:
+                    known[name] = value
             prefix, cmd, assigned = split_command(tokens)
+            cmd = [fill(w, known) for w in cmd]
             kind = classify(cmd)
-            if kind == "script" and not (matches(
-                    " ".join(w.raw for w in rewrite(kind, cmd, directory, cwd)), patterns)
-                    and script_faithful(cmd, directory, cwd)):
-                kind = None  # no excluded entry, or not the same from the session's folder
+            script_form = None
+            if kind == "script":
+                fitting = [f for f in script_forms(cmd, directory)
+                           if matches(" ".join(w.raw for w in f), patterns)]
+                if fitting and script_faithful(cmd, directory, cwd):
+                    script_form = fitting[0]
+                else:
+                    kind = None  # no excluded entry, or not the same from the session's folder
             piped_in = n > 0 and rest[n - 1]["op"] == "|"
             if not kind:
                 lone_all = False
@@ -1078,14 +1192,12 @@ def judge(command: str, cwd: str, patterns: list[str] | None = None) -> str | No
                 ftokens = words(rest[k]["text"])
                 if not ftokens or ftokens[0].value not in DISPLAY_FILTERS or rest[k]["outfile"] \
                         or (ftokens[0].value == "sort" and any(
-                            w.value.startswith(("-o", "--output")) for w in ftokens)) \
-                        or (ftokens[0].value == "sed" and any(
-                            w.value.startswith("-i") or re.search(r"(^|[;}\s])w\b", w.value)
+                            w.value.startswith("--output") or (
+                                re.match(r"-[^-]", w.value) and "o" in w.value)
                             for w in ftokens[1:])):
                     raise Unsafe("output piped into a command, or a filter that writes a file")
                 filters.append(rest[k])
-            cmd = [fill(w, known) for w in cmd]
-            new = prefix + rewrite(kind, cmd, directory, cwd)
+            new = prefix + (script_form or rewrite(kind, cmd, directory, cwd))
             ok = matches(" ".join(w.raw for w in new[len(prefix):]), patterns)
             written_ok = (matches(" ".join(w.raw for w in cmd), patterns) and not filters
                           and not part["heredoc"] and not part["subst"])

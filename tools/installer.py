@@ -425,6 +425,8 @@ def add_sandbox_hook(state):
     data = load_json(path)
     created = data is None
     data = data if data is not None else {}
+    made = [key for key, present in (('hooks', 'hooks' in data), ('PreToolUse', isinstance(
+        data.get('hooks'), dict) and 'PreToolUse' in data['hooks'])) if not present]
     entries = hook_list(data, path)
     record = state.get('claude_sandbox_hook', {})
     entry, changed = sandbox_hook_entry(), False
@@ -434,7 +436,8 @@ def add_sandbox_hook(state):
     if entry not in entries:
         entries.append(entry)
         changed = True
-    state['claude_sandbox_hook'] = {'entry': entry, 'created': record.get('created', created)}
+    state['claude_sandbox_hook'] = {'entry': entry, 'created': record.get('created', created),
+                                    'made': record.get('made', made)}
     if changed:
         backup(path)
         dump_json(path, data)
@@ -457,9 +460,10 @@ def remove_sandbox_hook(state):
     if not isinstance(entries, list) or record['entry'] not in entries:
         return
     entries.remove(record['entry'])
-    if not entries:
+    made = record.get('made', [])  # remove only the containers the install added
+    if not entries and 'PreToolUse' in made:
         del hooks['PreToolUse']
-    if not hooks:
+    if not hooks and 'hooks' in made:
         del data['hooks']
     backup(path)
     if record.get('created') and not data:

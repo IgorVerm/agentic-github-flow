@@ -55,6 +55,8 @@ def run_all(tmp):
     lab = os.path.join(root, 'lab')
     scripts = ['bash "%s/proj*/tools/remote/%s.sh"*' % (root, s) for s in ('wait', 'status', 'run')]
     scripts.append('bash "%s/bin/remote-ssh"*' % lab)
+    tool = os.path.join(tmp, 'plainroot', 'tool')  # a script path without a space
+    scripts += ['bash "%s/remote-x.sh"*' % tool, 'bash %s/other.sh *' % tool]
 
     def settings(name, entries, enabled=True):
         folder = os.path.join(tmp, name)
@@ -92,11 +94,19 @@ def run_all(tmp):
     git('-C', resolved, 'config', 'remote.upstream.gh-resolved', 'base')
     enterprise = os.path.join(root, 'enterprise')
     make_repo(enterprise, [('origin', 'git@github.example.com:team/app.git')])
+    tracking = os.path.join(root, 'tracking')
+    make_repo(tracking, [('origin', 'git@github.com:example-org/demo.git')])
+    git('-C', tracking, 'config', 'branch.agent/x.merge', 'refs/heads/feature-y')
     plain = os.path.join(root, 'plain')
     elsewhere = os.path.join(root, 'elsewhere')
     for folder in (plain, elsewhere, os.path.join(proj, 'tools', 'remote'), proj_wt,
-                   os.path.join(lab, 'bin')):
+                   os.path.join(lab, 'bin'), os.path.join(root, 'other-x', 'x'), tool,
+                   os.path.join(proj, 'data')):
         os.makedirs(folder, exist_ok=True)
+    os.symlink(os.path.join(root, 'other-x', 'x'), os.path.join(root, 'link'))
+    with open(os.path.join(proj_wt, 'input.txt'), 'w') as handle:
+        handle.write('x\n')
+    home = os.path.expanduser('~')
     for name, line in (('status.sh', '#!/bin/bash'), ('run.sh', '#!/usr/bin/env python3')):
         with open(os.path.join(proj, 'tools', 'remote', name), 'w') as handle:
             handle.write(line + '\necho\n')
@@ -204,6 +214,23 @@ def run_all(tmp):
          'matches an excluded command only loosely'),
         ('bash "%s/proj/evil.sh" "/tools/remote/wait.sh"' % root,
          'matches an excluded command only loosely'),
+        # a `*` spanning a substitution (review of #20)
+        ('bash "%s/proj$(id)/tools/remote/run.sh" x' % root, 'only loosely'),
+        ('bash "%s/proj`id`/tools/remote/run.sh" x' % root, 'only loosely'),
+        ('bash "%s/proj${X:-}/tools/remote/run.sh" x' % root, 'only loosely'),
+        # a script at a path without a space, entries written quoted or plain
+        ('%s/remote-x.sh a' % tool, 'bash "%s/remote-x.sh" a' % tool),
+        ('"%s/other.sh" b' % tool, '    bash %s/other.sh b\n' % tool),
+        # paths the shell expands the same from any folder, or variables with a literal value
+        ('cd %s && scp ~/notes.txt host:/tmp/' % q, '    scp ~/notes.txt host:/tmp/\n'),
+        ('cd %s && gh issue comment 5 --body "$(cat ~/body.md)"' % q,
+         '--body-file %s/body.md' % home),
+        ('f=~/b.md && cd %s && gh issue comment 5 --body-file "$f"' % q,
+         '--body-file %s/b.md' % home),
+        ('cd %s && gh workflow run ci.yml -F config=@inputs.json' % q,
+         '"config=@%s/inputs.json"' % repo),
+        ('cd %s && gh api repos/{owner}/{repo}/issues -F body=@-' % q, '-F body=@-\n'),
+        ('cd %s && gh pr merge 5 --squash' % q, 'gh pr merge -R %s 5 --squash' % O),
     ]
     if repo.startswith(os.path.expanduser('~') + '/'):
         block.append(('cd "$HOME/%s" && gh issue view 3' % repo[len(os.path.expanduser('~')) + 1:],
@@ -256,6 +283,8 @@ def run_all(tmp):
         'cd %s && timeout 60 gh pr list' % q, 'cd %s && command gh pr list' % q,
         'cd %s && exec gh pr list' % q, 'cd %s && gh api graphql -F owner={owner} -f query=q' % q,
         'cd %s && gh pr list | sort -o out.txt' % q, "cd %s && gh pr list | sed -n 'w out.txt'" % q,
+        'cd %s && gh pr list | sort -uo out.txt' % q,
+        "cd %s && gh pr view 5 | sed -n 's/a/b/w out.txt'" % q,
         'cd %s && gh pr list &' % q,
         # globs: the shell would expand them against another folder (Fable audit finding 2)
         'cd %s && gh release create v1 dist/*' % q, 'cd %s && scp out/*.txt host:/tmp/' % q,
@@ -275,6 +304,30 @@ def run_all(tmp):
         'cd "%s" && tools/remote/run.sh x' % proj, '"%s/tools/remote/run.sh" x' % proj,
         # a script with an entry, after a cd to another folder, not listed in sandbox-scripts
         'cd "%s" && bin/remote-ssh uptime' % lab,
+        # rewrites that would name another file, branch or folder (review of #20)
+        'cd "%s/link" && scp ../secret.txt host:/tmp/' % root,
+        'cd %s && scp "~/notes.txt" host:/tmp/' % q, 'cd %s && rsync -a . host:/dst/' % q,
+        'cd %s && rsync -a sub/. host:/dst/' % q,
+        'cd %s && rsync -aR sub/file.txt host:/dst/' % q,
+        'cd %s && rsync -a --relative sub/file.txt host:/dst/' % q,
+        "cd %s && rsync -a -f 'merge rules.txt' src/ host:/dst/" % q,
+        "cd %s && rsync -a --filter='. rules.txt' src/ host:/dst/" % q,
+        'cd "%s" && gh pr create --title t --body b' % resolved,
+        'cd "%s" && gh pr view' % resolved,
+        'cd "%s" && gh pr create --title t --body b' % tracking,
+        'cd "%s" && gh pr checks' % tracking,
+        'f=draft.md; f="$TMPDIR/body.md"; cd %s && gh pr comment 5 --body-file "$f"' % q,
+        'f=a.md || f=b.md; cd %s && gh issue comment 5 --body-file "$f"' % q,
+        'cd %s && gh issue comment 5 --body-file "notes-$n.md"' % q,
+        'cd %s && ssh host -i id_test uptime' % q,
+        'cd "%s/data" && ../tools/remote/wait.sh ./input.txt' % proj,
+        'cd "%s" && tools/remote/wait.sh ./input.txt' % proj_wt,
+        'cd "%s" && tools/remote/wait.sh input.txt' % proj_wt,
+        'cd "%s" && sh tools/remote/wait.sh x' % proj_wt,
+        'cd %s && gh ruleset check' % q, 'cd %s && gh pr merge 5 --delete-branch' % q,
+        'cd %s && gh pr merge 5 -d' % q,
+        'bash "%s"/proj*/tools/remote/wait.sh x' % root,
+        'cd %s && gh pr list ' % q + 'x' * 40000,
         # loops, conditionals, other shapes
         'bash "%s/tools/remote/run.sh" lane1 -- \'cd /work/../x && ls\'' % proj_wt,
         'cd %s && for n in 1 2; do gh issue view $n; done' % q,

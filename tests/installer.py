@@ -13,7 +13,8 @@ source, --uninstall leaving CLAUDE.md and AGENTS.md byte-identical (or absent wh
 a symlinked ~/.codex/AGENTS.md refused before any change, a missing client skipped, --guards
 merging and removing the settings, rules and hooks (the git guard and the personal-data hook in
 ~/.codex/hooks.json beside the user's own entries, the latter added by --update to an older
-install), the Codex rules as regular copies (refreshed by
+install), the opt-in sandbox-network guard (only with --guards sandbox, kept by a rerun and
+--update, removed by --uninstall), the Codex rules as regular copies (refreshed by
 --update, a link of an earlier version replaced, a changed copy left by --uninstall), --with
 issue-chats installed beside core in both clients and kept on a plain rerun, an unknown plugin
 refused, and an overlay in both blocks.
@@ -369,6 +370,65 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(after, settings)
         self.assertIsNone(self.read('.codex', 'hooks.json'))
         self.assertFalse(os.path.lexists(rules))
+
+    def sandbox_entries(self):
+        data = json.loads(self.read('.claude', 'settings.json') or b'{}')
+        return [e for e in data.get('hooks', {}).get('PreToolUse', [])
+                if 'pre_tool_sandbox_network.py' in json.dumps(e)]
+
+    def test_sandbox_guard_is_opt_in_kept_and_removed(self):
+        own = {'matcher': 'Bash', 'hooks': [{'type': 'command', 'command': 'my-own-hook'}]}
+        settings = {'sandbox': {'enabled': True, 'excludedCommands': ['gh *']},
+                    'hooks': {'PreToolUse': [own]}}
+        self.write(json.dumps(settings).encode(), '.claude', 'settings.json')
+        os.makedirs(self.path('.codex'))
+        code, out = self.install('--guards')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.sandbox_entries(), [], 'plain --guards must not add it')
+        code, out = self.install('--guards', 'frobnicate')
+        self.assertEqual(code, 2, out)
+        code, out = self.install('--guards', 'sandbox')
+        self.assertEqual(code, 0, out)
+        self.assertIn('sandbox-network guard added', out)
+        self.assertNotIn('does nothing until', out)
+        entries = self.sandbox_entries()
+        self.assertEqual(len(entries), 1, entries)
+        hooks = json.loads(self.read('.claude', 'settings.json'))['hooks']['PreToolUse']
+        self.assertEqual(hooks[0], own)
+        self.assertNotIn(b'sandbox-network', self.read('.codex', 'hooks.json') or b'')
+        command = entries[0]['hooks'][0]['command']
+        self.assertTrue(command.endswith(' || true'), command)
+        if not WINDOWS:  # the entry runs, and a missing script passes instead of blocking
+            payload = json.dumps({'tool_name': 'Bash', 'cwd': self.home,
+                                  'tool_input': {'command': 'ls'}})
+            for text in (command, command.replace('pre_tool_sandbox_network.py', 'gone.py')):
+                r = subprocess.run(['sh', '-c', text], input=payload, capture_output=True,
+                                   text=True, env=dict(self.env(), CLAUDE_CONFIG_DIR=self.path(
+                                       '.claude')))
+                self.assertEqual((r.returncode, r.stdout), (0, ''), r.stderr)
+        for args in ((), ('--update',)):  # a plain rerun and --update keep it, once
+            code, out = self.install(*args)
+            self.assertEqual(code, 0, out)
+            self.assertEqual(len(self.sandbox_entries()), 1, out)
+        state_file = self.path('.agentic-github-flow', '.state', 'install.json')
+        with open(state_file, encoding='utf-8') as f:
+            self.assertTrue(json.load(f)['sandbox_guard'])
+        code, out = self.install('--uninstall')
+        self.assertEqual(code, 0, out)
+        after = json.loads(self.read('.claude', 'settings.json'))
+        for key in ('enabledPlugins', 'extraKnownMarketplaces'):  # the client's own bookkeeping
+            if after.get(key) == {}:
+                del after[key]
+        self.assertEqual(after, settings)
+
+    def test_sandbox_guard_notes_a_sandbox_that_is_off(self):
+        code, out = self.install('--guards=sandbox', clients=['claude'])
+        self.assertEqual(code, 0, out)
+        self.assertIn('does nothing until', out)
+        self.assertEqual(len(self.sandbox_entries()), 1)
+        code, out = self.install('--uninstall', clients=['claude'])
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.sandbox_entries(), [])
 
     def codex_personal_data_entries(self):
         """The matchers of the ~/.codex/hooks.json entries that run the personal-data hook."""

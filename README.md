@@ -94,6 +94,7 @@ Add options to the install command as needed:
 |---|---|
 | `--with security,web-deploy,issue-chats` | also install those plugins (any of them) |
 | `--guards` | also install the guards (see below) |
+| `--guards sandbox` | the guards plus the opt-in [sandbox-network guard](#sandbox-network-guard-opt-in) (Claude Code) |
 | `--overlay <git-url-or-path>` | add a company or personal overlay (repeatable) |
 | `--no-claude`, `--no-codex` | leave one client alone |
 | `--claude-bin <path>`, `--codex-bin <path>` | a client that is not on `PATH` |
@@ -142,6 +143,9 @@ the same version.
   hook stays out of Codex (it asks, and a Codex hook can only deny); the delete prompt rules
   take its place there, and they prompt for every recursive `rm` and `xargs rm`, inside the
   workspace too (under `codex exec`, which never asks, such a command does not run).
+- With `--guards sandbox`, also: one `PreToolUse` entry in `~/.claude/settings.json` that runs
+  the sandbox-network guard from the clone, beside your own hooks (`--update` replaces and
+  `--uninstall` removes only that entry).
 
 With `--with issue-chats`, the plugin's archive hook comes with the plugin; the installer adds no
 permission rule for it (see [Issue chats](#issue-chats)).
@@ -170,6 +174,42 @@ connector (mail and GitHub alike). Whoever can write these files decides what is
 settings folder that a repository moves into itself (through `XDG_CONFIG_HOME` or `HOME` in its
 own settings) is not trusted for the two exemption files. The exact matching rules are in the
 guard's header, `plugins/guards/scripts/pre_tool_personal_data.py`.
+
+### Sandbox-network guard (opt-in)
+
+With Claude Code's Bash sandbox on, a call runs outside the sandbox only when every part of it
+matches an entry of `sandbox.excludedCommands`. A call such as `cd <repo> && gh pr list` never
+matches: it runs inside, `gh` or `ssh` fails there, and the agent retries it with the sandbox
+disabled. In one measured setup a fifth of all Bash calls left the sandbox that way.
+
+`--guards sandbox` adds a hook that turns such a call away and names the lone call that does the
+same and matches one of your entries, for example `gh pr list -R owner/repo`. It only refuses:
+it never lets a call run that would not run without it, and what runs outside the sandbox is
+still decided by your `excludedCommands` and your permission settings. It does nothing until
+`sandbox.enabled` is true in `~/.claude/settings.json` and `excludedCommands` lists your network
+commands (for example `gh *`, `ssh *`, `git push *`). When no faithful lone call exists (input
+from a file or a pipe, output to a file, `$(…)`, a glob after a `cd`, a gh command that acts on
+the folder), the call passes as before.
+
+The forms that run excluded, which the guard's refusals teach:
+- a network command in a Bash call of its own: no `cd`, pipe into another command, file
+  redirection, here-document or `$(…)` (`2>&1` is fine);
+- `gh … -R owner/repo`, with a body written to a file and passed as `--body-file`;
+- absolute paths for `scp`, `rsync` and scripts; filter ssh output on the remote side
+  (`ssh host 'cmd | head'`);
+- `git fetch|pull|push` from the session's own folder: `git -C <dir>` never matches an entry.
+
+A script that reaches the network and has an entry of the form `bash "<absolute path>"*` is
+rewritten to that form. After a `cd` to another folder only when the script does the same from
+any folder: list such scripts, one absolute path pattern per line (`*` allowed), in
+`${XDG_CONFIG_HOME:-~/.config}/agentic-github-flow/sandbox-scripts`. An entry such as `rsync *`
+also lets local copies run outside the sandbox; add only the entries you mean.
+
+A script or tool that only needs a host can stay inside the sandbox: name the host for that one
+call (Claude Code's `allowed_domains`, `host` or `host:port`). For a private address, clear
+`NO_PROXY` and `no_proxy` for that call: clients that honour their CIDR entries (`curl`) go
+straight to the address, which the sandbox refuses. The exact rules are in the guard's header,
+`plugins/guards/scripts/pre_tool_sandbox_network.py`.
 
 ## Issue chats
 

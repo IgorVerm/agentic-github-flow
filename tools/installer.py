@@ -5,7 +5,8 @@ Run it through install.sh (macOS, Linux) or install.ps1 (Windows): they find Pyt
 the clone exists in ~/.agentic-github-flow and start this file from it.
 
 Usage:
-  installer.py [--with security,web-deploy,issue-chats] [--guards] [--overlay <git-url-or-path>]...
+  installer.py [--with security,web-deploy,issue-chats] [--guards [sandbox]]
+               [--overlay <git-url-or-path>]...
                [--no-claude] [--no-codex] [--claude-bin <path>] [--codex-bin <path>]
   installer.py --update      pull the clone, then repeat the recorded install
   installer.py --uninstall   undo what the record says this installer added
@@ -30,6 +31,11 @@ What it does, per client (Claude Code, Codex):
   edited copy is left, with a note, and recorded in .state/codex-rules-left.json so that a
   later --guards keeps it instead of refusing it. Copies under an earlier CODEX_HOME are
   removed by the next install or --update while unchanged.
+- The sandbox-network guard (--guards sandbox, opt-in, Claude Code only): the guards above plus
+  one PreToolUse entry in ~/.claude/settings.json that runs
+  plugins/guards/scripts/pre_tool_sandbox_network.py from this clone (its header owns what it
+  does). It is not in the guards plugin's hooks.json, so only this flag turns it on; --update
+  replaces and --uninstall removes only the recorded entry.
 - Overlays (--overlay): a folder with an AGENTS.md, or a git URL cloned into overlays/ here
   (a second URL with the same name gets a suffix); their text follows the core rules in both
   blocks.
@@ -46,6 +52,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -56,6 +63,7 @@ PLUGINS = {'core': 'agentic-github-flow-core', 'security': 'agentic-github-flow-
            'web-deploy': 'agentic-github-flow-web-deploy',
            'issue-chats': 'agentic-github-flow-issue-chats', 'guards': 'agentic-github-flow-guards'}
 NEEDS = {'web-deploy': ['security']}
+GUARD_EXTRAS = ('sandbox',)  # opt-in guards named after --guards
 BEGIN = '<!-- >>> agentic-github-flow >>> -->'
 END = '<!-- <<< agentic-github-flow <<< -->'
 NOTE = ('<!-- Managed by the agentic-github-flow installer: edit outside these markers; '
@@ -391,6 +399,76 @@ def codex_hooks():
     )
 
 
+def sandbox_hook_entry():
+    """The ~/.claude/settings.json entry of the opt-in sandbox-network guard. `|| true`: a
+    missing file or Python must not block every Bash call (Python exits 2 for a missing script,
+    which Claude Code reads as a block)."""
+    scripts = os.path.join(CLONE, 'plugins', 'guards', 'scripts')
+    command = 'sh %s %s || true' % (shlex.quote(os.path.join(scripts, 'run-python.sh')),
+                                    shlex.quote(os.path.join(scripts,
+                                                             'pre_tool_sandbox_network.py')))
+    return {'matcher': 'Bash', 'hooks': [{'type': 'command', 'command': command, 'timeout': 10}]}
+
+
+def hook_list(data, path):
+    """data['hooks']['PreToolUse'], created when missing; Refused when the file holds another
+    shape there."""
+    hooks = data.setdefault('hooks', {})
+    entries = hooks.setdefault('PreToolUse', []) if isinstance(hooks, dict) else None
+    if not isinstance(entries, list):
+        raise Refused('%s: "hooks.PreToolUse" is not a list; fix it by hand first' % path)
+    return entries
+
+
+def add_sandbox_hook(state):
+    path = os.path.join(claude_dir(), 'settings.json')
+    data = load_json(path)
+    created = data is None
+    data = data if data is not None else {}
+    entries = hook_list(data, path)
+    record = state.get('claude_sandbox_hook', {})
+    entry, changed = sandbox_hook_entry(), False
+    if record.get('entry') in entries and record['entry'] != entry:
+        entries.remove(record['entry'])
+        changed = True
+    if entry not in entries:
+        entries.append(entry)
+        changed = True
+    state['claude_sandbox_hook'] = {'entry': entry, 'created': record.get('created', created)}
+    if changed:
+        backup(path)
+        dump_json(path, data)
+    say('ok', 'claude: sandbox-network guard %s %s' % ('added to' if changed else 'already in',
+                                                         path))
+    sandbox = data.get('sandbox') if isinstance(data.get('sandbox'), dict) else {}
+    if sandbox.get('enabled') is not True or not sandbox.get('excludedCommands'):
+        say('note', 'claude: it does nothing until "sandbox.enabled" is true and '
+                    '"sandbox.excludedCommands" lists your network commands in %s' % path)
+
+
+def remove_sandbox_hook(state):
+    record = state.get('claude_sandbox_hook')
+    path = os.path.join(claude_dir(), 'settings.json')
+    if not record or linked(path, 'the sandbox-network guard entry'):
+        return
+    data = load_json(path) or {}
+    hooks = data.get('hooks')
+    entries = hooks.get('PreToolUse') if isinstance(hooks, dict) else None
+    if not isinstance(entries, list) or record['entry'] not in entries:
+        return
+    entries.remove(record['entry'])
+    if not entries:
+        del hooks['PreToolUse']
+    if not hooks:
+        del data['hooks']
+    backup(path)
+    if record.get('created') and not data:
+        os.remove(path)
+    else:
+        dump_json(path, data)
+    say('ok', 'claude: sandbox-network guard removed from %s' % path)
+
+
 CODEX_RULES = (('git-safety.rules', 'agentic-github-flow-git-safety.rules'),
                ('delete-guard.rules', 'agentic-github-flow-delete-guard.rules'))
 
@@ -586,7 +664,7 @@ def resolve_overlays(sources, updating, failures):
 
 # ---- the steps --------------------------------------------------------------------------------
 
-def preflight(plan, guards, state):
+def preflight(plan, guards, state, sandbox=False):
     """Refuse before any change when a file this run would edit is a symlink or unreadable."""
     if guards and 'codex' in plan:
         record = rules_record(state)
@@ -611,7 +689,9 @@ def preflight(plan, guards, state):
                 'by copying its target), or skip this client with --no-claude or --no-codex, and '
                 'run the installer again. Nothing was changed.' % (path, os.readlink(path)))
         if path.endswith('.json'):
-            load_json(path)
+            data = load_json(path)
+            if sandbox and data is not None and path.endswith('settings.json'):
+                hook_list(json.loads(json.dumps(data)), path)
         else:
             text = read_text(path)
             if text is not None:
@@ -629,9 +709,10 @@ def install(args, state, updating=False):
     if not plan:
         say('FAIL', 'no client found: install Claude Code or Codex first')
         return 1
-    preflight(plan, args.guards, state)
+    preflight(plan, args.guards, state, args.sandbox and 'claude' in plan)
     overlays = resolve_overlays(args.overlay, updating, failures)
     state.update({'with': [w for w in wanted if w != 'core'], 'guards': args.guards,
+                  'sandbox_guard': args.sandbox,
                   'overlays': overlays, 'clients': sorted(plan),
                   'claude_bin': args.claude_bin or state.get('claude_bin'),
                   'codex_bin': args.codex_bin or state.get('codex_bin')})
@@ -661,6 +742,10 @@ def install(args, state, updating=False):
     if args.guards:
         if 'claude' in plan:
             merge_permissions(state)
+            if args.sandbox:
+                add_sandbox_hook(state)
+        elif args.sandbox:
+            say('skip', 'the sandbox-network guard is for Claude Code, which is left alone')
         if 'codex' in plan:
             codex_guards(state)
         save_state(state)
@@ -679,6 +764,7 @@ def uninstall(args, state):
         binary = find_client(client, state.get('%s_bin' % client))
         plan[client] = {'bin': binary, 'dir': folder}
     if state.get('guards'):
+        remove_sandbox_hook(state)
         unmerge_permissions(state)
         remove_codex_guards(state)
     for client, info in plan.items():
@@ -728,6 +814,7 @@ def update(args, state):
 def resume_update(args, state):
     args.with_plugins = state.get('with', [])
     args.guards = state.get('guards', False)
+    args.sandbox = state.get('sandbox_guard', False)
     args.overlay = [o['source'] for o in state.get('overlays', [])]
     clients = state.get('clients', ['claude', 'codex'])
     args.no_claude = 'claude' not in clients
@@ -740,8 +827,9 @@ def main(argv=None):
         prog='install', description='Install agentic-github-flow for Claude Code and Codex.')
     parser.add_argument('--with', dest='with_plugins', default='',
                         help='extra plugins, comma-separated: security, web-deploy, issue-chats')
-    parser.add_argument('--guards', action='store_true',
-                        help='also install the git and personal-data guards')
+    parser.add_argument('--guards', nargs='?', const='', default=None, metavar='sandbox',
+                        help='also install the guards; "--guards sandbox" adds the opt-in '
+                             'sandbox-network guard for Claude Code')
     parser.add_argument('--overlay', action='append', default=[], metavar='GIT-URL-OR-PATH',
                         help='a company or personal overlay with an AGENTS.md (repeatable)')
     parser.add_argument('--update', action='store_true', help='pull and repeat the install')
@@ -752,6 +840,12 @@ def main(argv=None):
     parser.add_argument('--codex-bin', help='path to the codex command')
     parser.add_argument('--resume-update', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    extras = [] if args.guards is None else [g.strip() for g in args.guards.split(',')
+                                             if g.strip()]
+    if [g for g in extras if g not in GUARD_EXTRAS]:
+        parser.error('unknown guard(s) for --guards: %s (choose from %s)' % (
+            ', '.join(g for g in extras if g not in GUARD_EXTRAS), ', '.join(GUARD_EXTRAS)))
+    args.guards, args.sandbox = args.guards is not None, 'sandbox' in extras
     args.with_plugins = [w.strip() for w in args.with_plugins.split(',') if w.strip()]
     unknown = [w for w in args.with_plugins if w not in PLUGINS or w == 'guards']
     if unknown:
@@ -775,6 +869,7 @@ def main(argv=None):
             args.with_plugins = sorted(set(args.with_plugins) | set(state.get('with', [])),
                                        key=list(PLUGINS).index)
             args.guards = args.guards or state.get('guards', False)
+            args.sandbox = args.sandbox or state.get('sandbox_guard', False)
             known = [o['source'] for o in state.get('overlays', [])]
             args.overlay = known + [o for o in args.overlay if o not in known]
         return install(args, state)

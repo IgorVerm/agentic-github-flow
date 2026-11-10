@@ -32,7 +32,8 @@ the user's word in any chat; steps 2, 6 and 7 below say what changes.
 worked in, fails the worktree check (`python3 <plugin>/scripts/chat_archivable.py <worktree>`
 says `keep:`, as it does while a commit of this chat is not on GitHub or, in local-main
 mode, not landed); a run of it whose result the work still needs is still running (a remote
-gate, a capture; its other live work it ends first, *End your own live work* below); another session it started is not detached and is running or fails the worktree check
+gate, a capture); other live work of its own it ends first (*End your own live work* below);
+another session it started is not detached and is running or fails the worktree check
 with `--landed` (method.md §4 *Side chats*), because archiving takes its finished side sessions
 along and removes their worktrees; a
 question to the user is unanswered and the next step needs its answer (any other question waits
@@ -42,12 +43,16 @@ next chat only on the user's request or by the card of step 5, and archive nothi
 **End your own live work** before every archive of this chat (step 7 in both modes, and the
 archive at step 6 of a chat with nothing to push), since the app refuses to archive a session
 with live background work: (1) wait for each subagent this chat started to report (its
-completion notification), starting no new work; if the turn ends first, go on in the turn the
-last notification begins; (2) stop each background task of this chat that still runs (a
-background Bash run, a Monitor: `TaskStop`) once its result is no longer needed, or wait for one
-whose result the hand-over needs; (3) then rerun the worktree check and archive as step 7 says.
-A run whose result the work still needs keeps the chat: report and stop. Another session this
-chat started is not its own live work: the side-chat reason above decides.
+completion notification), starting no new work, and read each report: one that changes the work
+(a finding, a failure) keeps the chat: report and stop. If the turn ends first, go on in the
+turn the last notification begins, checking *Never archive this chat* again. (2) Of its own
+background tasks still running (a background Bash run, a Monitor), stop with `TaskStop` only one
+nothing still uses (a dev server, a watcher, a poll whose answer you already have); wait for one
+that finishes in this turn and whose result goes into your report (the first CI result of
+`ship-change` step 7). One that outlasts the turn (a remote gate, a capture) is a run the work
+still needs: never stop it; it keeps the chat: report and stop. (3) Then rerun the worktree
+check and archive as step 7 says. Another session this chat started is not its own live work:
+the side-chat reason above decides.
 
 **A probe that must not be merged** keeps its commits on a local branch
 `scratch/<issue>-<what>` (`git branch scratch/<issue>-<what> <sha>`), named on the issue with

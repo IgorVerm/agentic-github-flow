@@ -196,11 +196,10 @@ not touch.
 
 The app refuses to archive a session with live background work, so a chat that kept a subagent
 or a background task of its own running stayed in the sidebar after its hand-over until the user
-archived it by hand. Before every archive of itself the chat therefore ends its own live work
-(`issue-handover`, *End your own live work*): it waits for each subagent it started to report,
-stops each background task whose result is no longer needed and waits for one whose result the
-hand-over needs. A run whose result the work still needs (a remote gate, a capture) keeps the
-chat, as unfinished work does; a session it started is a side chat (*Side chats* below).
+archived it by hand. So before every archive of itself the chat ends its own live work
+(`issue-handover`, *End your own live work*). A run whose result the work still needs (a remote
+gate, a capture) keeps the chat, as unfinished work does; a session it started is a side chat
+(*Side chats* below).
 
 A chat that handed its unfinished issue to a successor working on its own branch (started from
 this chat's head) passes once that branch is pushed: the check then finds HEAD in another branch
@@ -253,8 +252,10 @@ notification began. So:
 - **The work runs in the foreground of the turn the start brief began:** a long run is waited
   for by a blocking wait command, called again when the tool's timeout ends it, never by ending
   the turn for a notification. The hand-over happens in that same turn, so nothing of the chat
-  runs on in the background; what still runs at the archive the chat ends first
-  (`issue-handover`, *End your own live work*), since `archive_session` refuses a session with live background work.
+  runs on in the background; what still runs at the archive the chat ends first, since
+  `archive_session` refuses a session with live background work. After the hand-over, a
+  subagent's report is the one thing a chat may end its turn for (`issue-handover`, *End your
+  own live work*).
 - **Questions for the user go on the owning issue** with the question label. They do not block
   the hand-over unless the next step needs the answer. A question that is really new scope gets
   the requirements label instead.

@@ -34,9 +34,10 @@ command (or a `run_in_terminal` call) that:
   that part empty, and the guard assumes it holds no `..`. An unquoted one asks, because it
   splits on spaces. A known variable used unquoted is split at white space and its `*?[`
   expand (`D="$HOME/Documents backup"; rm -rf $D` deletes `~/Documents`). `${NAME:-word}` is
-  NAME's value when NAME is known, word (a leading `~` expanded) when NAME is known to be
-  empty, and otherwise word only when it lies in a temporary folder or a git worktree; else it
-  is unknown (`rm -rf ${CLEAN:-~}` asks);
+  NAME's value when NAME is known, word (a leading `~`, `~+` or `~+0` expanded; `~-` and `~N`
+  make it unknown) when NAME is known to be empty, and otherwise word only when it lies in a
+  temporary folder or a git worktree; else it is unknown (`rm -rf ${CLEAN:-~}` and
+  `rm -rf ${CLEAN:-~+}` in a repository ask);
 - deletes recursively a repository or worktree root (a folder holding `.git`, or one directly
   holding such folders) or a `.git` folder; worktrees go through the cleanup-merged skill;
 - deletes what `xargs` or GNU `parallel` hands over, or hands it to a shell: the command
@@ -54,10 +55,11 @@ command (or a `run_in_terminal` call) that:
   while it names a delete; holds a `$'…'` string the guard cannot decode while it names a
   delete; names more than MAX_PATHS paths to delete; holds a brace expansion of more than
   MAX_BRACES texts with an alternative holding `/` or `..` (without one, everything from the
-  first `{` is judged as a glob: `rm -f out/file{1..100}.txt` stays in `out`); or, while it
-  names a delete, takes longer than DEADLINE seconds to judge or blocks in a call (a hung
-  mount) past HARD_DEADLINE, after which the hook answers without waiting for it (the hook's
-  timeout in hooks.json is 10 s).
+  first `{` is judged as a glob: `rm -f out/file{1..100}.txt` stays in `out`; one with an
+  alternative that starts with `~` asks); or, while it names a delete or holds an `-rf`-style
+  flag cluster, takes longer than DEADLINE seconds to judge or blocks in a call (a hung mount)
+  past HARD_DEADLINE, after which the hook answers without waiting for it (the hook's timeout
+  in hooks.json is 10 s).
 Working folders: a `cd` in a loop, or anywhere once the command defines a function, makes the
 folder unknown. Otherwise a `cd` is trusted for the rest of its list when what follows runs
 only on its success (`cd x && …`, `cd x || exit`). When the list ends (`;`, a newline, `&`), and after
@@ -65,6 +67,21 @@ any other `cd`, relative paths are judged against both the folder before and the
 the `cd`, and the command asks if either is protected (`cd /tmp/x; rm -rf build` from a
 repository passes, `cd /tmp/gone && echo; rm -rf *` from the home folder asks). A subshell's
 `cd` ends at its `)`; `env -C <folder>` and `sudo -D <folder>` count as a trusted `cd`.
+Next to these folders it keeps a second set (MoreFolders) that only ever adds folders, and
+judges every command in both: a `cd` behind `time`, `noglob`, `nocorrect`, `-`, `!`, an
+assignment or zsh's `repeat N`; the folder before a `cd` that may be skipped (after `||`, in a
+pipeline, negated); for popd and pushd any folder the command was in, for `cd -` and zsh's
+`cd ±N` also an unknown one; zsh's `cd OLD NEW`; a CDPATH the command sets; a `cd` in a loop
+as often as the loop runs (the words of `for x in a b`, `repeat N`, else any number of
+times), also for a delete before it in the loop; the folders an `eval` or a variable holding a
+command (`C='cd ~'; $C`) may end in; an unknown folder after a computed command whose text
+names a `cd` (`$(echo cd) ~`, `eval "$(echo cd ~)"`); and the `cd`s of a function body where
+the function is called, and of a DEBUG, RETURN or ERR trap after each command. Function
+bodies and trap texts are judged again at the end of their shell, in every folder it may be
+in from their definition on (`trap 'rm -rf Documents' EXIT; cd ~`). The second reading gets
+half of DEADLINE; when it runs out of time, or faults on a command that names no delete, the
+command is judged again by the first reading alone, so it never asks less than that reading.
+More function and trap bodies than MAX_LATER ask when the command names a delete.
 The temporary folders: `/tmp`, `/private/tmp`, `/var/tmp`, `/var/folders`, `/private/var/folders`
 and the folder that `TMPDIR`, `TEMP` or `TMP` names, unless that is a root or holds a home
 folder; a path inside a home folder counts only when the temporary folder lies inside that home
@@ -73,16 +90,20 @@ too (Windows' `AppData/Local/Temp`).
 It reads the command as the shell would: behind `sh -c`, `bash -c --`, `su … -c`, `csh`,
 `fish`, `eval`, `$(…)`, a here-document or here-string a shell reads, wrappers (`sudo`, `env`,
 `nice`, `timeout`, `arch`, `script`, `command`, `builtin`, `busybox`, `pkexec`, `runuser`),
-quoting and escapes in the command name (`\\rm`, `"r"m`, `$'rm'`, zsh's `=rm`, `rm.exe`,
-`C:\\…\\rm.exe`, a glob such as `/bin/r[m]`), a variable that holds the command
-(`R=rm; $R -rf x`), the text of `trap '…' EXIT`, `~user` and `~+`, brace expansion (also
-`{a..c}`), `cd` (also inside `if` and `{ }`), find's `-O3` and `-D <flags>` before its folders,
-command names in any case. Literal paths inside a git worktree or a temporary folder pass,
-and `trash` always passes. Paths are compared without regard to case, as the macOS and
-Windows file systems do (on Linux that only asks more), both as written and with links
-resolved. On Windows, Git Bash paths (`/c/Users/…`, `/cygdrive/c/…`) and `C:\\…` or `C:/…`
-are read as the same drive paths; on every system WSL's `/mnt/<letter>/…` is also judged as
-that Windows drive.
+the precommands `time`, `noglob`, `nocorrect` and `-`, zsh's `repeat N`, a one-line function
+header (`function f { rm -rf x; }`), quoting and escapes in the command name (`\\rm`, `"r"m`,
+`$'rm'`, zsh's `=rm`, `rm.exe`, `C:\\…\\rm.exe`, a glob such as `/bin/r[m]`), a variable that
+holds the command (`R=rm; $R -rf x`), the text of `trap [--] '…' EXIT`, `~user`, `~+` and
+`~+0`, brace expansion (also `{a..c}`), `cd` (also inside `if` and `{ }`), find's `-O3` and
+`-D <flags>` before its folders, command names in any case. A `~` form the shell expands that
+the literal reading leaves alone is judged in addition to it: a brace alternative that starts
+with `~` (`{~,a}`, `~{/.zshrc,/.bashrc}`), and the folder stack's `~-`, `~N`, `~+N` and `~-N`
+as every folder the command was in and an unknown one. Literal paths inside a git worktree or
+a temporary folder pass, and `trash` always passes. Paths are compared without regard to case,
+as the macOS and Windows file systems do (on Linux that only asks more), both as written and
+with links resolved. On Windows, Git Bash paths (`/c/Users/…`, `/cygdrive/c/…`) and `C:\\…`
+or `C:/…` are read as the same drive paths; on every system WSL's `/mnt/<letter>/…` is also
+judged as that Windows drive.
 
 Not seen: deletes by a script file or program the command starts (`python3 x.py`,
 `shutil.rmtree` in `python -c`), `rsync --delete`, `mv` over a folder, `dd`, `diskutil`, a
@@ -107,11 +128,14 @@ its built-in check of `rm -f`, and the prompt rules in policy/delete-guard.rules
 deletes without `-f`, `xargs … rm`), which the installer copies into ~/.codex/rules/. The
 written rule binds Codex where those do not reach.
 
-An input it cannot parse is asked about when it names a delete program, and passes otherwise;
-a fault in the guard itself asks in the same case. Any other input, a malformed event
-included, passes with exit 0. Nothing is ever denied. The shell helpers it shares
-(`base`, `SHELLS`, `KEYWORDS`, `ASSIGN`, `HEREDOC`, `$'…'` decoding, the input and depth limits)
-have one owner, pre_tool_git_guard.py.
+An input it cannot parse is asked about when it names a delete program or holds an
+`-rf`-style flag cluster (what a computed command name may run), and passes otherwise; a fault
+in the guard itself asks in the same case. tests/delete_guard_differential.py checks that the
+guard asks for every command the guard as it was before issue #4 (the first reading alone)
+asks for. Any other input,
+a malformed event included, passes with exit 0. Nothing is ever denied. The shell helpers it
+shares (`base`, `SHELLS`, `KEYWORDS`, `ASSIGN`, `HEREDOC`, `$'…'` decoding, the input and
+depth limits) have one owner, pre_tool_git_guard.py.
 
 Usage as a hook: reads the PreToolUse JSON on stdin, prints the "ask" decision on stdout or
 nothing, and exits 0. For tests: `pre_tool_delete_guard.py --check '<command>' [cwd]` prints the
@@ -162,9 +186,19 @@ UNKNOWN = None  # the value of a variable this hook cannot know
 MAX_PATHS = 4096  # paths judged per command, brace expansions included; more asks
 MAX_BRACES = 64   # texts one brace expansion may make; more asks
 DEADLINE = 4.0    # seconds of judging (hooks.json allows 10); past it, a delete asks
-HARD_DEADLINE = DEADLINE + 2.0  # the judging thread's limit, for a call that blocks (a hung mount)
+# the judging thread's limit, for a call that blocks (a hung mount): both readings' time (the
+# second reading gets half of DEADLINE before the first is judged alone, see decide) and 2 s
+HARD_DEADLINE = 1.5 * DEADLINE + 2.0
 MAX_FOLDERS = 8   # working folders a command may be in after `cd`s that may have failed
+MAX_MORE = 32     # folders the second reading adds; past it, one unknown folder stands for the rest
+MAX_LATER = 16    # function and trap bodies judged again at the end of a shell
 LIST_ENDS = (';', ';;', '\n', '&', '')  # operators after which a `cd …&&` list is over
+CD_WORDS = ('cd', 'pushd', 'popd', 'chdir')
+CD_TEXT = re.compile(r'(^|[^\w.-])(cd|pushd|popd|chdir)([^\w.-]|$)')
+LOOP_ENDS = {'for': 'done', 'while': 'done', 'until': 'done', 'select': 'done', 'foreach': 'end'}
+PRECOMMANDS = ('time', 'noglob', 'nocorrect', '-', 'builtin', 'command')  # run the next word
+STACK_TILDE = re.compile(r'~([+-]?\d+|[+-])')  # `~+`, `~-`, `~+1`, `~-1`, `~2`: the folder stack
+RF_FLAG = re.compile(r'(^|\s)-[A-Za-z]*([rR][A-Za-z]*f|f[A-Za-z]*[rR])')
 RULE = "Outside a repository, delete with the system's trash, not `rm -rf`"
 SAFE_FORM = ("the system's trash (`trash` on macOS, `gio trash` on Linux, the Recycle Bin on "
              "Windows)")
@@ -371,6 +405,13 @@ def default_word(word, env):
     """The word of `${NAME:-word}` as the shell expands it: a leading `~` is a home folder."""
     if word == '~' or word.startswith('~/'):
         return env['HOME'] + word[1:]
+    stack = STACK_TILDE.match(word)
+    if env.get(' stack') and stack and word[stack.end():stack.end() + 1] in ('', '/'):
+        # the second reading (stack_value): `~+` and `~+0` are the working folder, `~-` and
+        # `~N` a folder of the stack
+        if stack.group(1) in ('+', '+0') and isinstance(env.get('PWD'), str):
+            return env['PWD'] + word[stack.end():]
+        return UNKNOWN
     user = re.match(r'~([A-Za-z0-9_.-]+)(/|$)', word)
     if user:
         home = os.path.expanduser('~' + user.group(1))
@@ -654,6 +695,10 @@ class State:
         self.budget = [MAX_PATHS]  # paths left to judge, shared with the child states
         self.deadline = time.monotonic() + DEADLINE
         self.alt = ()  # other folders the command may be in: a `cd` that may have failed
+        self.ext = ()  # the folders of the second reading (MoreFolders), judged next to these
+        self.landing = []  # folders a text this shell runs (eval, `$C`) may end in
+        self.shell = Shell()
+        self.more = True   # the second reading is on (decide turns it off after a failure)
 
     def folders(self):
         return [self.cwd] + list(self.alt)
@@ -704,11 +749,40 @@ class State:
         env[' state'] = self  # not a shell name: for `${NAME:-word}`
         return env
 
-    def child(self, text=''):
+    def child(self, text='', shared=False):
+        """A state for a nested text; shared when this shell runs it (eval, `$C`, a function or
+        trap body), so its folders, functions and traps stay in this shell."""
         state = State(self.cwd, self.home, self.homes, self.temp, self.env, text or self.text)
         state.mktemp, state.budget, state.deadline = self.mktemp, self.budget, self.deadline
-        state.alt = self.alt
+        state.alt, state.more = self.alt, self.more
+        if shared:
+            state.shell = self.shell
         return state
+
+
+class Shell:
+    """What the second reading collects about one shell process: every folder it may have been
+    in (where popd, `cd -`, `~-` and a function or trap body can lead), the function and trap
+    bodies it may run later, the folder changes in those bodies, and a CDPATH it set."""
+
+    def __init__(self):
+        self.seen = []
+        self.later = []    # [kind, item, folders]: a function body ('body', its commands) or a
+        #                    trap ('text'), judged at the end in the folders the shell may be in
+        #                    from its definition on
+        self.moves = []    # (function name, or None for a DEBUG trap; cd specs of its body):
+        #                    folder changes that happen where the function is called
+        self.cdpath = None
+        self.keys = set()
+        self.overflow = False  # more bodies than MAX_LATER
+
+    def run_later(self, kind, item, key):
+        if key not in self.keys:
+            self.keys.add(key)
+            if len(self.later) < MAX_LATER:
+                self.later.append([kind, item, []])
+            else:
+                self.overflow = True
 
 
 def safe_prefix(value, state):
@@ -786,20 +860,104 @@ def brace_as_glob(text):
 
 def judge_targets(targets, recursive, state, program):
     for word in targets:
-        value = evaluate(word, state.values())
-        if value.computed and recursive and not safe_prefix(value, state):
-            return 'deletes recursively a target that %s (%s)' % (value.why, word.raw())
-        for field, glob in value.fields():
-            texts = braces(word, field)
-            if texts is None:
-                texts, glob = [brace_as_glob(field)], True
-                if texts[0] is None:
-                    return 'deletes and ' + TOO_MANY_BRACES % word.raw()
-            for text in texts:
-                reason = judge_path(text, glob, word, recursive, state, program)
-                if reason:
-                    return reason
+        reason = judge_value(word, evaluate(word, state.values()), recursive, state, program)
+        if reason or not state.more:
+            if reason:
+                return reason
+            continue
+        value = stack_value(word, state)
+        reason = value and judge_value(word, value, recursive, state, program)
+        if reason:
+            return reason
+        more = more_texts(word, state)
+        if more is None:
+            return 'deletes and ' + TOO_MANY_BRACES % word.raw() + ' with a `~` alternative'
+        for path, glob in more:
+            if path is None:
+                if recursive:
+                    return ('deletes recursively a target in a folder of the folder stack, which '
+                            'the delete guard cannot know (%s)' % word.raw())
+                continue
+            reason = judge_path(path, glob, word, recursive, state, program)
+            if reason:
+                return reason
     return None
+
+
+def judge_value(word, value, recursive, state, program):
+    if value.computed and recursive and not safe_prefix(value, state):
+        return 'deletes recursively a target that %s (%s)' % (value.why, word.raw())
+    for field, glob in value.fields():
+        texts = braces(word, field)
+        if texts is None:
+            texts, glob = [brace_as_glob(field)], True
+            if texts[0] is None:
+                return 'deletes and ' + TOO_MANY_BRACES % word.raw()
+        for text in texts:
+            reason = judge_path(text, glob, word, recursive, state, program)
+            if reason:
+                return reason
+    return None
+
+
+def stack_value(word, state):
+    """The second reading of a word with a `${NAME:-word}` whose word starts with a folder
+    stack form, `~+` and `~+0` read as the working folder, `~-` and `~N` as unknown; or None.
+    The first reading takes such a word literally."""
+    if not any(q != "'" and '${' in t and '~' in t for q, t in word.parts):
+        return None
+    env = state.values()
+    env[' stack'] = True
+    return evaluate(word, env)
+
+
+def more_texts(word, state):
+    """The paths a `~` form in word makes that the first reading leaves literal (issue #4): an
+    alternative of a brace expansion that starts with `~` (`{~,a}`, `~{/.zshrc,/.bashrc}`: the
+    shell expands braces first), and the folder stack's `~+0`, `~-`, `~1`, `~-1`. They are
+    judged in addition to the literal reading, never in its place. Returns [(path or None for a
+    folder it cannot know, glob)], or None when a brace expansion over MAX_BRACES has an
+    alternative that starts with `~`."""
+    if not word.parts or word.parts[0][0] != '' or '~' not in word.parts[0][1]:
+        return []
+    first = word.parts[0][1]
+    lead = re.match(r'~[^/{]*', first)
+    literal = Word()  # the word with its leading `~` form kept as text
+    if lead:
+        literal.add("'", lead.group(0))
+        first = first[lead.end():]
+    if first:
+        literal.add('', first)
+    literal.parts += word.parts[1:]
+    stack = bool(lead and STACK_TILDE.fullmatch(lead.group(0)))
+    out = []
+    for field, glob in evaluate(literal, state.values()).fields():
+        texts = braces(word, field)
+        if texts is None:
+            if re.search(r'(^|[{,])~', field):
+                return None
+            continue
+        for text in texts:
+            if text.startswith('~') and (stack or text != field):
+                out += [(None if f is None else f + rest, glob)
+                        for f, rest in tilde_folders(text, state)]
+    return out
+
+
+def tilde_folders(text, state):
+    """[(folder or None, the rest of text)] for a text that starts with a `~` form."""
+    m = re.match(r'~([^/]*)', text)
+    tag, rest = m.group(1), text[m.end():]
+    if tag == '':
+        return [(state.home, rest)]
+    if tag in ('+', '+0'):
+        return [(state.cwd, rest)]
+    if re.fullmatch(r'[+-]?\d+|-', tag):
+        return [(f, rest) for f in state.shell.seen if f is not None] + [(None, rest)]
+    if re.fullmatch(r'[A-Za-z0-9_.-]+', tag):
+        home = os.path.expanduser('~' + tag)
+        return [(None if home.startswith('~') else canon(home), rest)]
+    return []
 
 
 def judge_path(text, glob, word, recursive, state, program):
@@ -910,28 +1068,57 @@ def judge_find(words, state):
         starts = [Word()]
         starts[0].add("'", '.')
     for word in starts:
-        value = evaluate(word, state.values())
-        if value.computed and not safe_prefix(value, state):
-            return 'runs find with a delete from a folder that %s (%s)' % (value.why, word.raw())
-        for field, glob in value.fields():
-            texts = braces(word, glob_base(field) if glob else field)
-            if texts is None:
-                texts = [brace_as_glob(field)]
-                if texts[0] is None:
-                    return 'runs find with a delete and ' + TOO_MANY_BRACES % word.raw()
-                texts = [glob_base(texts[0])]
-            for text in texts:
-                state.check_time()
-                path = norm(text, state.cwd)
-                if path is None:
-                    return ('runs find with a delete from a relative folder after a `cd` that '
-                            'may not have happened or went to a computed folder')
-                reason = protected(path, state.homes)
-                if reason:
-                    return 'runs find with a delete in %s (%s)' % (reason, word.raw())
-                if not in_safe_area(path, state):
-                    return ('runs find with a delete outside a git worktree and the temporary '
-                            'folders (%s)' % word.raw())
+        reason = judge_find_value(word, evaluate(word, state.values()), state)
+        if reason or not state.more:
+            if reason:
+                return reason
+            continue
+        value = stack_value(word, state)
+        reason = value and judge_find_value(word, value, state)
+        if reason:
+            return reason
+        more = more_texts(word, state)
+        if more is None:
+            return ('runs find with a delete and ' + TOO_MANY_BRACES % word.raw() +
+                    ' with a `~` alternative')
+        for path, glob in more:
+            reason = judge_find_start(glob_base(path) if glob and path else path, word, state)
+            if reason:
+                return reason
+    return None
+
+
+def judge_find_value(word, value, state):
+    if value.computed and not safe_prefix(value, state):
+        return 'runs find with a delete from a folder that %s (%s)' % (value.why, word.raw())
+    for field, glob in value.fields():
+        texts = braces(word, glob_base(field) if glob else field)
+        if texts is None:
+            texts = [brace_as_glob(field)]
+            if texts[0] is None:
+                return 'runs find with a delete and ' + TOO_MANY_BRACES % word.raw()
+            texts = [glob_base(texts[0])]
+        for text in texts:
+            reason = judge_find_start(text, word, state)
+            if reason:
+                return reason
+    return None
+
+
+def judge_find_start(text, word, state):
+    """The reason a find with a delete from text needs the user, or None; text None is a folder
+    the guard cannot know."""
+    state.check_time()
+    path = None if text is None else norm(text, state.cwd)
+    if path is None:
+        return ('runs find with a delete from a relative folder after a `cd` that may not have '
+                'happened or went to a computed folder')
+    reason = protected(path, state.homes)
+    if reason:
+        return 'runs find with a delete in %s (%s)' % (reason, word.raw())
+    if not in_safe_area(path, state):
+        return ('runs find with a delete outside a git worktree and the temporary folders (%s)'
+                % word.raw())
     return None
 
 
@@ -1023,6 +1210,102 @@ def too_deep(text):
 
 
 def judge_command(words, state, depth):
+    """The reason a simple command needs the user, or None: the forms the guard read before
+    issue #4 (judge_core), then the ones it added (judge_added_forms)."""
+    return judge_core(words, state, depth) or (
+        judge_added_forms(words, state, depth) if state.more else None)
+
+
+def judge_here(text, state, depth):
+    """judge for a text this shell runs itself (eval, `$C`): its folder changes, functions and
+    traps stay in this shell, so the folders it may end in go to state.landing."""
+    child = state.child(shared=True)
+    reason = judge(text, child, depth, own=False)
+    state.landing.extend(child.folders() + list(child.ext))
+    return reason
+
+
+def strip_head(words):
+    """(the words from the program a command runs, flags), past what judge_core skips (keywords,
+    assignments, `{`, `}`) and also past `!`, the precommands `time`, `noglob`, `nocorrect`, `-`,
+    `builtin` and `command`, zsh's `repeat N`, and a `function NAME` header. flags holds
+    'negated', 'repeat' and 'repeat-do' (`repeat N do … done`)."""
+    flags = set()
+    words = [w for w in words if not w.redirect]
+    while words:
+        raw = words[0].raw()
+        if raw == '!':
+            flags.add('negated')
+            words = words[1:]
+        elif raw in gg.KEYWORDS or raw in ('{', '}') or raw in PRECOMMANDS or \
+                gg.ASSIGN.fullmatch(raw):
+            words = words[1:]
+            while raw in ('command', 'builtin', 'time') and words and \
+                    words[0].raw().startswith('-') and words[0].raw() != '-':
+                words = words[1:]  # `command -p`, `builtin --`, `time -p`
+        elif raw == 'repeat' and len(words) > 1:
+            flags.add('repeat')
+            words = words[2:]
+            if words and words[0].raw() == 'do':
+                flags.add('repeat-do')
+        elif raw == 'function' and len(words) > 1:
+            words = words[1:] if words[1].raw() == '{' else words[2:]
+        else:
+            break
+    return words, flags
+
+
+def judge_added_forms(words, state, depth):
+    """Forms judge_core does not read (issue #4): the command behind a precommand, `repeat N` or
+    a one-line function header (`function f { rm -rf ~/Library; }`), and `trap` behind them or
+    with `--`. It only adds reasons to ask."""
+    if depth > gg.MAX_DEPTH:
+        return None  # judge_core has answered
+    herestrings = [w for w in words if w.herestring]
+    plain = [w for w in words if not w.redirect]
+    core = plain
+    while core and (gg.ASSIGN.fullmatch(core[0].raw()) or core[0].raw() in gg.KEYWORDS
+                    or core[0].raw() in ('{', '}')):
+        core = core[1:]
+    rest, _ = strip_head(plain)
+    if rest and len(rest) < len(core):
+        reason = judge_command(rest + herestrings, state, depth + 1)
+        if reason:
+            return reason
+    if rest and rest[0].raw() == 'trap':
+        return judge_trap(rest, state, depth)
+    return None
+
+
+def judge_trap(words, state, depth):
+    """`trap [--] ACTION SIGNAL…`: the action is judged here, and again at the end of the shell
+    in every folder it may be in then (judge_later), with its folder changes counted as ones
+    that may happen at any later point (a DEBUG trap runs before each command)."""
+    args = words[1:]
+    if args and args[0].raw() == '--':
+        args = args[1:]
+    elif args and args[0].raw().startswith('-'):
+        return None  # `trap -p`, `trap -l`: print
+    if len(args) < 2 or args[0].raw() in ('', '-'):
+        return None  # no action, or a reset
+    value = evaluate(args[0], state.values())
+    text = args[0].raw() if value.computed else value.text
+    if value.computed and has_delete_word(text):
+        return 'sets a computed trap that names a delete (%s)' % text[:80]
+    try:
+        reason = judge(text, state.child(), depth + 1)
+    except ValueError:  # a trap text the guard cannot lex
+        return ('sets a trap whose text the delete guard cannot read, and the text names a '
+                'delete (%s)' % text[:80] if names_delete(text) else None)
+    if reason:
+        return reason
+    state.shell.run_later('text', text, ('text', text))
+    if {w.raw().upper().lstrip('SIG') for w in args[1:]} & {'DEBUG', 'RETURN', 'ERR', 'ZERR'}:
+        state.shell.moves.append((None, moves_in(text, state)))  # runs around every command
+    return None
+
+
+def judge_core(words, state, depth):
     raws = ' '.join(w.raw() for w in words)
     if depth > gg.MAX_DEPTH:
         return too_deep(raws)
@@ -1045,8 +1328,8 @@ def judge_command(words, state, depth):
                 return 'runs a computed command name with a recursive flag (%s)' % raws[:80]
         elif head.text.strip():
             # `R=rm; $R -rf x` or `CMD='rm -rf x'; $CMD`: read the command as the shell does
-            return judge(head.text + ' ' + ' '.join(w.raw() for w in words[1:]),
-                         state.child(), depth + 1)
+            return judge_here(head.text + ' ' + ' '.join(w.raw() for w in words[1:]),
+                              state, depth + 1)
     name = name_of(words[0])
     if any(ch in name for ch in '*?[') and any(q == '' and any(ch in t for ch in '*?[')
                                                for q, t in words[0].parts):
@@ -1086,7 +1369,7 @@ def judge_command(words, state, depth):
             parts.append(w.raw() if value.computed else value.text)
         if computed and has_delete_word(' '.join(parts)):
             return 'evaluates computed text that names a delete (%s)' % raws[:80]
-        return judge(' '.join(parts), state.child(), depth + 1)
+        return judge_here(' '.join(parts), state, depth + 1)
     if name == 'trap' and len(words) > 1 and not words[1].raw().startswith('-'):
         # `trap '…' EXIT`: the shell runs the text later
         value = evaluate(words[1], state.values())
@@ -1241,7 +1524,10 @@ def strip_heredocs(text):
     return '\n'.join(out), bodies
 
 
-def judge(text, state, depth=0):
+def judge(text, state, depth=0, own=True):
+    """The reason text needs the user, or None. own: text is a shell of its own (the command,
+    `sh -c`, a substitution), so the function and trap bodies it defines are judged at its end;
+    a text this shell runs (judge_here, judge_later) leaves them to the shell's own judge."""
     if depth > gg.MAX_DEPTH:
         return too_deep(text)
     text, bodies = strip_heredocs(text.replace('\\\n', ' '))
@@ -1255,11 +1541,22 @@ def judge(text, state, depth=0):
         reason = judge(inner, state.child(), depth + 1)
         if reason:
             return reason
+    reason = run(commands, state, depth)
+    if reason or not own or not state.more:
+        return reason
+    return judge_later(state, depth)
+
+
+def run(commands, state, depth):
+    """Judge lexed commands in order, following the working folders: the first reading (track
+    and the loop below) and the second (MoreFolders), which only adds folders."""
     saved = []    # (working folders, variables, list start) at each `(`, restored at its `)`
     before = None  # the working folders before the current `&&`/`||` list, once a cd changed them
     loops = 0      # loops open: a cd in one may run any number of times
     functions = False  # a function was defined: its cds run wherever it is called
+    more = MoreFolders(commands, state) if state.more else None
     for k, (words, op) in enumerate(commands):
+        pre = state.folders()
         if words:
             first = words[0].raw()
             if first in ('for', 'while', 'until', 'select'):
@@ -1289,24 +1586,350 @@ def judge(text, state, depth=0):
         elif op == ')' and saved:
             folders, state.env, before = saved.pop()
             state.set_folders(folders)
+        if more:
+            more.after(k, pre)
     return None
 
 
 def judge_in_each_folder(words, state, depth):
-    """judge_command in each folder the command may run in."""
+    """judge_command in each folder the command may run in: the first reading's, then the ones
+    only the second reading has."""
     folders = state.folders()
+    folders += [f for f in state.ext if f not in folders]
     if len(folders) == 1:
         return judge_command(words, state, depth)
-    kept = state.cwd, state.alt
+    kept = state.cwd, state.alt, state.ext
     try:
         for folder in folders:
-            state.cwd, state.alt = folder, ()
+            state.cwd, state.alt, state.ext = folder, (), ()
             reason = judge_command(words, state, depth)
             if reason:
                 return reason
     finally:
-        state.cwd, state.alt = kept
+        state.cwd, state.alt, state.ext = kept
     return None
+
+
+def judge_later(state, depth):
+    """Judge the function and trap bodies a shell defined again, in every folder it may have
+    been in, since they run where they are called or when the trap fires."""
+    shell, k = state.shell, 0
+    if shell.overflow and names_delete(state.text):
+        return ('defines more functions and traps than the delete guard judges again (%d), and '
+                'names a delete' % MAX_LATER)
+    frozen = [list(entry[2]) for entry in shell.later]  # not grown by the bodies judged here
+    while k < len(shell.later):
+        kind, item, folders = shell.later[k]
+        folders = frozen[k] if k < len(frozen) else list(folders)
+        k += 1
+        for folder in folders:
+            child = state.child(shared=True)
+            child.cwd, child.alt = folder, ()
+            reason = (run(item, child, depth + 1) if kind == 'body'
+                      else judge(item, child, depth + 1, own=False))
+            if reason:
+                return '%s, in a function or trap body that runs later' % reason
+    return None
+
+
+# --- the second reading of the working folders (issue #4) ----------------------------------
+# The first reading (track and run's loop) is the guard as it was before issue #4. Its folders
+# are never replaced: the second reading keeps a list of its own (state.ext) of folders the
+# shell may also be in, and every command is judged in both. Unknown folders (None) are only
+# ever added. It reads what the first does not: a cd behind a precommand, `!`, an assignment or
+# `repeat`; a cd that may be skipped (after `||`, in a pipeline); popd, pushd and `cd -` with
+# the folders the command was in; zsh's `cd OLD NEW`; CDPATH; a cd in a loop applied as often
+# as it may run, also before the loop's first delete; eval and `$C` that run a cd; a cd hidden
+# in computed text; and the cds of function and trap bodies, which may run at any later point.
+
+def union(*lists):
+    out = []
+    for items in lists:
+        for f in items:
+            if f not in out:
+                out.append(f)
+    return out
+
+
+def capped(folders):
+    folders = list(folders)
+    return folders if len(folders) <= MAX_MORE else folders[:MAX_MORE - 1] + [None]
+
+
+def cd_specs(words, state):
+    """What a cd-like command (after strip_head) changes to, as a list of specs, or None for
+    another command: ('home',), ('path', text), ('subst', old, new) for zsh's `cd OLD NEW`,
+    ('stack', unknown) for popd, pushd, `cd -` and `cd ±N` (a folder the command was in, and an
+    unknown one when unknown), ('unknown',)."""
+    if not words or words[0].raw() not in CD_WORDS:
+        return None
+    if words[0].raw() == 'popd':
+        return [('stack', False)]
+    args = [w for w in words[1:] if not re.fullmatch(r'-[LPe@qs]+|--', w.raw())]
+    if not args:
+        return [('stack', True), ('home',)] if words[0].raw() == 'pushd' else [('home',)]
+    if args[0].raw() == '-' or re.fullmatch(r'[-+]\d+', args[0].raw()):
+        return [('stack', True)]
+    value = evaluate(args[0], state.values())
+    if value.computed:
+        return [('unknown',)]
+    specs = [('path', value.text)]
+    if len(args) > 1:
+        new = evaluate(args[1], state.values())
+        specs.append(('unknown',) if new.computed else ('subst', value.text, new.text))
+    return specs
+
+
+def moves_in(text, state):
+    """The cd specs of every cd in text, at any depth: a body that may run anywhere later."""
+    try:
+        commands, _ = lex(text)
+    except ValueError:
+        return [('unknown',)] if CD_TEXT.search(text) else []
+    specs = []
+    for words, _ in commands:
+        rest, _ = strip_head(words)
+        specs += cd_specs(rest, state) or []
+        if rest and computed_cd(rest[0]):
+            specs.append(('unknown',))
+    return specs
+
+
+def cdpath(word, state):
+    """The folders of a CDPATH value: split at `:` before a `~` at the start of an entry
+    expands (a Windows home has a drive colon), and a computed value is unknown."""
+    if any(q != "'" and ('$' in t or '`' in t) for q, t in word.parts):
+        value = evaluate(word, state.values())
+        if value.computed:
+            return [None]
+        entries = value.text.split(':')
+        if WINDOWS:  # `c:/x` split at its drive colon: join the letter back
+            k = 0
+            while k < len(entries) - 1:
+                if re.fullmatch(r'[A-Za-z]', entries[k]) and entries[k + 1].startswith(('/', '\\')):
+                    entries[k:k + 2] = [entries[k] + ':' + entries[k + 1]]
+                k += 1
+    else:
+        entries = word.raw().split(':')
+    return [norm(state.home + e[1:] if e == '~' or e.startswith('~/') else e or '.', state.cwd)
+            for e in entries]
+
+
+def computed_cd(word):
+    """True for a computed command word whose text names a cd: `$(echo cd)`."""
+    return any(q != "'" and ('$' in t or '`' in t) for q, t in word.parts) and bool(
+        CD_TEXT.search(word.raw()))
+
+
+def resolve(specs, folders, state):
+    out = []
+    for spec in specs:
+        if spec[0] == 'home':
+            out.append(state.home)
+        elif spec[0] == 'unknown':
+            out.append(None)
+        elif spec[0] == 'stack':
+            out += state.shell.seen + ([None] if spec[1] else [])
+        elif spec[0] == 'path':
+            text = spec[1]
+            out += [norm(text, f) for f in folders]
+            if state.shell.cdpath and not is_abs(text) and not text.startswith(('.', '~')):
+                out += [norm(text, c) for c in state.shell.cdpath]
+        elif spec[0] == 'subst':
+            out += [norm(f.replace(spec[1], spec[2], 1), None) for f in folders
+                    if f is not None and spec[1] and spec[1] in f
+                    and is_abs(f.replace(spec[1], spec[2], 1))]
+    return out
+
+
+def closure(folders, specs, state, times=None):
+    """folders and every folder the specs lead to from them, applied again and again (a cd in a
+    loop, or in a body that may run any number of times), at most times rounds when given."""
+    found, frontier = list(folders), list(folders)
+    while frontier and times != 0:
+        times = None if times is None else times - 1
+        state.check_time()
+        new = [f for f in resolve(specs, frontier, state) if f not in found]
+        found += union(new)
+        frontier = [f for f in union(new) if f is not None]
+        if len(found) > MAX_MORE:
+            return found + [None]
+    return found
+
+
+def loop_word(words):
+    """The loop a command starts (`for`, `while`, `until`, `select`, `foreach`), past `{`,
+    `!`, the other keywords, precommands and assignments; or ''."""
+    for w in words:
+        raw = w.raw()
+        if raw in LOOP_ENDS:
+            return raw
+        if not (w.redirect or raw in gg.KEYWORDS or raw in ('{', '}') or raw in PRECOMMANDS
+                or gg.ASSIGN.fullmatch(raw)):
+            return ''
+    return ''
+
+
+def rounds(words, head, flags):
+    """How often a loop runs, when its header says so: `for x in a b c` (literal words) or zsh's
+    `repeat 3`; else None (any number of times)."""
+    raws = [w.raw() for w in words if not w.redirect]
+    if 'repeat' in flags:
+        k = raws.index('repeat') if 'repeat' in raws else -1
+        n = raws[k + 1] if 0 <= k < len(raws) - 1 else ''
+        return int(n) if n.isdecimal() and n.isascii() and len(n) < 5 else None
+    if head == 'for' and 'in' in raws:
+        items = raws[raws.index('in') + 1:]
+        if items and not any(ch in ''.join(items) for ch in '$`*?[{~'):
+            return len(items)
+    return None
+
+
+class MoreFolders:
+    """The second reading of the working folders for one list of commands (see above)."""
+
+    def __init__(self, commands, state):
+        self.commands, self.state = commands, state
+        self.heads = [strip_head(words) for words, _ in commands]
+        self.before = None  # the second reading's folders before the current `&&`/`||` list
+        self.contexts = []  # open `(` (with the folders to restore) and `case`
+        n = len(commands)
+        self.untrusted = [False] * n  # in a loop or a function body: a cd there is never sure
+        self.loops = {}     # loop start -> (indexes of the cds in it, times it runs or None)
+        self.bodies = {}    # function definition -> (name, indexes of its cds, its commands)
+        for k in range(n):
+            rest, flags = self.heads[k]
+            head = loop_word(commands[k][0])
+            if head in LOOP_ENDS or 'repeat' in flags:
+                end = k if 'repeat' in flags and 'repeat-do' not in flags else self.find_end(
+                    k, ['end' if head == 'foreach' else 'done'])
+                self.loops[k] = self.cds(k, end), rounds(commands[k][0], head, flags)
+            words, op = commands[k]
+            following = commands[k + 1] if k + 1 < n else ([], '')
+            plain = [w for w in words if not w.redirect]
+            while plain and plain[0].raw() in gg.KEYWORDS:
+                plain = plain[1:]
+            if (len(plain) == 1 and op == '(' and not following[0] and following[1] == ')') or (
+                    plain and plain[0].raw() == 'function'):
+                start = k + 2 if op == '(' and following == ([], ')') else k
+                if start < n:
+                    end = self.find_body_end(start)
+                    name = plain[0].raw() if len(plain) == 1 else (
+                        plain[1].raw() if len(plain) > 1 and plain[1].raw() != '{' else None)
+                    self.bodies[k] = name, self.cds(start, end), commands[start:end + 1]
+        state.shell.seen = capped(union(state.shell.seen, state.folders(), state.ext))
+
+    def find_end(self, k, stack):
+        for j in range(k + 1, len(self.commands)):
+            rest, flags = self.heads[j]
+            head = loop_word(self.commands[j][0]) or (rest[0].raw() if rest else '')
+            if head == stack[-1]:
+                stack.pop()
+                if not stack:
+                    return j
+            elif head in LOOP_ENDS:
+                stack.append(LOOP_ENDS[head])
+            elif 'repeat-do' in flags:
+                stack.append('done')
+        return len(self.commands) - 1
+
+    def find_body_end(self, start):
+        balance = 0
+        for j in range(start, len(self.commands)):
+            words = self.commands[j][0]
+            balance += sum(w.raw() == '{' and w.parts[0][0] == '' for w in words)
+            if words and words[0].raw() == '}' and words[0].parts[0][0] == '':
+                balance -= 1
+            if balance <= 0:
+                return j
+        return len(self.commands) - 1
+
+    def cds(self, start, end):
+        """Indexes of the cds in commands start..end outside a subshell; marks them untrusted."""
+        found, depth = [], 0
+        for j in range(start, end + 1):
+            self.untrusted[j] = True
+            if depth <= 0 and cd_specs(self.heads[j][0], self.state) is not None:
+                found.append(j)
+            depth += {'(': 1, ')': -1}.get(self.commands[j][1], 0)
+        return found
+
+    def trusted(self, k, op):
+        """A cd the rest of its list runs only after: as track's trusted cd, unless it may be
+        skipped or runs in a pipeline, is negated, or is in a loop or a function body."""
+        if self.untrusted[k] or 'negated' in self.heads[k][1]:
+            return False
+        if k and self.commands[k - 1][1] in ('||', '|'):
+            return False
+        following = self.commands[k + 1] if k + 1 < len(self.commands) else ([], '')
+        return op == '&&' or (op == '||' and bool(following[0]) and
+                              following[0][0].raw() in ('exit', 'return'))
+
+    def after(self, k, pre):
+        """Update the second reading's folders after command k; pre: the first reading's
+        folders before it."""
+        state, shell = self.state, self.state.shell
+        words, op = self.commands[k]
+        rest, _ = self.heads[k]
+        view = union(pre, state.ext)
+        ext = view
+        for w in words:
+            if w.raw().startswith('CDPATH='):
+                shell.cdpath = cdpath(tail_word(w, len('CDPATH=')) or Word(), state)
+        specs = cd_specs(rest, state)
+        if specs is not None:
+            targets = resolve(specs, view, state)
+            if self.trusted(k, op):
+                self.before = view if self.before is None else self.before
+                ext = targets
+            else:
+                ext = union(view, targets)
+        if state.landing:  # eval or `$C` ran in this shell
+            ext = union(ext, state.landing)
+            state.landing = []
+        if rest and computed_cd(rest[0]):
+            ext = union(ext, shell.seen, [None])
+        if k in self.loops:
+            cds, times = self.loops[k]
+            specs = []
+            for j in cds:
+                specs += cd_specs(self.heads[j][0], state)
+            ext = closure(ext, specs, state, times and times * len(specs))
+        named = {w.raw() for w in words}
+        specs = [s for name, moves in shell.moves if name is None or name in named
+                 for s in moves]  # a DEBUG trap, or a call of a function that cds
+        if specs:
+            ext = closure(union(state.folders(), ext), specs, state)
+        if k in self.bodies:
+            name, cds, body = self.bodies[k]
+            shell.run_later('body', body, ('body', tuple(
+                (tuple(w.raw() for w in ws), o) for ws, o in body)))
+            specs = []
+            for j in cds:
+                specs += cd_specs(self.heads[j][0], state)
+            if specs:
+                shell.moves.append((name, specs))
+        following = self.commands[k + 1] if k + 1 < len(self.commands) else ([], '')
+        if self.before is not None and (op in LIST_ENDS or (op == '||' and not (
+                following[0] and following[0][0].raw() in ('exit', 'return')))):
+            ext = union(self.before, ext)  # a cd of the list may have failed
+            if op in LIST_ENDS:
+                self.before = None
+        head = rest[0].raw() if rest else ''
+        if head == 'case':
+            self.contexts.append('case')
+        elif head == 'esac' and 'case' in self.contexts:
+            while self.contexts.pop() != 'case':
+                pass
+        if op == '(':
+            self.contexts.append((ext, self.before))
+            self.before = None
+        elif op == ')' and self.contexts and self.contexts[-1] != 'case':
+            ext, self.before = self.contexts.pop()
+        state.ext = tuple(capped(ext))
+        shell.seen = capped(union(shell.seen, state.folders(), state.ext))
+        for entry in shell.later:
+            entry[2] = capped(union(entry[2], state.folders(), state.ext))
 
 
 def name_of_text(text):
@@ -1331,19 +1954,37 @@ def decide(command, cwd, home=None):
     if len(command) > gg.MAX_INPUT:
         return ('is longer than %d characters, too long to check, and names a delete'
                 % gg.MAX_INPUT if has_delete_word(command) else None)
-    try:
-        return judge(command, State.start(cwd, home, command))
+    try:  # both readings, with half the time
+        state = State.start(cwd, home, command)
+        state.deadline = time.monotonic() + DEADLINE / 2
+        return judge(command, state)
     except Overtime:
-        if has_delete_word(command):
+        pass  # the first reading alone, so it never asks less
+    except Exception:
+        if names_delete(command):
+            return 'deletes, and the delete guard could not read the command'
+    try:
+        state = State.start(cwd, home, command)
+        state.more = False
+        return judge(command, state)
+    except Overtime:
+        if names_delete(command):
             return ('took the delete guard longer than %.0f seconds to read, and names a delete'
                     % DEADLINE)
         return None
     except Exception:
         # Deliberate: a fault, or a command it cannot parse, asks rather than passes when the
         # command names a delete, and never denies.
-        if has_delete_word(command):
+        if names_delete(command):
             return 'deletes, and the delete guard could not read the command'
         return None
+
+
+def names_delete(text):
+    """True when a command the guard could not finish reading asks: it names a delete program,
+    or holds a flag cluster with r and f that a computed command name may run (`$R -rf x`), the
+    one ask that needs no delete word."""
+    return has_delete_word(text) or bool(RF_FLAG.search(re.sub(r'[\'"\\]', '', text)))
 
 
 def reason_text(reason):
@@ -1392,7 +2033,7 @@ def decide_bounded(command, cwd):
         return result[0], True
     if thread.is_alive():
         return ('could not be read by the delete guard within %.0f seconds, and names a delete'
-                % HARD_DEADLINE if has_delete_word(command) else None), False
+                % HARD_DEADLINE if names_delete(command) else None), False
     return None, True  # the thread failed, which decide never does
 
 

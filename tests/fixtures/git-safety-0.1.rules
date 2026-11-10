@@ -1,0 +1,266 @@
+# Git safety for Codex (execpolicy), from agentic-github-flow. Owner of the rule text: the core
+# rules (rules/core.md §Git). The installer links it into ~/.codex/rules/ with --guards (Codex loads
+# every *.rules file there).
+# Test: codex execpolicy check --pretty --rules git-safety.rules -- git push --force
+# Prefix rules match only the START of a command: a flag after another argument
+# (`git add x -A`, `git commit -m x --no-verify`) and every `git -C <dir>` form are NOT caught;
+# the git guard hook covers those. The gaps are pinned in tests/codex_policy.py.
+# The most restrictive matching rule wins (forbidden > prompt > allow), so the allows that
+# accumulate in ~/.codex/rules/default.rules cannot override these.
+
+prefix_rule(
+    pattern = ["git", "push", ["--force", "-f", "--force-with-lease", "--mirror", "--prune"]],
+    decision = "forbidden",
+    justification = "Never force-push or mass-delete remote refs. Rejected push: stop, ask the user.",
+    match = ["git push --force origin main", "git push -f", "git push --prune origin"],
+    not_match = ["git push origin main", "git push --delete origin agent/1-x"],
+)
+
+prefix_rule(
+    pattern = ["git", "push", ["--delete", "-d"]],
+    decision = "prompt",
+    justification = "Only a MERGED task branch is deleted, by the cleanup-merged skill.",
+    match = ["git push --delete origin agent/1-x", "git push -d origin agent/1-x"],
+    not_match = ["git push origin main"],
+)
+
+prefix_rule(
+    pattern = ["git", "reset", "--hard"],
+    decision = "forbidden",
+    justification = "No hard reset unless the user asks for that exact operation. Undo with git revert.",
+    match = ["git reset --hard HEAD~1"],
+)
+
+prefix_rule(
+    pattern = ["git", "branch", "-D"],
+    decision = "forbidden",
+    justification = "Never force-delete a branch unless the user asks for that exact operation.",
+    match = ["git branch -D lane/x"],
+    not_match = ["git branch -d lane/x"],
+)
+
+prefix_rule(
+    pattern = ["git", "clean"],
+    decision = "forbidden",
+    justification = "Untracked files may be another agent's uncommitted work. Ask the user.",
+    match = ["git clean -fd", "git clean -n"],
+)
+
+prefix_rule(
+    pattern = ["git", "restore"],
+    decision = "forbidden",
+    justification = "Never discard uncommitted work; it has no history to recover from.",
+    match = ["git restore src/main.rs", "git restore ."],
+)
+
+prefix_rule(
+    pattern = ["git", ["checkout", "switch"], ["--", ".", "-f", "--force", "--discard-changes"]],
+    decision = "forbidden",
+    justification = "Never discard uncommitted work; it has no history to recover from.",
+    match = ["git checkout -- a.txt", "git checkout .", "git switch -f main"],
+    not_match = ["git checkout main", "git switch main"],
+)
+
+prefix_rule(
+    pattern = ["git", "checkout", "--detach", ["-f", "--force"]],
+    decision = "forbidden",
+    justification = "A forced checkout discards uncommitted work.",
+    match = ["git checkout --detach --force HEAD"],
+    not_match = ["git checkout --detach HEAD"],
+)
+
+prefix_rule(
+    pattern = ["git", "stash", ["drop", "clear"]],
+    decision = "forbidden",
+    justification = "Never discard stashed work.",
+    match = ["git stash drop", "git stash clear"],
+)
+
+prefix_rule(
+    pattern = ["git", "rebase"],
+    decision = "forbidden",
+    justification = "Never rebase; history only grows. Bring main in by merge.",
+    match = ["git rebase main", "git rebase -i HEAD~3"],
+)
+
+prefix_rule(
+    pattern = ["git", "tag", ["-d", "--delete", "-f", "--force"]],
+    decision = "forbidden",
+    justification = "Never delete or move tags.",
+    match = ["git tag -d v1"],
+)
+
+prefix_rule(
+    pattern = ["git", "worktree", "remove"],
+    decision = "forbidden",
+    justification = "Deletes ignored files too; use the cleanup-merged skill's script.",
+    match = ["git worktree remove ../wt", "git worktree remove --force ../wt"],
+    not_match = ["git worktree prune", "git worktree add ../wt -b x"],
+)
+
+# --- history rewriting and pruning ---------------------------------------------------------
+
+prefix_rule(
+    pattern = ["git", ["filter-branch", "filter-repo", "replace", "prune"]],
+    decision = "forbidden",
+    justification = "History rewriting and pruning destroy restore points. Ask the user.",
+    match = ["git filter-repo --path x", "git filter-branch --tree-filter x", "git prune"],
+)
+
+prefix_rule(
+    pattern = ["git", "reflog", ["expire", "delete"]],
+    decision = "forbidden",
+    justification = "The reflog is the recovery path.",
+    match = ["git reflog expire --all", "git reflog delete HEAD@{1}"],
+    not_match = ["git reflog", "git reflog show"],
+)
+
+prefix_rule(
+    pattern = ["git", "gc", ["--prune", "--prune=now", "--prune=all"]],
+    decision = "forbidden",
+    justification = "Destroys recoverable objects.",
+    match = ["git gc --prune=now"],
+)
+
+prefix_rule(
+    pattern = ["git", "update-ref", "-d"],
+    decision = "forbidden",
+    justification = "Deletes a ref.",
+    match = ["git update-ref -d refs/heads/x"],
+)
+
+prefix_rule(
+    pattern = ["git", "update-ref"],
+    decision = "prompt",
+    justification = "Moves a branch directly, bypassing merge.",
+    match = ["git update-ref refs/heads/main abc123"],
+)
+
+prefix_rule(
+    pattern = ["git", "branch", ["-f", "--force"]],
+    decision = "forbidden",
+    justification = "Force-moving a branch can orphan commits.",
+    match = ["git branch -f main HEAD~1"],
+)
+
+prefix_rule(
+    pattern = ["git", "commit", "--amend"],
+    decision = "prompt",
+    justification = "Never amend a pushed commit.",
+    match = ["git commit --amend -m x"],
+)
+
+# --- hook bypass and blanket staging --------------------------------------------------------
+
+prefix_rule(
+    pattern = ["git", "commit", ["--no-verify", "-n", "-a", "--all"]],
+    decision = "forbidden",
+    justification = "No hook bypass; commit explicit pathspecs only.",
+    match = ["git commit --no-verify -m x", "git commit -n -m x", "git commit -a -m x"],
+    not_match = ["git commit -m x -- a.txt"],
+)
+
+prefix_rule(
+    pattern = ["git", "push", "--no-verify"],
+    decision = "forbidden",
+    justification = "Never bypass a hook.",
+    match = ["git push --no-verify origin main"],
+)
+
+prefix_rule(
+    pattern = ["git", "add", ["-A", "--all", ".", "-f", "--force"]],
+    decision = "forbidden",
+    justification = "Stage explicit pathspecs only; -f defeats .gitignore.",
+    match = ["git add -A", "git add .", "git add -f .env"],
+    not_match = ["git add src/main.rs"],
+)
+
+prefix_rule(
+    pattern = ["git", "-c"],
+    decision = "prompt",
+    justification = "-c can disable hooks (core.hooksPath) or change identity.",
+    match = ["git -c core.hooksPath=/dev/null commit -m x"],
+)
+
+# --- configuration, remotes and GitHub ------------------------------------------------------
+
+prefix_rule(
+    pattern = ["git", "config", ["--global", "--system", "--local", "--worktree", "--unset", "--unset-all", "core.hooksPath", "core.bare", "credential.helper", "user.name", "user.email"]],
+    decision = "forbidden",
+    justification = "Agents never change git configuration.",
+    match = ["git config --global user.email x", "git config core.hooksPath /dev/null", "git config user.email x"],
+    not_match = ["git config --get user.email", "git config -l"],
+)
+
+prefix_rule(
+    pattern = ["git", "remote", ["add", "set-url", "remove", "rm", "rename"]],
+    decision = "prompt",
+    justification = "Changes where pushes go.",
+    match = ["git remote set-url origin x", "git remote add up x"],
+    not_match = ["git remote -v"],
+)
+
+prefix_rule(
+    pattern = ["gh", "repo", ["delete", "archive", "edit", "rename"]],
+    decision = "forbidden",
+    justification = "Repository settings, visibility and existence are the owner's.",
+    match = ["gh repo edit --visibility public", "gh repo delete x"],
+)
+
+prefix_rule(
+    pattern = ["gh", ["release", "issue", "label"], "delete"],
+    decision = "forbidden",
+    justification = "Deletes data (the issue queue included).",
+    match = ["gh issue delete 12", "gh label delete x"],
+)
+
+prefix_rule(
+    pattern = ["gh", ["secret", "ssh-key"]],
+    decision = "forbidden",
+    justification = "Secrets and keys are the user's.",
+    match = ["gh secret set X", "gh ssh-key add k.pub"],
+)
+
+prefix_rule(
+    pattern = ["gh", "auth", "token"],
+    decision = "forbidden",
+    justification = "Never print a credential.",
+    match = ["gh auth token"],
+)
+
+prefix_rule(
+    pattern = ["gh", "auth"],
+    decision = "prompt",
+    justification = "Never change the GitHub login or its scopes.",
+    match = ["gh auth status", "gh auth refresh -s delete_repo"],
+)
+
+prefix_rule(
+    pattern = ["gh", "api"],
+    decision = "prompt",
+    justification = "gh api can write and delete; the method is not visible to a prefix rule.",
+    match = ["gh api -X DELETE repos/o/r/git/refs/heads/x"],
+)
+
+prefix_rule(
+    pattern = ["gh", ["repo", "pr", "release", "gist"], ["create", "merge"]],
+    decision = "prompt",
+    justification = "Creates or merges on GitHub.",
+    match = ["gh repo create x --private", "gh pr merge 3", "gh gist create f"],
+)
+
+prefix_rule(
+    pattern = ["printenv"],
+    decision = "forbidden",
+    justification = "Never print secrets from the environment.",
+    match = ["printenv", "printenv GITHUB_TOKEN"],
+)
+
+# --- every other push ----------------------------------------------------------------------
+
+prefix_rule(
+    pattern = ["git", "push"],
+    decision = "prompt",
+    justification = "Ask the user before every push.",
+    match = ["git push origin main"],
+)

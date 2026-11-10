@@ -54,7 +54,7 @@ Checked on 2026-11-09 (v2, and the landing modes of #13).
 | the always-loaded rules | `rules/core.md`, `AGENTS.md` §Rule budget |
 | a skill | its `SKILL.md`, `plugins/core/skills/repo-docs/skill-standard.md`, `tests/skills_format.py` |
 | the installer | `tools/installer.py` (its docstring owns the behaviour), `tests/installer.py` |
-| the guards | `plugins/guards/scripts/*.py` headers, `plugins/guards/policy/*.rules`, `tests/git_guard.py`, `tests/delete_guard.py`, `tests/personal_data_guard.py`, `tests/codex_policy.py` |
+| the guards | `plugins/guards/scripts/*.py` headers, `plugins/guards/policy/*.rules`, `tests/git_guard.py`, `tests/delete_guard.py` (cases in `tests/delete_guard_cases.py`; `tests/delete_guard_differential.py` checks it never asks less than before issue 4), `tests/personal_data_guard.py`, `tests/codex_policy.py` |
 | automatic merging | `plugins/core/scripts/merge_pr.py` header, `DESIGN_DECISIONS.md`, `tests/merge_pr.py` |
 | landing modes | `plugins/core/scripts/landing.py` and `promote_main.py` headers, `plugins/core/skills/ship-change/` (`SKILL.md`, `local-main.md`), `tests/landing.py`, `tests/promote_main.py` |
 | worktrees and cleanup | `plugins/core/scripts/*.py` headers, `plugins/core/skills/cleanup-merged/SKILL.md`, `tests/worktree_tools.py`, `tests/new_worktree.py`, `tests/overlap_check.py` |

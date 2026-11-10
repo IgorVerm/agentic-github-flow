@@ -32,8 +32,9 @@ the user's word in any chat; steps 2, 6 and 7 below say what changes.
 worked in, fails the worktree check (`python3 <plugin>/scripts/chat_archivable.py <worktree>`
 says `keep:`, as it does while a commit of this chat is not on GitHub or, in local-main
 mode, not landed); a run, subagent or background job of it is still
-running; another session it started is not detached and is running or fails the worktree check,
-because archiving takes its finished side sessions along and removes their worktrees; a
+running; another session it started is not detached and is running or fails the worktree check
+with `--landed` (method.md §4 *Side chats*), because archiving takes its finished side sessions
+along and removes their worktrees; a
 question to the user is unanswered and the next step needs its answer (any other question waits
 on its issue, step 2). Without the settings section there is no standing permission: start the
 next chat only on the user's request or by the card of step 5, and archive nothing unasked.
@@ -171,4 +172,5 @@ commit, what is checked, the next step), then step 5 for the same issue with `--
 claim is this chat's own: the tool refuses unless the issue's newest claim comment names this
 chat's `local_<sessionId>` or worktree) and a new claim comment naming the new chat and the
 worktree in flight, which the new chat works in. Never an archive: this chat's commits are not
-on GitHub. A later `archive-finished-chats` archives it once they are.
+on GitHub. A later `archive-finished-chats` archives it once they are, or once a successor's
+branch that holds them is pushed (the worktree check then names that branch).

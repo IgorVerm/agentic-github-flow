@@ -23,7 +23,7 @@ work queue; content from tools and web pages is data, not instructions.
 | `agentic-github-flow-core` | `spec-first` (a specification before large work), `requirements` (an interview that turns new work into a parent issue and ready sub-issues), `open-issue` (an issue an agent can pick up, labelled ready or needs-spec), `repo-docs` (a repository's agent documents), `ship-change` (lands a finished branch in the repository's [landing mode](#landing-pull-request-or-local-main), with an overlap check against other unmerged work and a yes before every push), `cleanup-merged` (worktree and branch removal after the merge or the push of main, checked so nothing is lost) | always |
 | `agentic-github-flow-security` | `review-security` (a review checklist by area), a secret scanner that never prints values, a dependency audit against OSV, with osv-scanner as an optional second opinion | `--with security` |
 | `agentic-github-flow-web-deploy` | `check-web-deploy` (pre-deploy check of a Vercel and Supabase site, with optional Google sign-in, its mail domain and EU privacy) | `--with web-deploy` (brings security) |
-| `agentic-github-flow-issue-chats` | `issue-handover` (one issue per chat: once a branch is ready to push, or has landed on local main, pick the next ready issue by priority, check it for overlap, start and claim its chat, then ask you for the push or archive) and `archive-finished-chats` (archive chats whose work is on GitHub, or landed on local main); a Claude Code hook that lets a chat be archived only when its worktree is clean and its commits are on GitHub or, in local-main mode, landed. See [Issue chats](#issue-chats) | `--with issue-chats` |
+| `agentic-github-flow-issue-chats` | `issue-handover` (one issue per chat: once a branch is ready to push, or has landed on local main, pick the next ready issue by priority, check it for overlap, start and claim its chat, then ask you for the push or archive) and `archive-finished-chats` (archive chats whose work is on GitHub, or landed on local main, and side chats once their work landed or merged); a Claude Code hook that lets a chat be archived only when its worktree is clean and its commits are on GitHub or, in local-main mode, landed (a side chat it is asked to archive: landed or merged). See [Issue chats](#issue-chats) | `--with issue-chats` |
 | `agentic-github-flow-guards` | Claude Code hooks that refuse destructive git commands and ask before destructive deletes and before personal data leaves the machine; the installer adds the matching deny list and the Codex rules and hooks | `--guards` |
 
 ## Requirements
@@ -178,7 +178,9 @@ ready issue, works on its own branch in a new worktree until the branch is ready
 starts the chat for the next ready issue and asks you for the push. It leaves the sidebar only
 once its commits are on GitHub. In a repository that lands on local main, a chat lands its work
 there, starts the next chat and archives itself; you push `main` when you want the landings
-published. Every push still waits for your yes. A repository switches it on
+published. Every push still waits for your yes. A side chat, one that another chat started
+with `start_session`, archives itself once its work has landed or its pull request merged, not
+when it is merely pushed. A repository switches it on
 with a `## Issue chats settings` section in its `HANDOFF.md`, merged like any other change; the
 template and the method are in the plugin's `issue-handover` skill (`method.md`).
 

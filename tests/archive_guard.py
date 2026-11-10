@@ -32,6 +32,8 @@ OTHER = "local_bbbbbbbb-0000-0000-0000-000000000002"
 
 
 ENV = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+# a gh that knows no merged pull request: a side chat's pushed branch has not landed
+ENV["AGENTIC_GITHUB_FLOW_GH"] = json.dumps([sys.executable, "-c", "print('[]')"])
 
 
 def git(*args: str, cwd: str) -> None:
@@ -41,7 +43,9 @@ def git(*args: str, cwd: str) -> None:
 
 def repo(tmp: str) -> tuple[str, str, str, str]:
     """A repository whose main is on origin, a clean worktree on main's HEAD, a dirty one, one
-    with a commit that was never pushed, and a path that is gone."""
+    with a commit that was never pushed, and a path that is gone. Also (handed): a worktree
+    whose unpushed commit a successor's pushed branch holds, and one where it also dropped a
+    commit that only its reflog holds; (pushed): a branch pushed whose pull request is open."""
     main = os.path.join(tmp, "repo")
     origin = os.path.join(tmp, "origin.git")
     os.makedirs(main)
@@ -63,6 +67,21 @@ def repo(tmp: str) -> tuple[str, str, str, str]:
     ahead = os.path.join(tmp, "wt-ahead")
     git("worktree", "add", "-q", "-b", "agent/ahead", ahead, cwd=main)
     git("commit", "-q", "--allow-empty", "-m", "not pushed", cwd=ahead)
+    for name, drop in (("handed", False), ("handed-reflog", True)):
+        pred = os.path.join(tmp, "wt-" + name)
+        git("worktree", "add", "-q", "-b", "agent/" + name, pred, cwd=main)
+        git("commit", "-q", "--allow-empty", "-m", "handed over", cwd=pred)
+        if drop:
+            git("commit", "-q", "--allow-empty", "-m", "dropped", cwd=pred)
+            git("reset", "-q", "--hard", "HEAD~1", cwd=pred)
+        succ = os.path.join(tmp, "wt-" + name + "-succ")
+        git("worktree", "add", "-q", "-b", "agent/" + name + "-succ", succ, "agent/" + name,
+            cwd=main)
+        git("push", "-q", "origin", "agent/" + name + "-succ", cwd=succ)
+    pushed = os.path.join(tmp, "wt-pushed")
+    git("worktree", "add", "-q", "-b", "agent/pushed", pushed, cwd=main)
+    git("commit", "-q", "--allow-empty", "-m", "pull request open", cwd=pushed)
+    git("push", "-q", "origin", "agent/pushed", cwd=pushed)
     return clean, dirty, os.path.join(tmp, "wt-gone"), ahead
 
 
@@ -126,12 +145,19 @@ def wiring() -> list[str]:
 def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         clean, dirty, gone, ahead = repo(tmp)
+        handed, handed_reflog = os.path.join(tmp, "wt-handed"), os.path.join(tmp, "wt-handed-reflog")
+        pushed = os.path.join(tmp, "wt-pushed")
         primary = os.path.join(tmp, "repo")
         os.makedirs(os.path.join(ahead, "sub"))  # a working directory below a worktree's top
 
         def session(sid, wt=None, **where):
             # without a worktreePath, the app reports where the chat works (default: primary)
             return {"sessionId": sid, **({"worktreePath": wt} if wt else where or {"cwd": primary})}
+
+        def side(sid, wt, detached=False):
+            # a side chat: started by another session with start_session, not detached
+            return {"sessionId": sid, "worktreePath": wt, "parentSessionId": "local_parent",
+                    "detached": detached}
 
         me = lambda wt=None, **where: session(APP, wt, **where)  # noqa: E731
         other = lambda wt=None, **where: session(OTHER, wt, **where)  # noqa: E731
@@ -180,6 +206,19 @@ def main() -> int:
             # the app's record shape for any target: tool_use in assistant, tool_result in user
             ("other spoof: api-request-blob copy", [use("a", OTHER, T1), res("a", other(dirty), T1), use("b", OTHER, T2), res("b", other(clean), T2, rtype="api-request-blob")], OTHER, None, None, False, 2),
             ("other spoof: tool_use in a user record", [as_user(use("a", OTHER, T1)), res("a", other(clean), T1)], OTHER, None, None, False, 2),
+            # #14: a handed-over chat whose commits a successor's pushed branch holds
+            ("other ok: work held by a successor's pushed branch", [use("a", OTHER, T1), res("a", other(handed), T1)], OTHER, None, None, False, 0),
+            ("other not-ok: successor, but a commit only its reflog holds", [use("a", OTHER, T1), res("a", other(handed_reflog), T1)], OTHER, None, None, False, 2),
+            # #18: a side chat goes only once its work landed or its pull request merged
+            ("other ok: issue chat, branch pushed", [use("a", OTHER, T1), res("a", other(pushed), T1)], OTHER, None, None, False, 0),
+            ("other not-ok: side chat, pull request open", [use("a", OTHER, T1), res("a", side(OTHER, pushed), T1)], OTHER, None, None, False, 2),
+            ("other not-ok: side chat, held by a successor only", [use("a", OTHER, T1), res("a", side(OTHER, handed), T1)], OTHER, None, None, False, 2),
+            ("other ok: side chat, landed", [use("a", OTHER, T1), res("a", side(OTHER, clean), T1)], OTHER, None, None, False, 0),
+            ("other ok: side chat gone", [use("a", OTHER, T1), res("a", side(OTHER, gone), T1)], OTHER, None, None, False, 0),
+            ("other ok: detached side chat, branch pushed", [use("a", OTHER, T1), res("a", side(OTHER, pushed, detached=True), T1)], OTHER, None, None, False, 0),
+            ("self not-ok: side chat, pull request open", [use("a", "self", T1), res("a", side(APP, pushed), T1)], "self", None, None, False, 2),
+            ("self ok: side chat, landed", [use("a", "self", T1), res("a", side(APP, clean), T1)], "self", None, None, False, 0),
+            ("self not-ok: side chat, cwd in a pushed worktree", [use("a", "self", T1), res("a", {"sessionId": APP, "cwd": pushed, "parentSessionId": "local_parent"}, T1)], "self", None, None, False, 2),
         ]
         bad = 0
         for name, recs, target, extra, raw, sub, want in cases:

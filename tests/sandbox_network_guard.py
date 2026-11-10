@@ -32,10 +32,37 @@ CORE = ['gh *', 'ssh *', 'scp *', 'git fetch *', 'git pull *', 'git push *', 'gi
 
 def main():
     tmp = os.path.realpath(tempfile.mkdtemp(prefix='sandbox-network-guard-'))
+    if os.name == 'nt':  # no sandbox on native Windows: the guard must pass everything there
+        try:
+            return windows(tmp)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
     try:
         return run_all(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def windows(tmp):
+    with open(os.path.join(tmp, 'settings.json'), 'w') as handle:
+        json.dump({'sandbox': {'enabled': True, 'excludedCommands': CORE}}, handle)
+    repo = os.path.join(tmp, 'repo')
+    make_repo(repo, [('origin', 'git@github.com:example-org/demo.git')])
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=tmp)
+    failures = []
+    for command in ('cd "%s" && gh pr list' % repo, 'cd "%s" && ssh -i k box uptime' % repo,
+                    'bash "%s/../x.sh"' % repo):
+        payload = json.dumps({'tool_name': 'Bash', 'cwd': tmp,
+                              'tool_input': {'command': command}})
+        r = subprocess.run([sys.executable, HOOK], input=payload, capture_output=True,
+                           text=True, env=env)
+        if r.returncode or r.stdout.strip():
+            failures.append('refused on Windows: %r: %r' % (command, r.stdout))
+    for line in failures:
+        print('FAIL', line)
+    print('sandbox_network_guard: %d/3 ok (native Windows: the guard passes every call)'
+          % (3 - len(failures)))
+    return 1 if failures else 0
 
 
 def git(*args):
@@ -359,6 +386,8 @@ def run_all(tmp):
     def run(args, claude, stdin=None, xdg=xdg, extra=None):
         env = {k: v for k, v in os.environ.items() if k not in ('GH_REPO', 'GH_HOST')}
         env.update(CLAUDE_CONFIG_DIR=claude, XDG_CONFIG_HOME=xdg, **(extra or {}))
+        if args[:1] == ['--check'] and len(args) > 1:  # the command through stdin: Windows
+            stdin, args = args[1], ['--check', '-'] + args[2:]  # caps a command line at 32,767
         return subprocess.run([sys.executable, HOOK, *args], input=stdin, capture_output=True,
                               text=True, env=env)
 

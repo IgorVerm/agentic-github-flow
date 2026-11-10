@@ -21,7 +21,8 @@ would not run without it, and no other guard's answer is weakened: Claude Code t
 strictest answer of all hooks. It reads `sandbox.enabled` and `sandbox.excludedCommands` from the
 user's Claude Code settings (`$CLAUDE_CONFIG_DIR/settings.json`, else `~/.claude/settings.json`)
 and checks every rewrite with the client's matching rules (`matches()`); with the sandbox not
-enabled there, or no entries, it does nothing. Two kinds of call are refused:
+enabled there, no entries, or on native Windows (no sandbox there; WSL2 counts as Linux), it does
+nothing. Two kinds of call are refused:
 1. `cd <dir> && ...` (also `;`, a newline, several `cd`s, a later literal `cd`, `$HOME`) whose
    remainder runs a network command:
    - gh: `-R owner/repo`, right after the subcommand, for the repository gh itself would pick in
@@ -97,7 +98,8 @@ Faults: a crash or an unreadable input passes the call (exit 0). Installed by
 
 Usage as a hook: JSON on stdin. For tests:
 `pre_tool_sandbox_network.py --check '<command>' [--cwd <dir>]` prints the reason and exits 2,
-or exits 0. Test: `python3 tests/sandbox_network_guard.py`.
+or exits 0; `--check -` reads the command from stdin (Windows refuses a command line over 32,767
+characters). Test: `python3 tests/sandbox_network_guard.py`.
 """
 from __future__ import annotations
 
@@ -522,7 +524,11 @@ def claude_settings_path() -> str:
 
 
 def excluded_patterns() -> list[str]:
-    """The user's `excludedCommands`, or [] when the sandbox is not enabled in their settings."""
+    """The user's `excludedCommands`, or [] when the sandbox is not enabled in their settings or
+    the system is native Windows, where Claude Code has no sandbox and this guard's POSIX path
+    handling would not hold (WSL2 counts as Linux)."""
+    if os.name == "nt":
+        return []
     try:
         with open(claude_settings_path(), encoding="utf-8") as handle:
             sandbox = json.load(handle).get("sandbox", {})
@@ -1303,10 +1309,10 @@ def reason(found: list, had_cd: bool, directory: str) -> str:
 def main(argv: list[str]) -> int:
     if len(argv) > 1 and argv[1] == "--check":
         if len(argv) < 3:
-            print("usage: pre_tool_cd_network.py --check '<command>' [--cwd <dir>]")
+            print("usage: pre_tool_sandbox_network.py --check '<command>'|- [--cwd <dir>]")
             return 64
         cwd = argv[argv.index("--cwd") + 1] if "--cwd" in argv else os.getcwd()
-        found = judge(argv[2], cwd)
+        found = judge(sys.stdin.read() if argv[2] == "-" else argv[2], cwd)
         if found:
             print(found)
             return 2

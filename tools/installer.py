@@ -444,7 +444,10 @@ def add_sandbox_hook(state):
     say('ok', 'claude: sandbox-network guard %s %s' % ('added to' if changed else 'already in',
                                                          path))
     sandbox = data.get('sandbox') if isinstance(data.get('sandbox'), dict) else {}
-    if sandbox.get('enabled') is not True or not sandbox.get('excludedCommands'):
+    if WINDOWS:
+        say('note', 'claude: Claude Code has no sandbox on native Windows, so the guard does '
+                    'nothing there (in WSL2 it works as on Linux)')
+    elif sandbox.get('enabled') is not True or not sandbox.get('excludedCommands'):
         say('note', 'claude: it does nothing until "sandbox.enabled" is true and '
                     '"sandbox.excludedCommands" lists your network commands in %s' % path)
 

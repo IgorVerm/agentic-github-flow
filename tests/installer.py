@@ -426,7 +426,7 @@ class InstallerTests(unittest.TestCase):
         self.write(json.dumps(settings).encode(), '.claude', 'settings.json')
         code, out = self.install('--guards=sandbox', clients=['claude'])
         self.assertEqual(code, 0, out)
-        self.assertIn('does nothing until', out)
+        self.assertIn('no sandbox on native Windows' if WINDOWS else 'does nothing until', out)
         self.assertEqual(len(self.sandbox_entries()), 1)
         code, out = self.install('--uninstall', clients=['claude'])
         self.assertEqual(code, 0, out)

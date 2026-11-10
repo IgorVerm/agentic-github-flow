@@ -187,7 +187,8 @@ same and matches one of your entries, for example `gh pr list -R owner/repo`. It
 it never lets a call run that would not run without it, and what runs outside the sandbox is
 still decided by your `excludedCommands` and your permission settings. It does nothing until
 `sandbox.enabled` is true in `~/.claude/settings.json` and `excludedCommands` lists your network
-commands (for example `gh *`, `ssh *`, `git push *`). When no faithful lone call exists (input
+commands (for example `gh *`, `ssh *`, `git push *`), and nothing on native Windows, where Claude
+Code has no sandbox (WSL2 works as Linux). When no faithful lone call exists (input
 from a file or a pipe, output to a file, `$(…)`, a glob after a `cd`, a gh command that acts on
 the folder), the call passes as before.
 

@@ -14,7 +14,10 @@ repository (step 8).
 Work starts on a branch in a worktree, in both modes. `python3 <plugin>/scripts/new_worktree.py <task>`,
 run from the repository's primary checkout, makes `../<repo>-worktrees/<task>` on a new branch
 `agent/<task>` from the freshly fetched landing branch. `<plugin>` is the folder two levels
-above this skill's folder ([new_worktree.py](../../scripts/new_worktree.py)).
+above this skill's folder ([new_worktree.py](../../scripts/new_worktree.py)). Every worktree
+this skill makes, the integration worktree of step 2 too, comes from that script, so on macOS
+its tracked files are copy-on-write clones of the primary checkout's unless the user switched
+that off (`AGENTIC_GITHUB_FLOW_CLONES=0`; the script's header owns the details).
 
 ## 1. Detect the mode, pick the review route, say both on the issue
 

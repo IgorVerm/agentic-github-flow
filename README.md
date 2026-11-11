@@ -88,6 +88,26 @@ cell holds the value alone:
 | landing branch | `main` |
 ```
 
+## Worktrees of large repositories on macOS
+
+Each task gets its own worktree, made by the core plugin's `new_worktree.py`. A plain worktree
+holds a full copy of every tracked file, so a repository with gigabytes of tracked assets costs
+gigabytes per parallel task. On macOS (APFS) the script can make the tracked files clones of the
+primary checkout's instead: copy-on-write, so they take no disk until one side changes them,
+and the result is the same checkout `git worktree add` gives (git re-hashes every clone). It
+does so by default on macOS wherever cloning works (APFS, the same volume, no sparse checkout);
+where it cannot, it says why in one line and makes a plain worktree. Switch it off per run with
+`--no-clones`, or for good in the environment your agents' shells start from, for example in
+`~/.zshenv`:
+
+```bash
+export AGENTIC_GITHUB_FLOW_CLONES=0
+```
+
+On Linux and Windows nothing changes.
+`clone_dedupe_worktree.py --apply <primary> <worktree>` turns the unmodified large files of an
+existing worktree into clones. `du` counts clones in full; `df` shows the disk they save.
+
 ## Install
 
 macOS and Linux:

@@ -1,12 +1,23 @@
 #!/usr/bin/env python3
 """Checks the core plugin's new_worktree.py in throwaway repositories: python3 tests/new_worktree.py.
 
-The post-checkout hook, as `git worktree add` runs it: the script's worktree is made beside a
-reference made by plain `git worktree add` from the same primary checkout, and both must hold the
-same paths, bytes, modes, symlinks and index, with `git status` clean, and the hook must have
-run the same way in both (one hook without a shebang, one failing, whose status the script must
-exit with while the worktree stands). Also the refusals. Offline. Not on Windows (shell hooks
-and a symlink in the fixture); tests/worktree_tools.py covers the script there.
+The script's worktree is made beside a reference made by plain `git worktree add` from the same
+primary checkout, and both must hold the same paths, bytes, modes, symlinks and index, with
+`git status` clean, and the post-checkout hook must have run the same way in both (one hook
+without a shebang, one failing, whose status the script must exit with while the worktree
+stands). Also the refusals. The fixture carries the traps for clones: a file under 100 KB, an
+executable whose blob a non-executable file also holds, a symlink, a submodule entry, a smudge
+filter and an eol=crlf path whose primary bytes differ from what a checkout writes, and a
+converted file whose bytes equal the primary's.
+
+Every case runs with clones switched off (AGENTIC_GITHUB_FLOW_CLONES=0) and, on macOS, again
+with the variable unset, where clones are the default: there the files the script cloned must
+share their blocks with the primary checkout (same physical offset on disk) while git-written
+files do not, a primary file with local edits is never a source, the switches turn it off and
+on, the fallbacks say why, and clone_dedupe_worktree.py turns a plain worktree's files into
+clones without changing a byte. Elsewhere the default must say nothing about clones and
+`--clones` must be a no-op with one note. Offline. Not on Windows (shell hooks and a symlink in the fixture);
+tests/worktree_tools.py covers the script there.
 """
 import os
 from pathlib import Path
@@ -18,6 +29,23 @@ import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
 TOOL = ROOT / 'plugins' / 'core' / 'scripts' / 'new_worktree.py'
+DEDUPE = ROOT / 'plugins' / 'core' / 'scripts' / 'clone_dedupe_worktree.py'
+CLONES_ENV = 'AGENTIC_GITHUB_FLOW_CLONES'
+MACOS = sys.platform == 'darwin'
+F_LOG2PHYS_EXT = 65  # <sys/fcntl.h>
+
+
+def physical_offset(path):
+    """Device offset of the file's first block; two files share blocks when these are equal."""
+    import fcntl
+    import struct
+    fd = os.open(str(path), os.O_RDONLY)
+    try:
+        os.fsync(fd)
+        out = fcntl.fcntl(fd, F_LOG2PHYS_EXT, struct.pack('=Iqq', 0, 4096, 0))
+        return struct.unpack('=Iqq', out)[2]
+    finally:
+        os.close(fd)
 
 
 def snapshot(top):
@@ -41,6 +69,8 @@ def snapshot(top):
 
 @unittest.skipIf(os.name == 'nt', 'symlinks and shell hooks in the fixture')
 class NewWorktree(unittest.TestCase):
+    CLONES = '0'  # the environment variable's value for this class's cases; None: unset
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix='new-worktree-')
         self.root = Path(os.path.realpath(self.tmp.name))
@@ -50,8 +80,10 @@ class NewWorktree(unittest.TestCase):
                         GIT_COMMITTER_EMAIL='fixture@example.invalid',
                         GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM='1')
         for key in ('GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR',
-                    'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES'):
+                    'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', CLONES_ENV):
             self.env.pop(key, None)
+        if self.CLONES is not None:
+            self.env[CLONES_ENV] = self.CLONES
         p = self.primary = self.root / 'repo'
         self.git(self.root, 'init', '-q', '-b', 'main', str(p))
         self.git(p, 'config', 'filter.upper.smudge', 'tr a-z A-Z')
@@ -62,7 +94,7 @@ class NewWorktree(unittest.TestCase):
             'bin/run.sh': b'#!/bin/sh\necho run\n',
             'bin/a-copy.txt': b'#!/bin/sh\necho run\n',  # same blob, not executable
             'assets/big.bin': os.urandom(1 << 20),
-            'assets/small.bin': os.urandom(2000),
+            'assets/small.bin': os.urandom(2000),  # under clone_dedupe_worktree's 100 KB
             'assets/dirty.bin': os.urandom(200_000),
             'dir with space/ünicöde.txt': 'café\n'.encode(),
             '.gitattributes': b'*.up filter=upper\n*.crlf text eol=crlf\n*.log text\n',
@@ -97,11 +129,11 @@ class NewWorktree(unittest.TestCase):
         return subprocess.run([sys.executable, str(TOOL), *args], cwd=cwd or self.primary,
                               env=self.env, text=True, capture_output=True)
 
-    def make(self, task='task', base='main'):
+    def make(self, task='task', base='main', extra=()):
         """The script's worktree and a plain `git worktree add` reference from the same base."""
         ref = self.root / ('ref-' + task)
         self.git(self.primary, 'worktree', 'add', '-q', '-b', 'ref/' + task, str(ref), base)
-        r = self.run_tool(task, '--base', base)
+        r = self.run_tool(task, '--base', base, *extra)
         self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
         wt = self.root / 'repo-worktrees' / task
         self.assertEqual(self.git(wt, 'rev-parse', '--abbrev-ref', 'HEAD').strip(),
@@ -112,6 +144,13 @@ class NewWorktree(unittest.TestCase):
         self.assertEqual(snapshot(wt), snapshot(ref))
         self.assertEqual(self.git(wt, 'ls-files', '-s'), self.git(ref, 'ls-files', '-s'))
         self.assertEqual(self.git(wt, 'status', '--porcelain', '--ignored'), '')
+
+    def shared(self, wt, rel):
+        """Whether <wt>/<rel> shares its blocks with some file of the primary checkout."""
+        offsets = {physical_offset(p) for p in self.primary.rglob('*')
+                   if '.git' not in p.relative_to(self.primary).parts
+                   and p.is_file() and not p.is_symlink() and p.stat().st_size}
+        return physical_offset(wt / rel) in offsets
 
     # -- the result is a normal checkout --
 
@@ -133,6 +172,32 @@ class NewWorktree(unittest.TestCase):
         wt, ref, _ = self.make(base='other')
         self.assert_like_reference(wt, ref)
         self.assertEqual((wt / 'README.md').read_text(), '# changed on other\n')
+
+    # -- clones by default on macOS only, and off when switched off --
+
+    @unittest.skipUnless(MACOS, 'APFS clones are macOS only')
+    def test_switched_off_nothing_is_cloned(self):
+        if self.CLONES != '0':
+            self.skipTest('clones are on in this class')
+        wt, ref, out = self.make()
+        self.assertNotIn('clone', out)
+        self.assertFalse(self.shared(wt, 'assets/big.bin'))
+
+    @unittest.skipIf(MACOS, 'the default off macOS')
+    def test_off_macos_the_default_is_todays_worktree(self):
+        self.env.pop(CLONES_ENV, None)
+        wt, ref, out = self.make()
+        self.assertNotIn('clone', out)
+        self.assert_like_reference(wt, ref)
+
+    @unittest.skipIf(MACOS, 'the no-op note is for systems without APFS clones')
+    def test_clones_are_a_no_op_off_macos(self):
+        self.env.pop(CLONES_ENV, None)
+        wt, ref, out = self.make(extra=('--clones',))
+        self.assertEqual(out.count('no clones (APFS clones are macOS only); a plain checkout\n'),
+                         1, out)
+        self.assertNotIn('dedupe', out)
+        self.assert_like_reference(wt, ref)
 
     # -- the post-checkout hook, as git runs it --
 
@@ -190,6 +255,97 @@ class NewWorktree(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in (self.root / 'repo-worktrees').iterdir()),
                          ['first', 'there'])
         self.assertEqual(self.run_tool().returncode, 2)
+
+
+@unittest.skipUnless(MACOS, 'APFS clones are macOS only')
+class NewWorktreeWithClones(NewWorktree):
+    """Every case above again with the variable unset (clones by default), and the clones."""
+    CLONES = None
+
+    def assert_shared(self, wt, rel, shared=True):
+        same = self.shared(wt, rel)
+        self.assertEqual(same, shared, '%s: shares blocks with the primary: %s' % (rel, same))
+
+    def test_files_share_blocks_with_the_primary(self):
+        wt, ref, out = self.make()
+        self.assertIn('cloned', out)
+        for rel in ('assets/big.bin', 'assets/small.bin', 'README.md', 'bin/run.sh',
+                    'bin/a-copy.txt', 'dir with space/ünicöde.txt'):
+            self.assert_shared(wt, rel)
+        self.assert_shared(ref, 'assets/big.bin', shared=False)  # the measuring stick works
+        for rel in ('note.up', 'lines.crlf'):  # a checkout conversion: git writes them
+            self.assert_shared(wt, rel, shared=False)
+        # A converted file git wrote with the primary's bytes becomes a clone after all.
+        self.assert_shared(wt, 'assets/text.log')
+
+    def test_the_switches_turn_clones_off_and_on(self):
+        # (environment value, flags, cloned): the flag wins over the variable.
+        for i, (value, flags, cloned) in enumerate((('1', (), True),
+                                                    (None, ('--no-clones',), False),
+                                                    ('0', (), False),
+                                                    ('0', ('--clones',), True))):
+            self.env.pop(CLONES_ENV, None)
+            if value is not None:
+                self.env[CLONES_ENV] = value
+            wt, ref, out = self.make('switch-%d' % i, extra=flags)
+            self.assertEqual('cloned' in out, cloned, out)
+            self.assert_shared(wt, 'assets/big.bin', shared=cloned)
+            self.assert_like_reference(wt, ref)
+
+    def test_primary_file_with_local_edits_is_not_cloned(self):
+        committed = (self.primary / 'assets/dirty.bin').read_bytes()
+        (self.primary / 'assets/dirty.bin').write_bytes(os.urandom(len(committed)))
+        # An edit that `git status` does not show: git's re-hash of the clone must catch it.
+        self.git(self.primary, 'update-index', '--assume-unchanged', 'README.md')
+        (self.primary / 'README.md').write_text('# hidden local edit\n')
+        wt, ref, _ = self.make()
+        self.assertEqual((wt / 'assets/dirty.bin').read_bytes(), committed)
+        self.assertEqual((wt / 'README.md').read_text(), '# fixture\n')
+        for rel in ('assets/dirty.bin', 'README.md'):
+            self.assert_shared(wt, rel, shared=False)
+        self.assert_like_reference(wt, ref)
+
+    # -- where cloning cannot work: a plain checkout, with a note --
+
+    def test_falls_back_under_autocrlf(self):
+        self.git(self.primary, 'config', 'core.autocrlf', 'true')
+        wt, ref, out = self.make()
+        self.assertIn('no clones (core.autocrlf is true); a plain checkout, then deduplication',
+                      out)
+        self.assertIn('dedupe: task: cloned', out)
+        self.assert_like_reference(wt, ref)
+
+    def test_falls_back_under_sparse_checkout(self):
+        self.git(self.primary, 'sparse-checkout', 'set', 'assets')
+        wt, ref, out = self.make()
+        self.assertIn('no clones (sparse checkout is on)', out)
+        self.assertFalse((wt / 'bin').exists())
+        self.assert_like_reference(wt, ref)
+
+    # -- clone_dedupe_worktree.py on a plain worktree --
+
+    def test_dedupe_turns_a_plain_worktree_into_clones(self):
+        wt = self.root / 'plain'
+        self.git(self.primary, 'worktree', 'add', '-q', '-b', 'plain', str(wt), 'main')
+        (wt / 'assets/dirty.bin').write_bytes(b'local edit\n' * 20_000)
+        before = snapshot(wt)
+        mtime = os.stat(str(wt / 'assets/big.bin')).st_mtime_ns
+        dry = subprocess.run([sys.executable, str(DEDUPE), str(self.primary), str(wt)],
+                             env=self.env, text=True, capture_output=True)
+        self.assertEqual(dry.returncode, 0, dry.stderr)
+        self.assertIn('would clone 2 files', dry.stdout)  # big.bin and text.log
+        self.assert_shared(wt, 'assets/big.bin', shared=False)
+        r = subprocess.run([sys.executable, str(DEDUPE), '--apply', str(self.primary), str(wt)],
+                           env=self.env, text=True, capture_output=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('plain: cloned 2 files', r.stdout)
+        self.assert_shared(wt, 'assets/big.bin')
+        self.assert_shared(wt, 'assets/text.log')
+        self.assert_shared(wt, 'assets/dirty.bin', shared=False)  # modified: never touched
+        self.assert_shared(wt, 'assets/small.bin', shared=False)  # under --min-kb
+        self.assertEqual(snapshot(wt), before)
+        self.assertEqual(os.stat(str(wt / 'assets/big.bin')).st_mtime_ns, mtime)
+        self.assertEqual(self.git(wt, 'status', '--porcelain'), ' M assets/dirty.bin\n')
 
 
 if __name__ == '__main__':

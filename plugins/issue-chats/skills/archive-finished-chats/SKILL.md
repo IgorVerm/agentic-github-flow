@@ -69,7 +69,8 @@ pull request stays.
    clean, on GitHub` (or `landed on local main`, or `held by <successor branch>`), for a side
    chat `finished side chat; landed` (or `pull request #<n> merged`). The plugin's guard hook
    repeats step 3, `--landed` included for a side chat, and may deny the call; it does not
-   check step 2 or the descendants: those stay yours.
+   check step 2 or the descendants: those stay yours. The app refuses a chat with live
+   background work: keep it and report `keep: live background work`.
 5. **File this chat** under the sidebar section: `list_sections`, `create_section` only if it is
    missing, then `move_sessions` with `"self"` and its `section_id`. One section per
    repository, no group per issue. Moving another chat asks the user first, so each chat files

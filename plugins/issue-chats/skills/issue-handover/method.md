@@ -176,11 +176,13 @@ Each issue chat runs this:
    settings' model and effort, claim its issue and hand it a complete brief; then ask the user
    for the push of this chat's branch (`ship-change` step 6) and end the turn. In local-main
    mode the comment opens `landed on local <branch> at <commit>`, the chat tells the user what
-   landed in place of asking for a push, and archives itself (item 4 does not apply).
+   landed in place of asking for a push, ends its own live work and archives itself (item 4
+   does not apply).
 4. **Push and leave:** when the user says yes, in a later turn, the chat pushes and opens the
-   pull request (`ship-change` step 7), comments `pull request opened: #<n>` on the issue,
-   checks that its worktree passes the worktree check and archives itself. Without a yes it
-   stays; the user can say push in it at any time, or tell it what to change first.
+   pull request (`ship-change` step 7), comments `pull request opened: #<n>` on the issue, ends
+   its own live work, checks that its worktree passes the worktree check and archives itself.
+   Without a yes it stays; the user can say push in it at any time, or tell it what to change
+   first.
 
 Why that order. The claim and the brief name the issue, so the next chat reads its state from
 GitHub, not from a document. The CLI starts the next chat, not this one's `start_session`, so it
@@ -191,6 +193,13 @@ worktree, so the worktree check comes right before it, and the check passes only
 branch is on GitHub: a chat whose work exists only in its worktree never leaves the sidebar. In
 local-main mode it passes once the work is on the local landing branch, which the archive does
 not touch.
+
+The app refuses to archive a session with live background work, so a chat that kept a subagent
+or a background task of its own running stayed in the sidebar after its hand-over until the user
+archived it by hand. So before every archive of itself the chat ends its own live work
+(`issue-handover`, *End your own live work*). A run whose result the work still needs (a remote
+gate, a capture) keeps the chat, as unfinished work does; a session it started is a side chat
+(*Side chats* below).
 
 A chat that handed its unfinished issue to a successor working on its own branch (started from
 this chat's head) passes once that branch is pushed: the check then finds HEAD in another branch
@@ -243,7 +252,10 @@ notification began. So:
 - **The work runs in the foreground of the turn the start brief began:** a long run is waited
   for by a blocking wait command, called again when the tool's timeout ends it, never by ending
   the turn for a notification. The hand-over happens in that same turn, so nothing of the chat
-  runs on in the background (`archive_session` refuses a session with live background work).
+  runs on in the background; what still runs at the archive the chat ends first, since
+  `archive_session` refuses a session with live background work. After the hand-over, a
+  subagent's report is the one thing a chat may end its turn for (`issue-handover`, *End your
+  own live work*).
 - **Questions for the user go on the owning issue** with the question label. They do not block
   the hand-over unless the next step needs the answer. A question that is really new scope gets
   the requirements label instead.

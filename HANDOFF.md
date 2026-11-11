@@ -1,6 +1,6 @@
 # agentic-github-flow: current state
 
-Checked on 2026-11-09 (v2, and the landing modes of #13).
+Checked on 2026-11-10 (v2, the landing modes of #13, the sandbox-network guard of #20).
 
 ## State
 
@@ -19,7 +19,8 @@ Checked on 2026-11-09 (v2, and the landing modes of #13).
   - guards: a delete guard for Claude Code (asks, never denies); Codex prompt rules for deletes;
     Codex rules files installed as copies, because Codex skips a symlinked rules file; the
     personal-data guard's settings `exempt-dirs` and `local-mcp`, and its Codex hook installed by
-    `--guards` (#15).
+    `--guards` (#15); the opt-in sandbox-network guard for Claude Code (`--guards sandbox`,
+    #20), wired by the installer in `~/.claude/settings.json`, not by the plugin's hooks.
   - issue-chats (new, opt-in): one issue per chat, hand-over to the next ready issue, archiving
     only once a chat's work is on GitHub (also when a successor's pushed branch holds it); a
     side chat started with `start_session` only once its work landed or its pull request merged. The method: `plugins/issue-chats/skills/issue-handover/method.md`.
@@ -58,7 +59,7 @@ Checked on 2026-11-09 (v2, and the landing modes of #13).
 | the always-loaded rules | `rules/core.md`, `AGENTS.md` §Rule budget |
 | a skill | its `SKILL.md`, `plugins/core/skills/repo-docs/skill-standard.md`, `tests/skills_format.py` |
 | the installer | `tools/installer.py` (its docstring owns the behaviour), `tests/installer.py` |
-| the guards | `plugins/guards/scripts/*.py` headers, `plugins/guards/policy/*.rules`, `tests/git_guard.py`, `tests/delete_guard.py` (cases in `tests/delete_guard_cases.py`; `tests/delete_guard_differential.py` checks it never asks less than before issue 4), `tests/personal_data_guard.py`, `tests/codex_policy.py` |
+| the guards | `plugins/guards/scripts/*.py` headers, `plugins/guards/policy/*.rules`, `tests/git_guard.py`, `tests/delete_guard.py` (cases in `tests/delete_guard_cases.py`; `tests/delete_guard_differential.py` checks it never asks less than before issue 4), `tests/personal_data_guard.py`, `tests/sandbox_network_guard.py` (with `--guards sandbox` in `tools/installer.py`), `tests/codex_policy.py` |
 | automatic merging | `plugins/core/scripts/merge_pr.py` header, `DESIGN_DECISIONS.md`, `tests/merge_pr.py` |
 | landing modes | `plugins/core/scripts/landing.py` and `promote_main.py` headers, `plugins/core/skills/ship-change/` (`SKILL.md`, `local-main.md`), `tests/landing.py`, `tests/promote_main.py` |
 | worktrees and cleanup | `plugins/core/scripts/*.py` headers, `plugins/core/skills/cleanup-merged/SKILL.md`, `tests/worktree_tools.py`, `tests/new_worktree.py`, `tests/overlap_check.py` |

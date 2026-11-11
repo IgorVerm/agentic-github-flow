@@ -14,10 +14,26 @@
 # the same row, as last fetched), that branch is refused by name too, and "merged" means merged
 # into it: in its tip as last fetched, or the head of a pull request merged into it. A value
 # that is no branch name refuses every deletion.
+# The content checks (#40), for every push that sends anything: the hook lists the objects that
+# go out (the commits of each pushed ref not yet in the pushed-to remote's tracking refs as last
+# fetched, nor in the remote tips the push replaces, plus annotated tags) and runs, from the
+# installed clone ($HOME/.agentic-github-flow, where install.sh and install.ps1 put it):
+# - the secret scan: plugins/security/scripts/scan_secrets.py --commits;
+# - the personal-data check: plugins/guards/scripts/pre_tool_personal_data.py --commits;
+# - only when AGENTIC_GITHUB_FLOW_UNASKED_PUSH is set (not empty, not 0), the protected-path
+#   check: plugins/core/scripts/push_paths.py. Nothing sets it today; the route that pushes a
+#   task branch without the user's yes (#26) will set it for its own `git push`, so CI
+#   workflows, hooks, permission settings, the installer and rules/core.md still ask.
+# Each script's header owns what it looks for. A finding refuses the push and names the rule,
+# the file and the commit, never the value. The checks fail closed: a missing clone or Python, a
+# script that cannot run, an object that is not a commit or tag refuses the push. Offline.
 # Install per repository (worktrees share it): cp pre-push "$(git rev-parse --git-path hooks)/pre-push"
 # and chmod +x it; an existing pre-push hook is chained by hand, never overwritten. On Windows,
 # Git for Windows runs it with its own sh.
 remote="$1"
+url="$2"
+tips=""
+known=""
 default=$(git symbolic-ref -q "refs/remotes/$remote/HEAD" 2>/dev/null) ||
   default="refs/remotes/$remote/main"
 landing=$(git show "$default:HANDOFF.md" 2>/dev/null | awk '
@@ -66,7 +82,71 @@ while read lref lsha rref rsha; do
     if ! git merge-base --is-ancestor "$rsha" "$lsha" 2>/dev/null; then
       echo "pre-push: refusing NON-FAST-FORWARD update of $rref (force push). Ask the user." >&2
       exit 1
-    fi ;;
+    fi
+    known="$known $rsha" ;;
   esac
+  tips="$tips $lsha"
 done
+[ -n "$tips" ] || exit 0
+
+refuse() {
+  echo "pre-push: refusing the push: $1" >&2
+  [ -z "$2" ] || printf '%s\n' "$2" | sed 's/^/  /' >&2
+  [ -z "$3" ] || echo "  $3" >&2
+  exit 1
+}
+flow="$HOME/.agentic-github-flow"
+for script in plugins/security/scripts/scan_secrets.py \
+    plugins/guards/scripts/pre_tool_personal_data.py plugins/core/scripts/push_paths.py; do
+  [ -f "$flow/$script" ] || refuse "the checks cannot run: $flow/$script is missing" "" \
+    "Install or update agentic-github-flow (install.sh --update), or ask the user."
+done
+python=""
+for candidate in python3 python; do
+  if command -v "$candidate" >/dev/null 2>&1 &&
+     "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 8))' >/dev/null 2>&1; then
+    python="$candidate"; break
+  fi
+done
+if [ -z "$python" ] && command -v py >/dev/null 2>&1; then python="py -3"; fi
+[ -n "$python" ] || refuse "the checks cannot run: no Python 3.8+ found" "" "Ask the user."
+
+# what goes out: commits the remote does not have as far as this clone knows, annotated tags
+# shellcheck disable=SC2086
+objects=$(git rev-list $tips --not $known --remotes="$remote" --) ||
+  refuse "the checks cannot run: git cannot list the outgoing commits" "" "Ask the user."
+for tip in $tips; do
+  [ "$(git cat-file -t "$tip" 2>/dev/null)" = tag ] && objects="$objects
+$tip"
+done
+[ -n "$objects" ] || exit 0
+
+out=$(printf '%s\n' "$objects" |
+      $python -I "$flow/plugins/security/scripts/scan_secrets.py" . --commits - 2>&1)
+case $? in
+  0) ;;
+  1) refuse "the secret scan found secrets in the outgoing commits (rule, file:line, commit):" \
+       "$(printf '%s\n' "$out" | grep -v '^scan_secrets:')" \
+       "Never push a secret: tell the user the file and the commit; a real one is revoked first." ;;
+  *) refuse "the secret scan could not run:" "$out" "Ask the user." ;;
+esac
+out=$(printf '%s\n' "$objects" |
+      $python -I "$flow/plugins/guards/scripts/pre_tool_personal_data.py" --commits "$url" 2>&1)
+case $? in
+  0) ;;
+  1) refuse "the outgoing commits carry personal data (what, file:line, commit):" "$out" \
+       "Personal data leaves the machine only on the user's explicit confirmation: ask the user." ;;
+  *) refuse "the personal-data check could not run:" "$out" "Ask the user." ;;
+esac
+case "${AGENTIC_GITHUB_FLOW_UNASKED_PUSH:-}" in
+  ""|0) ;;
+  *)
+    out=$(printf '%s\n' "$objects" | $python -I "$flow/plugins/core/scripts/push_paths.py" . 2>&1)
+    case $? in
+      0) ;;
+      1) refuse "a push without the user's yes changes a protected path (path, commit):" "$out" \
+           "CI workflows, hooks, permission settings, the installer and the rules: ask the user." ;;
+      *) refuse "the protected-path check could not run:" "$out" "Ask the user." ;;
+    esac ;;
+esac
 exit 0

@@ -1,6 +1,6 @@
 {
   "name": "agentic-github-flow-guards",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Claude Code hooks that refuse destructive git commands and ask before destructive deletes and before personal data leaves the machine.",
   "author": {
     "name": "MAI-Tech",

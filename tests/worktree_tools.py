@@ -29,6 +29,8 @@ NEW = os.path.join(SCRIPTS, 'new_worktree.py')
 REMOVE = os.path.join(SCRIPTS, 'remove_merged_worktree.py')
 DELETE = os.path.join(SCRIPTS, 'delete_merged_branch.py')
 PRE_PUSH = os.path.join(ROOT, 'templates', 'pre-push')
+sys.path.insert(0, HERE)
+from pre_push_checks import install_clone  # noqa: E402
 WINDOWS = os.name == 'nt'
 
 FAKE_GH = r'''import json, os, sys
@@ -954,6 +956,12 @@ class DeleteMergedTests(Repos):
 class PrePushTests(Repos):
     def setUp(self):
         super().setUp()
+        # the hook runs its content checks from the installed clone (tests/pre_push_checks.py)
+        home = os.path.join(self.dir, 'home')
+        install_clone(home)
+        self.env.update(HOME=home, USERPROFILE=home, XDG_CONFIG_HOME=os.path.join(home, 'cfg'),
+                        GH_CONFIG_DIR=os.path.join(home, 'gh'))
+        self.env.pop('AGENTIC_GITHUB_FLOW_UNASKED_PUSH', None)
         hooks = self.git(self.repo, 'rev-parse', '--git-path', 'hooks').stdout.strip()
         hooks = os.path.join(self.repo, hooks) if not os.path.isabs(hooks) else hooks
         os.makedirs(hooks, exist_ok=True)

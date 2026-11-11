@@ -15,6 +15,14 @@
       "Fix the failing test in tests/test_io.py."
     ]
   },
+  "efficient-design": {
+    "should": [
+      "Review this change: the dashboard now recomputes the totals of every order on each page request."
+    ],
+    "should_not": [
+      "Fix the typo in the README heading."
+    ]
+  },
   "ship-change": {
     "should": [
       "The fix for issue 12 is committed on my task branch and the tests pass. Land it the way this repository lands work."

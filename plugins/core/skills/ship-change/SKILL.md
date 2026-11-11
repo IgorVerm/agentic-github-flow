@@ -57,6 +57,9 @@ The review route, in both modes:
   touching authentication, permissions, secrets, dependencies or deployment also gets the
   `review-security` skill when it is installed.
 
+On either route, whoever checks the change states the `efficient-design` result with the
+verdict (the core rule *Work grows with what changed*).
+
 One sentence on the issue is enough: the mode with its reason, the route and why. When you start
 work on an issue that has no assignee, assign it to the account you post under
 (`gh issue edit <n> --add-assignee @me`) and say so on the issue: that is the claim the overlap

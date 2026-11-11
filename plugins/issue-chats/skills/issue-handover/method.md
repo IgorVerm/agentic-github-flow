@@ -45,8 +45,8 @@ the next ready issue, starts the chat for it and archives chats that pass the wo
 without asking again, and in local-main mode lands the chat's work on local main (local work).
 It never covers a push, a merge or marking a pull request ready: those stay on the user's word
 for each push and each pull request, unless a standing grant covers the push of a chat's own
-task branch, or the user switched automatic merging on in `## Standing permissions`
-(`ship-change` steps 6 to 8). Deleting the section switches all of it off.
+task branch, or the user switched automatic merging on in `## Landing settings`
+(`ship-change` steps 1 and 6 to 8). Deleting the section switches all of it off.
 
 The skills read their values from it; a row left out takes its default:
 
@@ -92,7 +92,7 @@ The method: the `issue-handover` skill's method file (agentic-github-flow-issue-
 This section switches on its standing permission in this repository: picking and claiming the
 next ready issue, starting its chat, and archiving chats that pass the worktree check. Pushes,
 merges and ready-marking follow the `ship-change` skill: the user's word, unless a standing
-grant or the switch in §Standing permissions says otherwise.
+grant or the `automatic merge` row of §Landing settings says otherwise.
 
 | Setting | Value |
 |---|---|

@@ -369,6 +369,19 @@ class Landing(unittest.TestCase):
         r = self.run_tool(args=('--branch',))
         self.assertEqual((r.returncode, r.stdout.strip()), (0, 'editor'))
 
+    def test_automatic_merge_is_off_unless_the_row_says_on(self):
+        self.assertEqual(self.mode(solo()), 'local main')
+        self.assertIn('automatic merge: off', self.out)
+        for value, shown in (('`on`', 'on'), ('On', 'on'), ('`off`', 'off'), ('yes', 'off')):
+            with self.subTest(value=value):
+                self.commit({'HANDOFF.md': settings([('landing', 'pull request'),
+                                                     ('automatic merge', value)])})
+                self.publish('main')
+                self.assertEqual(self.mode(solo()), 'pull request')
+                self.assertIn('automatic merge: %s' % shown, self.out)
+        r = self.run_tool(solo(), args=('-C', self.repo))
+        self.assertNotIn('automatic merge', r.stdout)
+
     def test_invalid_landing_branch_is_an_error(self):
         self.commit({'HANDOFF.md': settings([('landing branch', 'a..b')])})
         self.publish('main')

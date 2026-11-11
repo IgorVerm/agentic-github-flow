@@ -32,7 +32,8 @@ Run it again at every landing, with `--explain` to see the signals it read, and 
 mode over from an earlier task. A repository fixes its mode in `HANDOFF.md`, merged like any
 other change: `landing` is `pull request`, `local main` (which cannot overrule a server that
 requires pull requests) or `auto` (detect); `landing branch`, left out, is the remote's default
-branch. A value cell holds the value alone:
+branch; `automatic merge` is `on` or, left out, off (step 8). A value cell holds the value
+alone:
 
 ```markdown
 ## Landing settings
@@ -41,6 +42,7 @@ branch. A value cell holds the value alone:
 |---|---|
 | landing | `auto` |
 | landing branch | `main` |
+| automatic merge | `off` |
 ```
 
 The review route, in both modes:
@@ -168,8 +170,8 @@ Your own pull request, in pull-request mode, until it is merged or the user take
 4. **Wait for CI** in the foreground: `gh pr checks <n> --watch`, called again when the tool's
    timeout ends it.
 5. **Ready and merge,** once every check is green and the newest review approves the head:
-   - **Automatic merging switched on** (a row `automatic merge` | `on` in the repository's
-     `HANDOFF.md` §Standing permissions, which only the user sets): run
+   - **Automatic merging switched on** (`landing.py --explain` says `automatic merge: on`: the
+     row of step 1, which only the user sets): run
      `python3 <plugin>/scripts/merge_pr.py <n> --ready` ([merge_pr.py](../../scripts/merge_pr.py)),
      never `gh pr ready` or `gh pr merge` yourself. It marks the draft ready and merges only when
      every condition in its header holds. A refusal for a path that merges only on the user's

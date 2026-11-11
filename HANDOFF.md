@@ -36,11 +36,11 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
   the landing branch on the user's word (`plugins/core/skills/ship-change/local-main.md`). The
   setting `## Landing settings` can fix the mode and name a landing branch; the worktree,
   overlap and cleanup scripts and `templates/pre-push` follow that branch.
-- Automatic merging (#13, narrowed by #26, `DESIGN_DECISIONS.md`): only in a repository where
-  the user set the row `automatic merge` | `on` in `HANDOFF.md` §Standing permissions by hand;
-  an overlay cannot switch it on. There `merge_pr.py --ready` marks an agent's own draft ready
-  and merges it when its checks, review, overlap line and paths allow it. This repository has
-  no switch (Standing permissions below). The review it needs comes from the core skill
+- Automatic merging (#13, narrowed by #26, `DESIGN_DECISIONS.md`): off by default, switched on
+  per repository by the row `automatic merge` | `on` in `HANDOFF.md` §Landing settings, next to
+  the landing mode (`landing.py` owns it, `--explain` reports it); an overlay cannot switch it
+  on. There `merge_pr.py --ready` marks an agent's own draft ready and merges it when its
+  checks, review, overlap line and paths allow it. It is off here (Landing settings below). The review it needs comes from the core skill
   `review-change` (#39), whose `review_verdict.py` writes the verdict comment and owns its
   format; `merge_pr.py` parses it through the same module.
 - Unasked push (#26): under a standing grant (`HANDOFF.md` §Standing permissions or an overlay)
@@ -100,7 +100,7 @@ The method: the `issue-handover` skill's method file (agentic-github-flow-issue-
 This section switches on its standing permission in this repository: picking and claiming the
 next ready issue, starting its chat, and archiving chats that pass the worktree check. Pushes,
 merges and ready-marking follow the `ship-change` skill: the user's word, unless a standing
-grant or the switch in §Standing permissions says otherwise. Switched on by Igor, 2026-11-11:
+grant or the `automatic merge` row of §Landing settings says otherwise. Switched on by Igor, 2026-11-11:
 "zet de knop aan" (#51).
 
 | Setting | Value |

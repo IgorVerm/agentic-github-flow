@@ -4,8 +4,9 @@
 A bare origin on disk holds the base branch and the pull request's head at refs/pull/7/head; a
 stand-in `gh` (AGENTIC_GITHUB_FLOW_GH) answers `pr view` from a fixture and records `pr merge`.
 A folder remote is not GitHub, so landing.py decides pull request unless HANDOFF.md says local
-main. Each case is a way an agent could merge what it may not: automatic merging not switched
-on in HANDOFF.md (whatever --grant says), local-main mode, a draft without --ready, a merge state other than CLEAN, a failed, pending or missing check, no review, a review
+main. Each case is a way an agent could merge what it may not: automatic merging off in
+HANDOFF.md's Landing settings (no row, `off`, another value, or the row in another section,
+whatever --grant says), local-main mode, a draft without --ready, a merge state other than CLEAN, a failed, pending or missing check, no review, a review
 that does not approve or was edited after posting, an approval of an older commit followed by a commit of the author or by
 a merge with a conflict resolved by hand, no overlap result, a path that merges only on the
 user's word (built in, or named in HANDOFF.md), and a base other than the landing branch. And the
@@ -24,12 +25,13 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 TOOL = os.path.join(ROOT, 'plugins', 'core', 'scripts', 'merge_pr.py')
 VERDICT = os.path.join(ROOT, 'plugins', 'core', 'scripts', 'review_verdict.py')
 ROBOT = '\N{ROBOT FACE}'
-SWITCH = '## Standing permissions\n\n| Permission | Value |\n|---|---|\n| automatic merge | `on` |\n'
+SWITCH = '| automatic merge | `on` |\n'
 
 
-def handoff(*sections):
-    """HANDOFF.md with automatic merging switched on, and the sections given."""
-    return '# Handoff\n\n' + '\n'.join(sections + (SWITCH,))
+def handoff(*rows, text='', switch=SWITCH):
+    """HANDOFF.md with <text>, then Landing settings: the rows given and automatic merging on."""
+    return ('# Handoff\n\n' + text + '## Landing settings\n\n| Setting | Value |\n|---|---|\n'
+            + ''.join(rows) + switch)
 
 STUB = r'''import json, os, sys
 s = json.load(open(os.environ['STUB_GH']))
@@ -149,6 +151,7 @@ class MergePr(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn(text, r.stdout)
         self.assertEqual(self.merged(), [])
+        return r
 
     def test_merges_with_the_head_pinned(self):
         self.assertMerged(self.pr())
@@ -164,18 +167,19 @@ class MergePr(unittest.TestCase):
         self.assertEqual(self.run_tool(self.pr(), '--method', 'rebase').returncode, 2)
 
     def test_the_switch_in_handoff_decides_not_a_grant(self):
-        for text in ('# Handoff\n',
-                     '# Handoff\n\n## Standing permissions\n\nNone.\n',
-                     SWITCH.replace('`on`', '`off`'),
-                     '# Handoff\n\n## Landing settings\n\n| Setting | Value |\n|---|---|\n'
-                     '| automatic merge | on |\n'):
+        for text in ('# Handoff\n', handoff(switch=''),
+                     handoff(switch=SWITCH.replace('`on`', '`off`')),
+                     handoff(switch='| automatic merge | yes |\n'),
+                     '# Handoff\n\n## Standing permissions\n\n| Permission | Value |\n|---|---|\n'
+                     + SWITCH):
             with self.subTest(text=text):  # the task branch keeps the switch; main decides
                 self.git('switch', '-q', 'main')
                 self.write('HANDOFF.md', text)
                 self.git('commit', '-q', '-am', 'no switch')
                 self.git('push', '-q', 'origin', 'main')
                 self.git('switch', '-q', 'agent/7-x')
-                self.assertRefused(self.pr(), 'not switched on', grant='agent-rules overlay')
+                self.assertRefused(self.pr(), 'automatic merging is off',
+                                   grant='agent-rules overlay')
 
     def test_ready_marks_a_draft_only_when_everything_else_holds(self):
         draft = self.pr(isDraft=True, mergeStateStatus='DRAFT')
@@ -367,8 +371,7 @@ class MergePr(unittest.TestCase):
 
     def test_paths_named_in_handoff(self):
         self.git('switch', '-q', 'main')
-        self.write('HANDOFF.md', "# H\n\n## Landing settings\n\n| Setting | Value |\n|---|---|\n"
-                   "| merge on the user's word | `schema/*`, `*.sql` |\n")
+        self.write('HANDOFF.md', handoff("| merge on the user's word | `schema/*`, `*.sql` |\n"))
         self.git('commit', '-q', '-am', 'settings')
         self.git('push', '-q', 'origin', 'main')
         self.git('fetch', '-q', 'origin')
@@ -376,15 +379,16 @@ class MergePr(unittest.TestCase):
         self.git('merge', '-q', '--no-edit', 'origin/main')
         self.head = self.change('db/001.sql', 'create table t();\n')
         pr = self.pr(comments=[self.comment('Approved %s' % self.head)])
-        self.assertRefused(pr, 'db/001.sql')
+        r = self.assertRefused(pr, 'db/001.sql')
+        self.assertEqual(r.stdout.count('REFUSED'), 1, r.stdout)
 
     def test_handoff_grant_and_settings_are_guarded(self):
-        self.head = self.change('HANDOFF.md', handoff('More state.\n'))
+        self.head = self.change('HANDOFF.md', handoff(text='More state.\n\n'))
         self.assertMerged(self.pr(comments=[self.comment('Approved %s' % self.head)]), '--dry-run')
-        for text in ('## Landing settings\n\nGranted.\n',
-                     SWITCH + '| unasked push | on |\n', '# Handoff\n'):
+        for text in (handoff('| required checks | lint |\n'),
+                     handoff(text='## Standing permissions\n\nGranted.\n\n'), '# Handoff\n'):
             with self.subTest(text=text):
-                self.head = self.change('HANDOFF.md', '# Handoff\n\n' + text)
+                self.head = self.change('HANDOFF.md', text)
                 self.assertRefused(self.pr(comments=[self.comment('Approved %s' % self.head)]),
                                    'merges only on the user')
 
@@ -404,14 +408,13 @@ class MergePr(unittest.TestCase):
                      '### Standing permissions\n\nAutomatic merging.\n',
                      'Our landing settings changed: local main.\n'):
             with self.subTest(text=text):
-                self.head = self.change('HANDOFF.md', handoff(text))
+                self.head = self.change('HANDOFF.md', handoff(text=text + '\n'))
                 self.assertRefused(self.pr(comments=[self.comment('Approved %s' % self.head)]),
                                    'line naming them')
 
     def test_required_checks_row_and_app_checks(self):
         self.git('switch', '-q', 'main')
-        self.write('HANDOFF.md', handoff("## Landing settings\n\n| Setting | Value |\n|---|---|\n"
-                                         "| required checks | test (ubuntu, 3.12); lint |\n"))
+        self.write('HANDOFF.md', handoff("| required checks | test (ubuntu, 3.12); lint |\n"))
         self.git('commit', '-q', '-am', 'settings')
         self.git('push', '-q', 'origin', 'main')
         self.git('fetch', '-q', 'origin')
@@ -452,8 +455,7 @@ class MergePr(unittest.TestCase):
 
     def test_local_main_mode(self):
         self.git('switch', '-q', 'main')
-        self.write('HANDOFF.md', handoff("## Landing settings\n\n| Setting | Value |\n|---|---|\n"
-                                         "| landing | `local main` |\n"))
+        self.write('HANDOFF.md', handoff("| landing | `local main` |\n"))
         self.git('commit', '-q', '-am', 'settings')
         self.git('push', '-q', 'origin', 'main')
         self.git('fetch', '-q', 'origin')

@@ -6,14 +6,18 @@ the linked issue.
 ## Automatic merging only where the user switches it on; unasked push of the own task branch, 2026-11-11
 
 **Decision (the maintainer):** on merging, "automatisch mergen mag enkel voor repos waar ik dit
-manueel aanzet" (automatic merging only in repositories where I switch it on by hand). On the
+manueel aanzet" (automatic merging only in repositories where I switch it on by hand), and on
+the form of that switch, "auto merge is defaulth uit maar kan aan op wens net zoals local en
+pull mode" (automatic merge is off by default but can be switched on at will, just like local
+and pull mode). On the
 push, from the issue: "pushing to the non main remote branch should be allowed without me giving
 it permissions since it doesn't enter main and stays on the pull request". On the steps after
 the pull request: "start en voeg die stappen na PR toe aan die issue" (start, and add those
 steps after the PR to the issue).
-**What:** automatic merging needs a row `automatic merge` | `on` in the repository's own
-`HANDOFF.md` §Standing permissions, on the default branch, set by the user by hand;
-`merge_pr.py` refuses without it whatever an overlay or `--grant` says, and with `--ready`
+**What:** automatic merging needs the row `automatic merge` | `on` in the repository's own
+`HANDOFF.md` §Landing settings, next to `landing`, on the default branch, set by the user;
+missing, it is off. `landing.py` owns the setting and `--explain` reports it; `merge_pr.py`
+refuses while it is off, whatever an overlay or `--grant` says, and with `--ready`
 marks the draft ready only when every other condition holds. The push of an agent's own task
 branch in pull-request mode needs no word where a standing grant allows it (the repository's
 §Standing permissions or an overlay), and goes only through `push_branch.py`: not the default
@@ -29,8 +33,9 @@ powers (rules, guards, hooks, CI, the installer) are checked or still asked. Mer
 so the user decides per repository, not once for all.
 **Narrows:** the ruling of 2026-11-09 below: an overlay's grant no longer switches automatic
 merging on.
-**Binds:** `rules/core.md` §Git, `plugins/core/scripts/merge_pr.py`, `push_branch.py`,
-`tests/merge_pr.py`, `tests/push_branch.py`, `plugins/core/skills/ship-change/SKILL.md` steps 6
+**Binds:** `rules/core.md` §Git, `plugins/core/scripts/landing.py` (and its copy in the
+issue-chats plugin), `merge_pr.py`, `push_branch.py`, `tests/landing.py`, `tests/merge_pr.py`,
+`tests/push_branch.py`, `plugins/core/skills/ship-change/SKILL.md` steps 6
 to 8, `plugins/issue-chats/skills/issue-handover/` (`SKILL.md` steps 2, 6 and 7, `method.md`).
 **Detail:** issue #26.
 

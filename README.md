@@ -52,9 +52,9 @@ repository lands finished work, and states the answer with its reasons on the is
   private repository cannot have protection at all; that counts as "no protection", not as
   unknown.
 
-In pull-request mode you merge, unless you switch automatic merging on for that repository
-yourself: a row `automatic merge` with the value `on` in its `HANDOFF.md` §Standing
-permissions (an overlay cannot switch it on). Then an agent marks its own pull request ready
+In pull-request mode you merge, unless you switch automatic merging on for that repository,
+like its landing mode: the row `automatic merge` with the value `on` in its `HANDOFF.md`
+§Landing settings (below); it is off by default, and an overlay cannot switch it on. Then an agent marks its own pull request ready
 and merges it through `merge_pr.py`, only with every required check green, an approving review
 of the head commit by another agent, the overlap result in the body, and no change to rules,
 guards, permission settings, hooks, the installer, CI or deployment configuration, the merge

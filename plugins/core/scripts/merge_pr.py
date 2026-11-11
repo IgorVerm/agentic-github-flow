@@ -6,14 +6,15 @@ Usage: python3 merge_pr.py <number> [--ready] [--method merge|squash] [--dry-run
                            [-C <checkout>] [-R <owner>/<repo>] [--grant "<text>"]
 
 Merging, and marking a draft ready, is the user's word for each pull request, unless the
-repository switched automatic merging on (the core rules): a row `automatic merge` with the
-value `on` in the `## Standing permissions` section of HANDOFF.md as the default branch holds
-it, set by the user by hand (the maintainer's ruling of 2026-11-11, DESIGN_DECISIONS.md). An
-overlay cannot switch it on: without the row this script refuses, whatever a grant says.
---grant is still accepted from older callers and only printed. The script fetches, then checks,
-reading git and `gh` only, and merges only when all hold:
+repository switched automatic merging on (the core rules): the row `automatic merge` with the
+value `on` in HANDOFF.md's `## Landing settings`, next to the landing mode, as the default branch
+holds it; off when it is missing (landing.py, beside this file, owns the setting; the
+maintainer's rulings of 2026-11-11, DESIGN_DECISIONS.md). An overlay cannot switch it on: while
+it is off this script refuses, whatever a grant says. --grant is still accepted from older
+callers and only printed. The script fetches, then checks, reading git and `gh` only, and merges
+only when all hold:
 
-  switch    the row above, on the default branch;
+  switch    automatic merging is on (landing.py's automatic_merge());
   mode      landing.py (beside this file) decides pull request for the repository, and the pull
             request's base is the landing branch;
   state     open, not a draft, merge state CLEAN (GitHub's own rules and checks satisfied), and
@@ -73,8 +74,8 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from landing import (PR, GITHUB_URL, SettingError, Unknown, decide, gh_command,  # noqa: E402
-                     gh_json, row, settings_text)
+from landing import (AUTO_MERGE, PR, GITHUB_URL, SettingError, Unknown,  # noqa: E402
+                     automatic_merge, decide, gh_command, gh_json, row, settings_text)
 from review_verdict import verdict  # noqa: E402
 
 # Paths that merge only on the user's word: the always-loaded rules and a repository's own
@@ -98,7 +99,6 @@ EXCLUDED = (
 # raises it) passes; any other change, such as a hook a manifest declares, is held.
 MANIFESTS = ("*.claude-plugin/*.json", "*.codex-plugin/*.json", ".agents/plugins/*.json")
 GUARDED_SECTIONS = ("Standing permissions", "Landing settings")
-SWITCH = "automatic merge"
 READY_WAIT_S, READY_POLL_S = 60, 5
 GUARDED_LINE = re.compile(r"standing permission|landing setting", re.I)
 PASSED_RUNS = {"SUCCESS", "NEUTRAL", "SKIPPED"}
@@ -144,15 +144,6 @@ def version_only(path: str, before: str, after: str, name: str) -> bool:
 def section(text: str | None, title: str) -> str:
     m = re.search(r"^## %s[ \t]*$(.*?)(?=^## |\Z)" % re.escape(title), text or "", re.M | re.S)
     return m.group(1).strip() if m else ""
-
-
-def switched_on(text: str | None) -> bool:
-    """Whether HANDOFF.md's `## Standing permissions` has the row `automatic merge` set to `on`."""
-    for line in section(text, GUARDED_SECTIONS[0]).splitlines():
-        cells = [c.strip() for c in line.strip().strip("|").split("|")]
-        if line.strip().startswith("|") and len(cells) >= 2 and cells[0].lower() == SWITCH:
-            return cells[1].replace("`", "").strip().lower() == "on"
-    return False
 
 
 def required_checks(command: list, repo: str, branch: str, named: list) -> set:
@@ -410,9 +401,9 @@ def main(argv: list) -> int:
     named = [p.strip() for p in (row(text, "required checks") or "").split(";") if p.strip()]
 
     reasons = []
-    if not switched_on(text):
-        reasons.append("automatic merging is not switched on in this repository: the user sets "
-                       f"the row `{SWITCH}` | `on` in HANDOFF.md §Standing permissions by hand")
+    if not automatic_merge(path):
+        reasons.append("automatic merging is off in this repository: the user switches it on "
+                       f"with the row `{AUTO_MERGE}` | `on` in HANDOFF.md §Landing settings")
     if mode != PR:
         reasons.append(f"the repository lands on {mode}, not through pull requests")
     if pr.get("state") != "OPEN":
@@ -472,8 +463,8 @@ def main(argv: list) -> int:
                 reasons.append(f"{name}: §Standing permissions, §Landing settings or a line "
                                "naming them changes: that merges only on the user's word")
 
-    print(f"merge_pr: #{number} in {repo}, head {head[:10]}, switch: HANDOFF.md §Standing "
-          f"permissions, {SWITCH}" + (f"; grant named: {grant.strip()}" if grant.strip() else ""))
+    print(f"merge_pr: #{number} in {repo}, head {head[:10]}, switch: HANDOFF.md §Landing "
+          f"settings, {AUTO_MERGE}" + (f"; grant named: {grant.strip()}" if grant.strip() else ""))
     print(f"merge_pr: mode {mode}; {found or 'no approved review'}")
     if reasons:
         for reason in reasons:

@@ -387,6 +387,21 @@ def scan_commits(repo, ids, excludes):
         results += scan_diff(git_input(repo, stdin, *DIFF_CONFIG, 'log', '--no-walk=unsorted',
                                        '--stdin', '--cc', '--no-renames', *DIFF_OPTIONS,
                                        '--format=@@commit %H'), 'commit', excludes)
+        # every file name, also of an empty file, whose diff has no `+++` header
+        names = git_input(repo, stdin, *DIFF_CONFIG, 'log', '--no-walk=unsorted', '--stdin',
+                          '--cc', '--name-only', '--no-renames', '-z', '--format=@@commit %H')
+        commit = ''
+        for field in names.split('\0'):
+            field = field[1:] if field.startswith('\n') else field
+            if field.startswith('@@commit '):
+                commit = field.split()[1][:12]
+            elif field and commit and not excluded(field, excludes):
+                in_name = findings_in_line(field)
+                shown = '(a file name)' if in_name else field
+                results += [('commit', name, shown, 0, commit) for name in in_name]
+                pat = secret_file_name(field)
+                if pat:
+                    results.append(('commit', 'secret-file-name:' + pat, shown, 0, commit))
         messages = git_input(repo, stdin, '-c', 'i18n.logOutputEncoding=UTF-8', 'log',
                              '--no-walk=unsorted', '--stdin', '--format=%x00%H%n%B')
         for chunk in messages.split('\0')[1:]:

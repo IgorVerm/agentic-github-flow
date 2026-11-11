@@ -828,18 +828,23 @@ def push_findings(repo, ids, url):
     if commits:
         stdin = ''.join(c + '\n' for c in commits)
         shown = {}
-        for commit, path, n, line in added_lines(_git(repo, PUSH_DIFF, stdin)):
-            if line is None:  # the file name: an address in it is reported, never printed
-                key = (commit, path)
-                shown[key] = path
-                # `<address>.md` reads as a file name to emails(): judge each part without its
-                # extension too
-                parts = ' '.join([path] + [os.path.splitext(p)[0] for p in path.split('/')])
+        # every file name, also of an empty file (its diff has no `+++` header); an address in
+        # it is reported, never printed. `<address>.md` reads as a file name to emails(), so
+        # each part is judged without its extension too.
+        names, commit = _git(repo, PUSH_DIFF[:-1] + ['--name-only', '-z', PUSH_DIFF[-1]],
+                             stdin), ''
+        for field in names.split('\0'):
+            field = field[1:] if field.startswith('\n') else field
+            if field.startswith('@@commit '):
+                commit = field.split()[1][:12]
+            elif field and commit:
+                parts = ' '.join([field] + [os.path.splitext(p)[0] for p in field.split('/')])
                 if push_labels(parts, mine, github, own):
-                    shown[key] = '(a file name)'
-                    judge_line(parts, shown[key], commit)
-                continue
-            judge_line(line, '%s:%d' % (shown.get((commit, path), path), n), commit)
+                    shown[(commit, field)] = '(a file name)'
+                    judge_line(parts, '(a file name)', commit)
+        for commit, path, n, line in added_lines(_git(repo, PUSH_DIFF, stdin)):
+            if line is not None:
+                judge_line(line, '%s:%d' % (shown.get((commit, path), path), n), commit)
         messages = _git(repo, ['-c', 'i18n.logOutputEncoding=UTF-8', 'log', '--no-walk=unsorted',
                                '--stdin', '--format=%x00%H%x01%an%x01%ae%x01%cn%x01%ce%n%B'],
                         stdin)

@@ -276,6 +276,12 @@ class Push(unittest.TestCase):
         self.git(self.repo, 'switch', '-q', '-C', 'agent/t', 'main')
         self.commit('k/' + TOKEN + '.txt', 'GH=' + TOKEN + '\n', 'k')
         self.refused(self.push('agent/t'), 'github-token', '(a file name)')
+        # an empty file shows no `+++` header in a diff: its name is still read
+        for name, rule in (('users/' + OTHER + '/.gitkeep', 'e-mail address'),
+                           ('k/' + TOKEN, 'github-token'), ('deploy/.env', 'secret-file-name')):
+            self.git(self.repo, 'switch', '-q', '-C', 'agent/e', 'main')
+            self.commit(name, '', 'empty')
+            self.refused(self.push('agent/e'), rule)
 
     def test_someone_elses_address_as_author_is_refused(self):
         b = self.branch()

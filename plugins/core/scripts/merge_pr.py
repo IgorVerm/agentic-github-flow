@@ -25,10 +25,13 @@ when all hold:
             `reviewer` (`🤖 <agent> (review): Approved <sha>`), approves: it opens with
             `Approved` and the SHA. review_verdict.py (beside this file, posted by the
             review-change skill) owns that format; this script reads it through its verdict().
-            That the reviewer did not write the change is its attestation. A signed comment or
-            review edited after it was posted never approves (anyone signed in as the account
-            can edit it, the author's session too), and a SHA prefix counts only where git
-            resolves it to one commit. <sha> is the head commit, or an earlier commit on the head's own line
+            That the reviewer did not write the change is its attestation. Only a pull request
+            comment approves, and not once it was edited after posting (`includesCreatedEdit`;
+            missing counts as edited): anyone signed in as the account can edit it, the
+            author's session too. A GitHub review's body never approves, since gh does not
+            report whether it was edited; it still blocks. A SHA prefix counts only where git
+            resolves it to one commit that starts with it (a ref named like the prefix does
+            not). <sha> is the head commit, or an earlier commit on the head's own line
             followed only by two-parent merges of the base branch whose tree is git's own merge
             result (no conflict resolved, nothing edited), so a merge of the default branch
             after the review needs only green checks again. A newer review of that account
@@ -231,20 +234,23 @@ def review_reason(path: str, pr: dict, login: str, head: str, base_ref: str) -> 
     for c in pr.get("comments") or []:
         if ((c or {}).get("author") or {}).get("login", "").lower() == login.lower():
             events.append((str(c.get("createdAt") or ""), "comment", "", c.get("body") or "",
-                           bool(c.get("includesCreatedEdit"))))
+                           c.get("includesCreatedEdit") is not False))
     for r in pr.get("reviews") or []:
         state = str((r or {}).get("state") or "").upper()
         if state == "PENDING" or not (r or {}).get("submittedAt"):
             continue
         if ((r or {}).get("author") or {}).get("login", "").lower() == login.lower():
             events.append((str(r.get("submittedAt")), "review", state, r.get("body") or "",
-                           bool(r.get("includesCreatedEdit"))))
+                           True))  # gh does not fetch includesCreatedEdit for reviews
     events.sort(key=lambda e: e[0])  # ISO 8601 strings sort by time
     verdicts = []  # (time, approved sha or None, text)
     for when, kind, state, body, edited in events:
         signed = verdict(body)
         if kind == "review" and state == "CHANGES_REQUESTED":
             verdicts.append((when, None, "changes requested"))
+        elif signed and kind == "review":
+            verdicts.append((when, None, "a GitHub review, which never approves: post the "
+                             "approval as a comment (the review-change skill)"))
         elif signed and edited:
             verdicts.append((when, None, "edited after it was posted; post a new review"))
         elif signed:
@@ -256,7 +262,7 @@ def review_reason(path: str, pr: dict, login: str, head: str, base_ref: str) -> 
         return f"the newest review does not approve: {text[:80]!r}", ""
     resolved = head if token == head else \
         git(path, "rev-parse", "-q", "--verify", token + "^{commit}").stdout.strip()
-    if not resolved:
+    if not resolved or not resolved.startswith(token):
         return f"the approved commit {token} is not in this repository (or not unique)", ""
     if resolved == head:
         return None, f"approved at the head {head[:10]}"

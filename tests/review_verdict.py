@@ -6,7 +6,8 @@ with `gh pr comment`, and parses a comment for merge_pr.py. A stand-in `gh`
 (AGENTIC_GITHUB_FLOW_GH) answers `pr view` from a fixture and records `pr comment` with the body
 it was given. The cases: the approval it writes parses back to the full SHA it names; findings
 never parse as an approval; it refuses a short or foreign SHA, a head that moved, a closed pull
-request, an agent name that would break the signature, and empty findings. That merge_pr.py
+request, an agent name that would break the signature, empty or non-UTF-8 findings; and it
+exits 3 when it posted but cannot vouch for the head afterwards. That merge_pr.py
 accepts what it writes is checked in tests/merge_pr.py. Offline: no network, no real gh.
 """
 import importlib.util
@@ -143,7 +144,7 @@ class Cli(unittest.TestCase):
     def test_head_moving_while_posting_is_reported(self):
         r = self.run_tool('approve', '7', '--sha', HEAD, '--agent', 'Codex',
                           views=[self.view(), self.view(headRefOid=OTHER)])
-        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
         self.assertIn('moved', r.stderr)
         [call] = self.posted()
         self.assertIn('Approved ' + HEAD, call[-1])
@@ -161,9 +162,20 @@ class Cli(unittest.TestCase):
         r = self.run_tool('findings', '7', '--sha', HEAD, '--agent', 'Codex', '--body-file', '-',
                           stdin='2. a finding\n')
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.posted()[0][-1], rv.findings('Codex', HEAD, '2. a finding'))
+        r = self.run_tool('findings', '7', '--sha', HEAD, '--agent', 'Codex', '--body-file', '-',
+                          stdin='\ufeff3. caf\u00e9 \u2192 na\u00efve\n')
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue(self.posted()[0][-1].endswith('3. caf\u00e9 \u2192 na\u00efve\n'))
         empty = self.run_tool('findings', '7', '--sha', HEAD, '--agent', 'Codex',
                               '--body-file', '-', stdin='\n')
         self.assertEqual(empty.returncode, 2)
+        self.assertEqual(self.posted(), [])
+        with open(path, 'wb') as f:
+            f.write('1. a finding'.encode('utf-16'))  # PowerShell 5.1's `>`
+        r = self.run_tool('findings', '7', '--sha', HEAD, '--agent', 'Codex', '--body-file', path)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn('UTF-8', r.stderr)
         self.assertEqual(self.posted(), [])
 
     def test_check_reads_a_comment(self):
@@ -184,6 +196,15 @@ class Cli(unittest.TestCase):
                 self.assertEqual(self.run_tool(*args).returncode, 2)
         self.assertEqual(self.posted(), [])
         self.assertEqual(self.run_tool('--help').returncode, 0)
+        r = self.run_tool('approve', '7', '--sha', HEAD, '--agent', 'Codex', '--note', '-h',
+                          '--dry-run')  # a value is never the help flag
+        self.assertEqual((r.returncode, r.stdout), (0, rv.approval('Codex', HEAD, '-h')))
+
+    def test_a_gh_that_hangs_or_fails_after_posting(self):
+        r = self.run_tool('approve', '7', '--sha', HEAD, '--agent', 'Codex',
+                          views=[self.view(), {'state': 'OPEN'}])
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        self.assertIn('posted, but the head could not be read', r.stderr)
 
 
 if __name__ == '__main__':

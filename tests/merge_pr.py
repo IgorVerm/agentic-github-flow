@@ -105,7 +105,7 @@ class MergePr(unittest.TestCase):
         return pr
 
     def comment(self, text, role='review', login='me', when='2026-11-09T10:00:00Z'):
-        return {'createdAt': when, 'author': {'login': login},
+        return {'createdAt': when, 'author': {'login': login}, 'includesCreatedEdit': False,
                 'body': ROBOT + ' Claude Code (%s): %s' % (role, text)}
 
     def run_tool(self, pr, *args, grant='HANDOFF.md Standing permissions', api=None):
@@ -190,7 +190,7 @@ class MergePr(unittest.TestCase):
         as_review = self.pr(comments=[], reviews=[{'submittedAt': '2026-11-09T10:00:00Z',
                                                    'state': 'COMMENTED', 'author': {'login': 'me'},
                                                    'body': approve['body']}])
-        self.assertMerged(as_review)
+        self.assertRefused(as_review, 'never approves')  # gh cannot tell if it was edited
         # a stranger's approval, a self-review, a pending review and a negative text never count
         self.assertRefused(self.pr(comments=[self.comment('Approved %s' % self.head,
                                                           login='stranger')]), 'no signed review')
@@ -218,7 +218,8 @@ class MergePr(unittest.TestCase):
                             '-R', 'acme/tool'], capture_output=True, text=True, env=env,
                            encoding='utf-8')
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        return {'createdAt': '2026-11-09T10:00:00Z', 'author': {'login': 'me'}, 'body': r.stdout}
+        return {'createdAt': '2026-11-09T10:00:00Z', 'author': {'login': 'me'}, 'body': r.stdout,
+                'includesCreatedEdit': False}
 
     def test_the_review_skills_comment_is_accepted(self):
         approval = self.verdict_script('approve', '7', '--sha', self.head, '--agent',
@@ -246,7 +247,7 @@ class MergePr(unittest.TestCase):
                      ROBOT + ' Claude Code (review): Approved %s' % ('0' * 40)):  # unknown commit
             with self.subTest(body=body):
                 comment = {'createdAt': '2026-11-09T10:00:00Z', 'author': {'login': 'me'},
-                           'body': body}
+                           'body': body, 'includesCreatedEdit': False}
                 r = self.run_tool(self.pr(comments=[comment]))
                 self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
                 self.assertRegex(r.stdout, 'no signed review|does not approve|not in this '
@@ -258,11 +259,19 @@ class MergePr(unittest.TestCase):
         self.assertRefused(self.pr(comments=[edited]), 'edited after it was posted')
         older = self.comment('Approved %s' % self.head, when='2026-11-09T09:00:00Z')
         self.assertRefused(self.pr(comments=[older, edited]), 'edited after it was posted')
-        review = {'submittedAt': '2026-11-09T10:00:00Z', 'state': 'COMMENTED',
-                  'author': {'login': 'me'}, 'body': edited['body'], 'includesCreatedEdit': True}
-        self.assertRefused(self.pr(comments=[], reviews=[review]), 'edited after it was posted')
+        unknown = dict(edited)
+        del unknown['includesCreatedEdit']  # a gh that does not report it: counts as edited
+        self.assertRefused(self.pr(comments=[unknown]), 'edited after it was posted')
         newer = self.comment('Approved %s' % self.head, when='2026-11-09T11:00:00Z')
         self.assertMerged(self.pr(comments=[edited, newer]), '--dry-run')
+
+    def test_a_ref_named_like_the_prefix_does_not_count(self):
+        reviewed = self.head
+        self.head = self.change('skills.md', 'unreviewed\n')
+        self.git('tag', reviewed[:10], self.head)
+        self.git('push', '-q', 'origin', 'refs/tags/' + reviewed[:10])
+        self.assertRefused(self.pr(comments=[self.comment('Approved %s' % reviewed[:10])]),
+                           'not unique')
 
     def test_approval_of_an_older_commit(self):
         reviewed = self.head

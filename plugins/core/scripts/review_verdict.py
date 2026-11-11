@@ -18,24 +18,30 @@ merge accepts cannot drift apart. The format, as GitHub stores the comment body:
 
 verdict() accepts what merge_pr.py has always accepted, so reviews posted before this script
 stay valid: the signature `🤖 <agent> (<role>):` with the role `review` or `reviewer`, then text
-opening with `Approved` and 7 to 40 hex digits (in backticks or bold, with a colon, allowed).
-This script writes only the strict form above: the full SHA, never a prefix.
+opening with `Approved` (or `**Approved**`, or `Approved:`) and 7 to 40 hex digits, which may
+stand in backticks. This script writes only the strict form above: the full SHA, never a
+prefix, as a pull request comment (merge_pr.py never counts a GitHub review's body).
 
   head      prints the pull request's head SHA. Run it before the review: that is the commit
             to review.
   approve   posts the approval of --sha. Refused (exit 1) unless --sha is the full head SHA of
             the open pull request at the moment of posting; after posting it reads the head
-            again and exits 1 if it moved meanwhile (the approval then covers --sha only, and
-            merge_pr.py treats it so).
+            again and exits 3 if it moved meanwhile or cannot be read (the approval then covers
+            --sha only, and merge_pr.py treats it so).
   findings  posts the findings from --body-file (`-` reads stdin) for --sha, which must be the
             head too. A findings comment never approves, whatever its text says.
   check     reads a comment body and prints `approves <sha>` (exit 0) or why it does not
-            (exit 1): what merge_pr.py will make of it.
+            (exit 1), by the format alone; merge_pr.py also requires it to be the account's
+            newest verdict, unedited, and its SHA to resolve to the head (or an earlier commit
+            followed only by clean merges of the base).
 
 --dry-run prints the comment body on stdout, exactly as it would be posted, and posts nothing
-(it still checks the head). -R must name the same repository as origin; without it, origin on
-github.com. AGENTIC_GITHUB_FLOW_GH, a JSON list, replaces the `gh` command (tests use it). Exit
-0 posted (or printed), 1 refused with the reason on stderr, 2 usage error or unreadable state.
+(it still checks the head). Body files and stdin are read as UTF-8. -R must name the same
+repository as origin; without it, origin on github.com. AGENTIC_GITHUB_FLOW_GH, a JSON list,
+replaces the `gh` command (tests use it). Exit 0 posted (or printed) for the head; 1 refused,
+nothing posted, the reason on stderr; 2 usage error or unreadable state, nothing posted; 3
+posted, or possibly posted, but the head moved or its outcome is unknown: read the stderr line
+and the pull request before posting again.
 """
 from __future__ import annotations
 
@@ -102,10 +108,13 @@ def git(path: str, *args: str) -> subprocess.CompletedProcess:
 
 
 def gh(command: list, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run(command + list(args), input=stdin,
-                          stdin=None if stdin is not None else subprocess.DEVNULL,
-                          capture_output=True, text=True, encoding="utf-8", errors="replace",
-                          timeout=120)
+    try:
+        return subprocess.run(command + list(args), input=stdin,
+                              stdin=None if stdin is not None else subprocess.DEVNULL,
+                              capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", timeout=120)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return subprocess.CompletedProcess(command, 124, "", f"gh did not finish: {e}")
 
 
 def view(command: list, repo: str, number: str) -> dict | None:
@@ -124,11 +133,11 @@ def view(command: list, repo: str, number: str) -> dict | None:
 def read_body(path: str) -> str | None:
     try:
         if path == "-":
-            return sys.stdin.read()
-        with open(path, encoding="utf-8") as f:
+            return sys.stdin.buffer.read().decode("utf-8-sig")
+        with open(path, encoding="utf-8-sig") as f:
             return f.read()
-    except OSError as e:
-        print(f"review_verdict: cannot read {path}: {e}", file=sys.stderr)
+    except (OSError, UnicodeDecodeError) as e:
+        print(f"review_verdict: cannot read {path} as UTF-8: {e}", file=sys.stderr)
         return None
 
 
@@ -143,9 +152,6 @@ def main(argv: list) -> int:
         sys.stderr.reconfigure(errors="replace")
     except AttributeError:
         pass
-    if any(a in ("-h", "--help") for a in argv):
-        print(__doc__)
-        return 0
     opts = {"--sha": None, "--agent": None, "--note": "", "--body-file": None, "-C": ".",
             "-R": None}
     words, dry, i = [], False, 0
@@ -157,6 +163,9 @@ def main(argv: list) -> int:
             opts[a] = argv[i + 1]
             i += 2
             continue
+        if a in ("-h", "--help"):
+            print(__doc__)
+            return 0
         if a == "--dry-run":
             dry = True
         elif a.startswith("-") and a != "-":
@@ -230,13 +239,18 @@ def main(argv: list) -> int:
               file=sys.stderr)
         return 1
     if sha != head:
-        print(f"review_verdict: the head of #{number} is {head}, not {sha}: review the commits "
-              f"since then and post for the head", file=sys.stderr)
+        print(f"review_verdict: the head of #{number} is {head}, not {sha}: review again at the "
+              f"head (the commits since {sha[:10]} where it is an ancestor of the head, else "
+              f"the whole diff) and post for the head", file=sys.stderr)
         return 1
     if dry:
         sys.stdout.write(body)
         return 0
     r = gh(command, "pr", "comment", number, "-R", repo, "--body-file", "-", stdin=body)
+    if r.returncode == 124:
+        print(f"review_verdict: posting did not finish ({r.stderr.strip()[:200]}): it may have "
+              f"been posted; look at #{number} before posting again", file=sys.stderr)
+        return 3
     if r.returncode != 0:
         print(f"review_verdict: posting failed: {(r.stderr or r.stdout).strip()[:300]}",
               file=sys.stderr)
@@ -245,12 +259,14 @@ def main(argv: list) -> int:
           f"{r.stdout.strip()[:200]}")
     after = view(command, repo, number)
     if after is None:
-        return 2
+        print(f"review_verdict: posted, but the head could not be read again: the comment "
+              f"covers {sha[:10]} only", file=sys.stderr)
+        return 3
     if str(after["headRefOid"]).lower() != sha:
-        print(f"review_verdict: the head of #{number} moved to {after['headRefOid']} while "
-              f"posting: the comment covers {sha[:10]} only; review the new commits",
-              file=sys.stderr)
-        return 1
+        print(f"review_verdict: posted, but the head of #{number} moved to "
+              f"{after['headRefOid']} meanwhile: the comment covers {sha[:10]} only; review "
+              f"the new commits", file=sys.stderr)
+        return 3
     return 0
 
 

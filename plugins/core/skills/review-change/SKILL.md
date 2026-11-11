@@ -23,20 +23,24 @@ so nothing on GitHub can tell; your word in the verdict is the attestation.
 ## 2. Pin the commit you review
 
 `python3 <plugin>/scripts/review_verdict.py head <n>` prints the head SHA: `<sha>` below. That
-commit, and nothing pushed after it, is what you review and what the verdict names. Fetch it:
-`git fetch origin refs/pull/<n>/head`, and check that `git rev-parse FETCH_HEAD` prints `<sha>`.
+commit, and nothing pushed after it, is what you review and what the verdict names. Fetch it
+and the base: `git fetch origin <base>`, then `git fetch origin refs/pull/<n>/head`, and check
+that `git rev-parse FETCH_HEAD` prints `<sha>`; if not, the author pushed meanwhile: start this
+step again. `<base>` is the pull request's base branch (`gh pr view <n> --json baseRefName`).
 
 ## 3. Read the context
 
 The pull request body, the issue it closes, the repository's `AGENTS.md` and `HANDOFF.md` (what
-the repository already enforces, so you judge the change against it), and the whole diff:
-`git diff origin/<base>...<sha>`, `<base>` the pull request's base branch.
+the repository already enforces, so you judge the change against it), and the whole diff of
+the pinned commit: `git diff origin/<base>...<sha>`. Your verdict rests on this diff.
 
 ## 4. Review
 
 - **Code review:** Claude Code `/code-review <n>`; Codex `/review` with custom instructions to
-  review `git diff origin/<base>...<sha>`. Read what it reports against the diff yourself: a
-  finding you cannot confirm is dropped or marked uncertain, and what it missed is still yours.
+  review `git diff origin/<base>...<sha>`. It is an aid: `/code-review <n>` reads the pull
+  request as it is when it runs, which may no longer be `<sha>`. Check what it reports against
+  the diff of step 3: a finding you cannot confirm there is dropped or marked uncertain, and
+  what it missed is still yours.
 - **Security:** when the change touches authentication, permissions, secrets or environment
   configuration, dependencies or deployment, the `review-security` skill too. Not installed:
   say so in the verdict.
@@ -65,12 +69,15 @@ open question you cannot settle from the code is a finding, not an approval.
 
 `--dry-run` shows the comment without posting. What the exit codes mean:
 
-- 0: posted. Report the verdict, `<sha>` and the comment's URL to whoever asked.
-- 1, *the head is …, not …*: the author pushed during the review. Go back to step 2; only the
-  commits since `<sha>` need reading. Nothing was posted.
-- 1, *moved while posting*: the comment was posted and covers `<sha>` only. Review the new
-  commits and post again for the new head.
-- 2: a usage error or GitHub not read; nothing was posted. Fix the call and run it again.
+- 0: posted for the head. Report the verdict, `<sha>` and the comment's URL to whoever asked.
+- 1: refused, nothing posted. *The head is …, not …*: the author pushed during the review; go
+  back to step 2 for the new head. If `git merge-base --is-ancestor <sha> <new head>` succeeds,
+  only the commits since `<sha>` need reading; otherwise (a force-push) the whole diff again.
+- 2: a usage error, an unreadable body file (UTF-8 only) or GitHub not read; nothing was
+  posted. Fix the call and run it again.
+- 3: posted, or possibly posted, but the head moved or could not be read afterwards: the
+  comment covers `<sha>` only. Look at the pull request, then review the new commits and post
+  for the new head.
 
 ## A branch without a pull request
 
@@ -86,5 +93,8 @@ the `ship-change` skill's `local-main.md` says.
   approval.
 - Never edit a verdict comment; post a new one. `merge_pr.py` counts the newest signed verdict
   of the account, and an edited one never approves.
+- Post the verdict as the script does, a pull request comment. A GitHub review (Approve,
+  Comment) never approves for `merge_pr.py`, because gh cannot say whether it was edited; a
+  signed one that does not approve still blocks.
 - A request for changes on GitHub by someone with write access still blocks the merge after
   your approval; it is theirs to withdraw.

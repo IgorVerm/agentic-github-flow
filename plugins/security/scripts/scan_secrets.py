@@ -22,7 +22,11 @@ What it scans:
 - `--commits <file|->`: what a push sends, for the `pre-push` hook (`templates/pre-push`), which
   lists the outgoing commits and annotated tags, one object id per line: the lines each commit
   adds (a merge: only what is new against every parent; a rename as a new file, so a rename to
-  `.env` is seen), the file names, the commit messages and the tag messages. The working tree is
+  `.env` is seen), the file names, the commit messages and the tag messages. A file that is
+  binary in a commit (a NUL byte in its first 8000 bytes, as git decides it from the content,
+  whatever `.gitattributes` says) and is not UTF-16 text has its content skipped in that commit:
+  model data such as a `.glb` matches token patterns by chance (#55). Its name is still judged,
+  and so is the same file in a commit where it is text. The working tree is
   not read then. Anything that is not a commit or a tag is an error, so nothing goes out unread.
   A file name holding a token is reported as `(a file name)`, never printed.
 
@@ -52,6 +56,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 IGNORE_TEMPLATE = os.path.join(HERE, 'gitignore-secrets')
@@ -264,24 +269,29 @@ def scan_tree(repo, excludes):
     return results
 
 
-def scan_diff(text, kind, excludes):
-    """Findings in the added lines of a diff; `@@commit` lines mark the commit. A merge's
+def scan_diff(text, kind, excludes, skip=frozenset()):
+    """Findings in the added lines of a diff; `@@commit` lines mark the commit. A file whose new
+    blob (its `index` header, with --full-index) is in `skip` has its lines left out. A merge's
     combined diff (`--cc`: one prefix column per parent) counts a line as added only when it is
     new against every parent, so what a merge brings from an already pushed parent is not
     judged again, while a conflict resolution or a file only the merge adds is. Headers are told
     from content by position: they run from a `diff ` line to the first `@@` hunk header."""
     results, commit, path, shown, line_no, header, width = [], '', '', '', 0, False, 1
+    blob = ''
     for raw in text.split('\n'):
         if raw.startswith('@@commit '):
             commit, header, path = raw[len('@@commit '):].strip()[:12], False, ''
         elif raw.startswith('diff '):
-            header, path = True, ''
+            header, path, blob = True, '', ''
         elif raw.startswith('@@'):
             header = False
             width = max(1, len(raw) - len(raw.lstrip('@')) - 1)
             m = re.search(r' \+(\d+)', raw)
             line_no = int(m.group(1)) - 1 if m else 0
         elif header:
+            new_blob = NEW_BLOB.match(raw)
+            if new_blob:
+                blob = new_blob.group(1)
             if raw.startswith('+++ '):
                 path = shown = diff_path(raw[4:].strip())
                 if path != '/dev/null' and not excluded(path, excludes):
@@ -297,7 +307,8 @@ def scan_diff(text, kind, excludes):
             if '-' in prefix:
                 continue  # a removed line: not in the result
             line_no += 1
-            if prefix != '+' * width or path == '/dev/null' or excluded(path, excludes):
+            if prefix != '+' * width or path == '/dev/null' or blob in skip or \
+                    excluded(path, excludes):
                 continue
             for name in findings_in_text(raw[width:]):
                 results.append((kind, name, shown, line_no, commit))
@@ -311,6 +322,76 @@ def findings_in_text(line):
     if '\0' in line:
         found += [n for n in findings_in_line(line.replace('\0', '')) if n not in found]
     return found
+
+
+# --- binary files in a push (#55). Twin: the push check in plugins/guards/scripts/
+# pre_tool_personal_data.py holds the same code (the two plugins are installed apart);
+# tests/pre_push_checks.py checks that both tell the same files apart alike.
+FIRST_FEW_BYTES = 8000  # git calls a file binary when these hold a NUL byte (xdiff-interface.c)
+TEXT_BYTES = frozenset(range(32, 127)) | {9, 10, 13}
+
+
+def utf16_text(head):
+    """UTF-16 text (what Windows PowerShell 5.1 writes with `>`): a byte-order mark, or a NUL in
+    every other byte with mostly ASCII text in the bytes between."""
+    if head[:2] in (b'\xff\xfe', b'\xfe\xff'):
+        return True
+    pairs = len(head) // 2
+    for nul, char in ((1, 0), (0, 1)):  # little-endian, big-endian
+        nuls = head[nul::2][:pairs].count(0)
+        chars = sum(1 for b in head[char::2][:pairs] if b in TEXT_BYTES)
+        if pairs and nuls >= 0.9 * pairs and chars >= 0.7 * pairs:
+            return True
+    return False
+
+
+def skipped_binary(head):
+    """Whether a push check skips a file's content: git calls it binary and it is no UTF-16
+    text. `head` is (at least) the file's first 8000 bytes."""
+    head = head[:FIRST_FEW_BYTES]
+    return b'\0' in head and not utf16_text(head)
+
+
+def binary_blobs(repo, oids):
+    """The blobs among `oids` whose content is skipped (skipped_binary). An object git does not
+    have (a submodule's commit) is none. Only the first bytes of each stay in memory."""
+    oids = sorted(set(o for o in oids if o.strip('0')))
+    found = set()
+    if not oids:
+        return found
+    with tempfile.TemporaryFile() as ids:
+        ids.write(''.join(o + '\n' for o in oids).encode('ascii'))
+        ids.seek(0)
+        proc = subprocess.Popen(['git', '-C', repo, 'cat-file', '--batch'], stdin=ids,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            for _ in oids:
+                header = proc.stdout.readline().decode('ascii', 'replace').split()
+                if len(header) == 2 and header[1] == 'missing':
+                    continue
+                if len(header) != 3 or not header[2].isdigit():
+                    raise RuntimeError('git cat-file: unexpected output %r' % ' '.join(header)[:80])
+                size = int(header[2])
+                head = proc.stdout.read(min(size, FIRST_FEW_BYTES))
+                left = size - len(head) + 1  # the rest and the newline after it
+                while left > 0:
+                    chunk = proc.stdout.read(min(left, 1 << 20))
+                    if not chunk:
+                        raise RuntimeError('git cat-file: output ends early')
+                    left -= len(chunk)
+                if header[1] == 'blob' and skipped_binary(head):
+                    found.add(header[0])
+        finally:
+            proc.stdout.close()
+            err = proc.stderr.read().decode('utf-8', 'replace').strip()
+            proc.stderr.close()
+            proc.wait()
+    if proc.returncode != 0:
+        raise RuntimeError('git cat-file: %s' % err[:200])
+    return found
+
+
+NEW_BLOB = re.compile(r'^index [0-9a-f,]+\.\.([0-9a-f]+)', re.M)
 
 
 # Every diff as text, whatever .gitattributes says (`* -diff` would hide a file's lines, a
@@ -378,15 +459,18 @@ def tag_messages(repo, tag):
 
 def scan_commits(repo, ids, excludes):
     """Findings in what a push sends (templates/pre-push lists the objects): the lines each
-    commit adds (a merge: what is new against every parent), each commit message and each
-    annotated tag's message. The working tree is not read: it is not what goes out."""
+    commit adds (a merge: what is new against every parent; a binary file's not, skipped_binary),
+    each commit message and each annotated tag's message. The working tree is not read: it is
+    not what goes out."""
     commits, tags = outgoing(repo, ids)
     results = []
     if commits:
         stdin = ''.join(c + '\n' for c in commits)
-        results += scan_diff(git_input(repo, stdin, *DIFF_CONFIG, 'log', '--no-walk=unsorted',
-                                       '--stdin', '--cc', '--no-renames', *DIFF_OPTIONS,
-                                       '--format=@@commit %H'), 'commit', excludes)
+        diff = git_input(repo, stdin, *DIFF_CONFIG, 'log', '--no-walk=unsorted', '--stdin',
+                         '--cc', '--no-renames', *DIFF_OPTIONS, '--full-index',
+                         '--format=@@commit %H')
+        skip = binary_blobs(repo, NEW_BLOB.findall(diff))
+        results += scan_diff(diff, 'commit', excludes, skip)
         # every file name, also of an empty file, whose diff has no `+++` header
         names = git_input(repo, stdin, *DIFF_CONFIG, 'log', '--no-walk=unsorted', '--stdin',
                           '--cc', '--name-only', '--no-renames', '-z', '--format=@@commit %H')

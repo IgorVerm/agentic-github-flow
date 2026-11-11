@@ -3,6 +3,37 @@
 Rulings of the maintainers named in `HANDOFF.md`, newest first, with their words. Detail lives on
 the linked issue.
 
+## Automatic merging only where the user switches it on; unasked push of the own task branch, 2026-11-11
+
+**Decision (the maintainer):** on merging, "automatisch mergen mag enkel voor repos waar ik dit
+manueel aanzet" (automatic merging only in repositories where I switch it on by hand). On the
+push, from the issue: "pushing to the non main remote branch should be allowed without me giving
+it permissions since it doesn't enter main and stays on the pull request". On the steps after
+the pull request: "start en voeg die stappen na PR toe aan die issue" (start, and add those
+steps after the PR to the issue).
+**What:** automatic merging needs a row `automatic merge` | `on` in the repository's own
+`HANDOFF.md` §Standing permissions, on the default branch, set by the user by hand;
+`merge_pr.py` refuses without it whatever an overlay or `--grant` says, and with `--ready`
+marks the draft ready only when every other condition holds. The push of an agent's own task
+branch in pull-request mode needs no word where a standing grant allows it (the repository's
+§Standing permissions or an overlay), and goes only through `push_branch.py`: not the default
+or landing branch, no force, pull-request mode, the pre-push hook installed (secret scan and
+personal-data check on every outgoing commit), no path that merges only on the user's word,
+the overlap result in the body; anything it refuses still asks. After its pull request is open
+the agent switches on the client's CI monitor, has a subagent run `review-change`, turns
+findings into new commits, waits for CI and merges through `merge_pr.py --ready` where the
+switch is on, else asks for the merge; an issue chat stays until the merge and its cleanup.
+**Why:** a task branch enters the default branch only through a merge, so its push integrates
+nothing; what a push cannot take back (secrets, personal data) and what changes later sessions'
+powers (rules, guards, hooks, CI, the installer) are checked or still asked. Merging integrates,
+so the user decides per repository, not once for all.
+**Narrows:** the ruling of 2026-11-09 below: an overlay's grant no longer switches automatic
+merging on.
+**Binds:** `rules/core.md` §Git, `plugins/core/scripts/merge_pr.py`, `push_branch.py`,
+`tests/merge_pr.py`, `tests/push_branch.py`, `plugins/core/skills/ship-change/SKILL.md` steps 6
+to 8, `plugins/issue-chats/skills/issue-handover/` (`SKILL.md` steps 2, 6 and 7, `method.md`).
+**Detail:** issue #26.
+
 ## Efficient design: a skill and a review rule, for any kind of software, 2026-11-11
 
 **Decision (the maintainer):** "Skill + regel" (a skill and a rule), adding "maar algemener dan
@@ -46,7 +77,7 @@ tests and documents may merge automatically. Paths compare without case.
 for; the excluded paths change what every later session may do, so they stay with the user.
 **Where the grant lives:** this repository grants nothing (`HANDOFF.md`: Standing permissions:
 None); the maintainer's grant is in a private overlay, so it never extends to other
-contributors. A bare `gh pr merge` stays an ask rule in the guards.
+contributors. Narrowed on 2026-11-11 (above): only the repository's own switch counts. A bare `gh pr merge` stays an ask rule in the guards.
 **Binds:** `rules/core.md` §Git, `plugins/core/scripts/merge_pr.py`, `tests/merge_pr.py`,
 `plugins/core/skills/ship-change/SKILL.md` steps 1, 4 and 7.
 **Detail:** issue #13.

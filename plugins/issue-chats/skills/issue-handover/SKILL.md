@@ -1,6 +1,6 @@
 ---
 name: issue-handover
-description: Pick and claim the next ready GitHub issue and hand an issue chat over to the chat for it - record that the branch is ready to push or landed on local main, pick the next issue by priority, check it for overlap, start its chat in the background, claim the issue and hand over the brief, then ask for the push or archive. Use when an issue chat's branch is ready to push or landed, when its context nears the limit, after two failed corrections, or when the user asks to start issue chats.
+description: Pick and claim the next ready GitHub issue and hand an issue chat over to the chat for it - record the branch ready to push or landed on local main, pick the next issue by priority, check it for overlap, start and claim its chat, hand over the brief, then push or ask for it, see the pull request through to its merge, and archive. Use when an issue chat's branch is ready to push or landed, when its context nears the limit, after two failed corrections, or when the user asks to start issue chats.
 compatibility: The background start needs the Claude Code desktop app and a logged-in claude CLI (measured on macOS; Linux unmeasured; Windows unsupported) plus gh. Codex desktop uses codex.md. Elsewhere the chat gives the user the brief to paste.
 ---
 
@@ -21,14 +21,19 @@ folder two levels above this skill's folder, where the scripts are
 tool are the core plugin's, run as the `ship-change` skill names them. Everything up to the ask
 for the push runs in the foreground of the turn of the task's work.
 
-**The push stays the user's.** The settings section lets this chat pick, claim, start the next
-chat and archive itself without asking; it never covers a push, a merge or marking a pull
-request ready. This chat pushes only after the user's yes for this push, typed in this chat.
-In local-main mode (`ship-change` step 1) the chat lands its own work on local main instead, as
-the `ship-change` skill's `local-main.md` says, and the push of the landing branch waits for
-the user's word in any chat; steps 2, 6 and 7 below say what changes.
+**The push and the merge follow `ship-change`, not the settings section.** The settings section
+lets this chat pick, claim, start the next chat and archive itself without asking; it never
+covers a push, a merge or marking a pull request ready. This chat pushes its task branch on the
+user's yes for this push, typed in this chat, or without asking under a standing grant through
+`push_branch.py` (`ship-change` steps 6 and 7); it marks its pull request ready and merges it on
+the user's word, or through `merge_pr.py` where the user switched automatic merging on in the
+repository (`ship-change` step 8). In local-main mode (`ship-change` step 1) the chat lands its
+own work on local main instead, as the `ship-change` skill's `local-main.md` says, and the push
+of the landing branch waits for the user's word in any chat; steps 2, 6 and 7 below say what
+changes.
 
-**Never archive this chat** while any of these holds: its worktree, or a task worktree it
+**Never archive this chat** while any of these holds: in pull-request mode, its pull request is
+open (it sees the pull request through to the merge, step 7); its worktree, or a task worktree it
 worked in, fails the worktree check (`python3 <plugin>/scripts/chat_archivable.py <worktree>`
 says `keep:`, as it does while a commit of this chat is not on GitHub or, in local-main
 mode, not landed); a run of it whose result the work still needs is still running (a remote
@@ -68,6 +73,10 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
    Then a signed comment on the issue whose text after the signature opens with
    `ready to push:`: the branch, its head commit, the checks and their results, and one line per
    overlap hit (the next chat's pick reads this opening: the area is free again, method.md §1).
+   **Under a standing grant for the push** (`ship-change` step 6) push now instead, as
+   `ship-change` step 7 says, and open the comment with `pull request opened: #<number>` with
+   the same fields; a refusal of `push_branch.py` makes it `ready to push:` and the ask of
+   step 6.
    The issue stays open and assigned; the merge closes it. **In local-main mode** land the work
    instead (`local-main.md` §1; for the independent route a subagent that did not write it
    reviews and lands it, §2), then the signed comment opens with
@@ -152,22 +161,38 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
 6. **Tell the user and ask for the push,** in a few lines and in their language: what is ready
    to push (what `ship-change` step 6 lists); which chat started with
    which model and effort, and its issue; anything that stopped you. Then end the turn: this
-   chat waits for the yes and does not archive now. **In local-main mode** tell the user what
+   chat waits for the yes and does not archive now. **When step 2 already pushed under a
+   grant,** tell the user the pull request in place of the ask and go on with step 7 in this
+   turn. **In local-main mode** tell the user what
    landed (the commits and checks; the landing branch now holds unpushed landings, pushed on
    their word in any chat) in place of the ask, and go on with step 7 in this turn.
-7. **Push and archive,** in the turn of the user's yes: `ship-change` step 7 (push your task
-   branch, open the pull request, report its URL and first CI result); a signed comment on the
-   issue whose text after the signature opens with `pull request opened: #<number>`; then end
-   your own live work (above), rerun the worktree check, call `get_session "self"`, and
-   `archive_session` with `session_id:
-   "self"` and a short `reason`. No detach first: the CLI started the next chat, so it is not
-   this chat's child. Tell the user before the archive, which ends the conversation. If the
-   user wants changes first, they are new commits on this branch and steps 2 and 6 again; if
-   anything fails, do not archive: report and stop. A chat with nothing to push (no next issue
-   and no commits, or a task stopped for open requirements) archives at step 6, after ending its
-   own live work, when the check passes. **In local-main mode** step 7 is the archive alone: end
-   your own live work, rerun the worktree check (`ok` once landed), `get_session "self"`, tell
-   the user, then `archive_session` with
+7. **Push, see the pull request through, and archive,** in the turn of the user's yes (or, after
+   a push under a grant, in the turn of step 6):
+   1. **Push** as `ship-change` step 7 says, unless step 2 did, and a signed comment on the
+      issue whose text after the signature opens with `pull request opened: #<number>`.
+   2. **See it through:** `ship-change` step 8, in the foreground of the turn: the CI monitor on,
+      a review subagent given only the pull request number, findings and failures as new
+      commits (pushed under the grant without asking, else each push on the user's yes), the
+      wait for CI. With automatic merging switched on, `merge_pr.py <n> --ready` merges. Without
+      it, or when `merge_pr.py` refuses for a path that merges only on the user's word, tell the
+      user that the pull request is ready to merge, and end the turn: the chat stays and merges
+      in the turn of their word. A refusal for anything else (a red check, a review requesting
+      changes) is more work of item 2.
+   3. **After the merge:** the `cleanup-merged` skill for this chat's worktree, run from the
+      primary checkout, then a signed comment on the issue whose text after the signature opens
+      with `merged: #<number> at <merge commit>`, with what cleanup removed and kept.
+   4. **Archive:** end your own live work (above), rerun the worktree check (`ok` once the
+      worktree is gone or its commits are in the default branch), call `get_session "self"`, and
+      `archive_session` with `session_id: "self"` and a short `reason`. No detach first: the CLI
+      started the next chat, so it is not this chat's child. Tell the user before the archive,
+      which ends the conversation.
+
+   If the user wants changes first, they are new commits on this branch and steps 2 and 6 again
+   (after the pull request is open: item 2); if anything fails, do not archive: report and stop.
+   A chat with nothing to push (no next issue and no commits, or a task stopped for open
+   requirements) archives at step 6, after ending its own live work, when the check passes.
+   **In local-main mode** step 7 is the archive alone: end your own live work, rerun the worktree
+   check (`ok` once landed), `get_session "self"`, tell the user, then `archive_session` with
    `session_id: "self"` and a short `reason`; no push and no pull request.
 
 **Starting chains** (a chat the user types in, method.md §7): run steps 3 and 5 once per chain,

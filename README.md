@@ -52,12 +52,20 @@ repository lands finished work, and states the answer with its reasons on the is
   private repository cannot have protection at all; that counts as "no protection", not as
   unknown.
 
-In pull-request mode you merge, unless you grant automatic merging in the repository's
-`HANDOFF.md` (§Standing permissions) or in your own overlay: then an agent merges its own pull
-request through `merge_pr.py`, only with every required check green, an approving review of
-the head commit by another agent, the overlap result in the body, and no change to rules,
+In pull-request mode you merge, unless you switch automatic merging on for that repository
+yourself: a row `automatic merge` with the value `on` in its `HANDOFF.md` §Standing
+permissions (an overlay cannot switch it on). Then an agent marks its own pull request ready
+and merges it through `merge_pr.py`, only with every required check green, an approving review
+of the head commit by another agent, the overlap result in the body, and no change to rules,
 guards, permission settings, hooks, the installer, CI or deployment configuration, the merge
-gate, or the grant and landing settings in `HANDOFF.md`.
+and push gates, or the switch and landing settings in `HANDOFF.md`.
+
+You also decide every push, unless you grant the push of an agent's own task branch in the
+repository's `HANDOFF.md` (§Standing permissions) or in your own overlay. Then the agent pushes
+through `push_branch.py` and opens its pull request without asking, only in pull-request mode,
+with the `pre-push` template installed (so the secret scan and the personal-data check run on
+every outgoing commit), the overlap result in the body, and no change to the paths above;
+whatever it refuses still asks.
 
 A repository can fix its mode, and name a landing branch other than its default branch, in its
 `HANDOFF.md`; `local main` there cannot overrule a server that requires pull requests. Pull
@@ -241,7 +249,16 @@ For chains that run without a click, allow the start script alone in `~/.claude/
 `<plugin folder>` is where Claude Code installed the plugin: the folder two levels above the
 `issue-handover` skill's folder (a session can tell you where it loaded the skill from). Write
 the rule in each spelling the agents use for that path. The folder names the plugin's version,
-so renew the rule after an update raises it. An allow rule for
+so renew the rule after an update raises it. Where you grant unasked pushes or switch
+automatic merging on, allow the core plugin's two gates the same way, never `git push`,
+`gh pr ready` or `gh pr merge` themselves:
+
+```json
+"Bash(python3 <core plugin folder>/scripts/push_branch.py *)",
+"Bash(python3 <core plugin folder>/scripts/merge_pr.py *)"
+```
+
+An allow rule for
 `mcp__ccd_session_mgmt__archive_session` lets chats archive themselves without a click; the
 plugin's hook still denies any archive whose worktree is not clean and on GitHub (or, in
 local-main mode, landed). The installer

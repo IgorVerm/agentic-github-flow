@@ -1,13 +1,15 @@
 ---
 name: ship-change
-description: Land finished work from a task branch in the mode the repository uses - a pull request, or a guarded fast-forward onto local main - after detecting the mode, picking the review route, running the checks and asking the user before every push. Use when work on a branch is done and ready to land or for review, or when the user asks to push, land, publish or open a pull request.
+description: Land finished work from a task branch in the mode the repository uses - a pull request, or a guarded fast-forward onto local main - after detecting the mode, picking the review route, running the checks and asking the user before every push a standing grant does not cover, then see the pull request through review, CI and merge. Use when work on a branch is done and ready to land or for review, or when the user asks to push, land, publish or open a pull request.
 ---
 
 # Landing a finished branch
 
-The user decides every push. This skill prepares everything first, so that the user's yes is
+The user decides every push, unless a standing grant covers the push of your own task branch
+in pull-request mode (step 6). This skill prepares everything first, so that the user's yes is
 the last step. It never force-pushes, and it marks a pull request ready, or merges it, only when
-the user says so for that pull request.
+the user says so for that pull request or where the user switched automatic merging on in the
+repository (step 8).
 
 Work starts on a branch in a worktree, in both modes. `python3 <plugin>/scripts/new_worktree.py <task>`,
 run from the repository's primary checkout, makes `../<repo>-worktrees/<task>` on a new branch
@@ -112,15 +114,30 @@ repository without a GitHub remote.
 It does not block by itself: the merge on GitHub, or `promote_main.py` in local-main mode, is
 where the branches meet.
 
-## 6. Ask
+## 6. Ask, or push under a standing grant
 
-One message to the user: the branch, how many commits, the checks and their results, the
-overlap check's result, the `Efficient design:` line, the pull request title, draft or ready.
-Wait for an explicit yes for this push. A yes for an earlier push does not cover this one.
+**A standing grant** for the push of your own task branch (the repository's `HANDOFF.md`
+§Standing permissions, or an overlay the user installed, says so): go on with step 7 without
+asking. The grant covers only what
+[push_branch.py](../../scripts/push_branch.py) lets through (its header owns the conditions): your
+own task branch in pull-request mode, the pre-push hook installed, no path that leaves only on
+the user's word, the overlap result in the body. Whatever it refuses is asked as below.
+
+**Otherwise,** one message to the user: the branch, how many commits, the checks and their
+results, the overlap check's result, the `Efficient design:` line, the pull request title, draft
+or ready. Wait for an explicit yes for this push. A yes for an earlier push does not cover this
+one.
 
 ## 7. Push and open the pull request
 
-On the yes:
+**Under the grant:** `python3 <plugin>/scripts/push_branch.py --grant "<where the grant is
+written>" --title "<title>" --body-file <file> --draft` in your worktree, as a single call. It
+checks, pushes your branch with the pre-push hook's protected-path check switched on, and opens
+the pull request. Exit 0: report its URL. Exit 1: it names each reason (a protected path, no
+hook, local-main mode, a refusal by the hook): nothing is opened; ask the user as in step 6 for
+that push. Never fall back to a bare `git push` without the user's yes.
+
+**On the user's yes:**
 
 1. `git push origin <your task branch>`: your own task branch only, never the landing branch,
    never with `--force` or `+` (and without `-u`, which writes upstream settings into the git
@@ -128,15 +145,37 @@ On the yes:
 2. `gh pr create --base <landing> --head <branch> --title "<title>" --body-file <file>`
    (`--draft` for a draft). Without `gh`, give the user the title, the body and the compare URL
    (`https://github.com/<owner>/<repo>/compare/<landing>...<branch>`), and stop.
-3. Report the pull request URL and the first CI result (`gh pr checks <n>`).
 
-Review comments become new commits on the same branch; each new push asks again. Marking the
-draft ready and merging happen only on the user's word for that pull request
-(`gh pr ready <n>`, `gh pr merge <n>` with the method the repository uses), unless a standing
-grant allows automatic merging: the repository's `HANDOFF.md` §Standing permissions, or an
-overlay the user installed. Then, never `gh pr merge` yourself:
-`python3 <plugin>/scripts/merge_pr.py <n> --grant "<where the grant is written>"`
-([merge_pr.py](../../scripts/merge_pr.py)) merges only when every condition in its header holds
-(green checks, an approving review of the head by another agent, the overlap line, no path that
-merges only on the user's word) and otherwise names each one that fails: those wait for the
-user. After the merge: the `cleanup-merged` skill.
+Then report the pull request URL and the first CI result (`gh pr checks <n>`).
+
+## 8. After the pull request is open
+
+Your own pull request, in pull-request mode, until it is merged or the user takes it over:
+
+1. **CI monitor.** Where the client watches a session's pull request (the Claude desktop app:
+   `set_monitor` with `auto_fix: true` and the pull request's URL), switch it on for the pull
+   request you opened: it wakes the session on a failing check, a merge conflict or a review
+   comment. Never the client's own auto-merge (`set_auto_merge`): merging goes through item 5.
+2. **Independent review.** A subagent given only the pull request number runs the
+   `review-change` skill and posts its verdict for the head commit. A pull request that is to
+   merge automatically needs it on either route of step 1; on the small-change route without
+   automatic merging, your own check of step 3 stands.
+3. **Findings and failures become new commits** on the branch (never `--amend`), pushed as in
+   step 7, under the grant without asking (`push_branch.py --grant "…"` alone: the pull request
+   is open), and then a new review of the new head (item 2). A
+   change in the landing branch is merged in (step 2); a review of an earlier head still counts
+   across conflict-free merges of the landing branch alone (`merge_pr.py`'s header).
+4. **Wait for CI** in the foreground: `gh pr checks <n> --watch`, called again when the tool's
+   timeout ends it.
+5. **Ready and merge,** once every check is green and the newest review approves the head:
+   - **Automatic merging switched on** (a row `automatic merge` | `on` in the repository's
+     `HANDOFF.md` §Standing permissions, which only the user sets): run
+     `python3 <plugin>/scripts/merge_pr.py <n> --ready` ([merge_pr.py](../../scripts/merge_pr.py)),
+     never `gh pr ready` or `gh pr merge` yourself. It marks the draft ready and merges only when
+     every condition in its header holds. A refusal for a path that merges only on the user's
+     word (rules, guards, hooks, permission settings, the installer, CI or deployment
+     configuration, the merge and push gates, the switch itself) waits for the user: ask.
+   - **Not switched on:** tell the user that the pull request is ready to merge (green checks,
+     the approving review and its commit) and wait for their word on it; then `gh pr ready <n>`
+     and `gh pr merge <n>` with the method the repository uses.
+6. **After the merge:** the `cleanup-merged` skill.

@@ -20,7 +20,8 @@ missing, it is off. `landing.py` owns the setting and `--explain` reports it; `m
 refuses while it is off, whatever an overlay or `--grant` says, and with `--ready`
 marks the draft ready only when every other condition holds. The push of an agent's own task
 branch in pull-request mode needs no word where a standing grant allows it (the repository's
-§Standing permissions or an overlay), and goes only through `push_branch.py`: not the default
+§Standing permissions or an overlay, as a line `standing grant | push_branch.py` that the script
+reads), and goes only through `push_branch.py`: not the default
 or landing branch, no force, pull-request mode, the pre-push hook installed (secret scan and
 personal-data check on every outgoing commit), no path that merges only on the user's word,
 the overlap result in the body; anything it refuses still asks. After its pull request is open

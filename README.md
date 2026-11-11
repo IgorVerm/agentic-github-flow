@@ -60,16 +60,18 @@ approving review of the head commit by another agent, the overlap result in the 
 to rules, guards, permission settings, hooks, the installer, CI or deployment configuration, the
 merge and push gates, or the switch and landing settings in `HANDOFF.md`.
 
-You also decide every push, unless you grant the push of an agent's own task branch: in the
-repository's `HANDOFF.md` §Standing permissions, or in your own overlay file outside the
-repository, by naming `push_branch.py` there. Then the agent pushes through `push_branch.py` and
-opens its pull request without asking; the script reads the grant where the agent names it, and
-pushes only the branch, only in pull-request mode read from the setting or from GitHub, with
-the `pre-push` template installed (so the secret scan and the personal-data check run on every
-outgoing commit), the overlap result in the body, and no change to the paths above; whatever it
-refuses still asks. The allow rule below holds in every repository, so the grant is what
-limits it: an overlay that does not name the script, an employer's for example, grants
-nothing.
+You also decide every push, unless you grant the push of an agent's own task branch with the
+line `standing grant | push_branch.py` (a table row works too): in the repository's
+`HANDOFF.md` §Standing permissions, or in your own overlay file outside the repository and
+outside the installed clone. Then the agent pushes through `push_branch.py` and opens its pull
+request without asking; the script reads the grant where the agent names it (a mere mention of
+the script is no grant), and pushes only the branch, only in pull-request mode read from the
+setting or from GitHub, with the `pre-push` template installed (so the secret scan and the
+personal-data check run on every outgoing commit), the overlap result in the body, and no
+change to the paths above; whatever it refuses still asks. The allow rule below holds in every
+repository, so the grant is what limits it: an overlay without that line, an employer's for
+example, grants nothing, and a personal overlay that has it says in which repositories it
+holds.
 
 A repository can fix its mode, and name a landing branch other than its default branch, in its
 `HANDOFF.md`; `local main` there cannot overrule a server that requires pull requests. Pull

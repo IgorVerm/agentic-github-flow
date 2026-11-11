@@ -121,8 +121,8 @@ where the branches meet.
 **A standing grant** for the push of your own task branch, written where
 [push_branch.py](../../scripts/push_branch.py) reads it (its header owns the conditions): the
 repository's `HANDOFF.md` §Standing permissions on the default branch, or an overlay file the
-user installed, outside the repository, naming `push_branch.py`. Then go on with step 7 without
-asking. The grant covers only what the script lets through: your task branch alone, pull-request
+user installed outside the repository, each with the line `standing grant | push_branch.py`.
+Then go on with step 7 without asking. The grant covers only what the script lets through: your task branch alone, pull-request
 mode read from the setting or from GitHub, the pre-push hook installed, no path that leaves only
 on the user's word, the overlap result in the body. Whatever it refuses is asked as below.
 

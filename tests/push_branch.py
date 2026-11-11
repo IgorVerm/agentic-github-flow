@@ -9,8 +9,9 @@ remote is not GitHub, so landing.py decides pull request unless HANDOFF.md says 
 The cases that push: a clean task branch, which then gets its pull request, with the hook run
 under AGENTIC_GITHUB_FLOW_UNASKED_PUSH and no tag following the branch; a later push to a branch
 whose pull request is open; a grant in HANDOFF.md. Each refusal is one condition broken on its
-own: no grant, a grant file that is missing, inside the repository or silent on the script, a
-HANDOFF.md that grants nothing, the default branch, a detached HEAD, local-main mode,
+own: no grant, a grant file that is missing, only mentions the script (as the core rules do),
+lies in a checkout of this repository or in the installed clone, a HANDOFF.md that only
+mentions it or grants it on the task branch alone, the default branch, a detached HEAD, local-main mode,
 pull-request mode only as the safe default, no hook or another hook, a protected path, no
 overlap result, a branch behind origin's; the hook's own refusal (a secret) is the script's
 refusal; a pull request that cannot be opened after the push exits 3. Planted values are built
@@ -86,7 +87,8 @@ class PushBranch(unittest.TestCase):
         self.overlay = os.path.join(self.dir, 'overlay', 'AGENTS.md')
         os.makedirs(os.path.dirname(self.overlay))
         with open(self.overlay, 'w') as f:
-            f.write('Push your own task branch through push_branch.py --grant <this file>.\n')
+            f.write('Push your own task branch without asking.\n\n'
+                    '| Grant | Script |\n|---|---|\n| standing grant | `push_branch.py` |\n')
 
     def git(self, cwd, *args, check=True):
         r = subprocess.run(['git', *args], cwd=cwd, env=self.env, capture_output=True,
@@ -190,8 +192,8 @@ class PushBranch(unittest.TestCase):
 
     def test_a_grant_in_handoff(self):
         self.git(self.repo, 'switch', '-q', 'main')
-        self.commit('HANDOFF.md', SETTINGS + '\n## Standing permissions\n\nUnasked push of own '
-                    'task branches through `push_branch.py`.\n')
+        self.commit('HANDOFF.md', SETTINGS + '\n## Standing permissions\n\n'
+                    'standing grant: push_branch.py\n')
         self.git(self.repo, 'push', '-q', 'origin', 'main')
         self.git(self.repo, 'switch', '-q', 'agent/7-x')
         r = self.run_tool(grant='HANDOFF.md')
@@ -211,15 +213,39 @@ class PushBranch(unittest.TestCase):
         silent = os.path.join(self.dir, 'other.md')
         with open(silent, 'w') as f:
             f.write('Ask before every push.\n')
-        self.assertRefused('does not name push_branch.py', grant=silent)
+        self.assertRefused('has no line', grant=silent)
+        # a mention is no grant: the core rules name the script too
+        rules = os.path.join(self.dir, 'rules.md')
+        with open(rules, 'w') as f:
+            f.write('- **Ask before every push**, unless a standing grant covers your own task\n'
+                    '  branch: then push it through `push_branch.py`.\n')
+        self.assertRefused('has no line', grant=rules)
+        grant = '| standing grant | `push_branch.py` |\n'
         inside = os.path.join(self.repo, 'grant.md')
         with open(inside, 'w') as f:
-            f.write('push_branch.py\n')
-        self.assertRefused('inside this repository', grant=inside)
-        self.assertRefused('§Standing permissions does not name', grant='HANDOFF.md')
+            f.write(grant)
+        self.assertRefused('in a checkout of this repository', grant=inside)
+        sibling = os.path.join(self.dir, 'sibling')
+        self.git(self.repo, 'worktree', 'add', '-q', '-b', 'agent/8-y', sibling, 'origin/main')
+        with open(os.path.join(sibling, 'grant.md'), 'w') as f:
+            f.write(grant)
+        self.assertRefused('in a checkout of this repository',
+                           grant=os.path.join(sibling, 'grant.md'))
+        installed = os.path.join(self.home, '.agentic-github-flow', 'grant.md')
+        with open(installed, 'w') as f:
+            f.write(grant)
+        self.assertRefused('installed agentic-github-flow', grant=installed)
+        self.assertRefused('has no line', grant='HANDOFF.md')
+        # a mention in §Standing permissions is no grant either
+        self.git(self.repo, 'switch', '-q', 'main')
+        self.commit('HANDOFF.md', SETTINGS + '\n## Standing permissions\n\nNone; '
+                    'push_branch.py is not granted.\n')
+        self.git(self.repo, 'push', '-q', 'origin', 'main')
+        self.git(self.repo, 'switch', '-q', 'agent/7-x')
+        self.assertRefused('has no line', grant='HANDOFF.md')
         # a grant written on the task branch alone does not count
-        self.commit('HANDOFF.md', SETTINGS + '\n## Standing permissions\n\npush_branch.py\n')
-        self.assertRefused('§Standing permissions does not name', grant='HANDOFF.md')
+        self.commit('HANDOFF.md', SETTINGS + '\n## Standing permissions\n\n' + grant)
+        self.assertRefused('has no line', grant='HANDOFF.md')
         self.assertEqual(self.on_origin(), '')
 
     def test_pull_request_mode_only_as_the_safe_default(self):

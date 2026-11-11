@@ -15,12 +15,16 @@ workflows, hooks, permission settings, the installer, the rules) is checked firs
 how an agent uses such a grant. It pushes the branch checked out in <checkout> only when all
 hold:
 
-  grant     --grant names where the grant is written, and the script reads it there: `HANDOFF.md`
-            is the repository's, as the default branch holds it, whose `## Standing permissions`
-            names `push_branch.py`; any other value is the path of an overlay file outside this
-            repository that names `push_branch.py` (the allow rule for this script is global,
-            so the grant decides per user or per repository; an overlay that does not name the
-            script, an employer's for example, grants nothing);
+  grant     --grant names where the grant is written, and the script reads it there: a line
+            (or table row) `standing grant | push_branch.py` (GRANT), not a mere mention.
+            `HANDOFF.md` is the repository's, as the default branch holds it, with that line in
+            `## Standing permissions`; any other value is the path of an overlay file with that
+            line, outside every checkout of this repository and outside the installed
+            agentic-github-flow (~/.agentic-github-flow), whose files grant nothing. The allow
+            rule for this script is global, so the grant decides per user or per repository: an
+            overlay without the line, an employer's for example, grants nothing. A personal
+            overlay's grant still reaches an employer's repository, which the script cannot
+            see: an overlay that grants it says where it holds;
   ref       a branch is checked out, and it is not main, master, the remote's default branch or
             the landing branch; origin's copy of it, if any, is in HEAD (a fast-forward: no
             force, no deletion). It need not be a branch this agent made: a chat that took over
@@ -56,6 +60,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -68,6 +73,12 @@ from push_paths import held  # noqa: E402
 
 HOOK_MARKS = ("agentic-github-flow pre-push hook", "AGENTIC_GITHUB_FLOW_UNASKED_PUSH")
 SCRIPT = "push_branch.py"
+INSTALLED = "~/.agentic-github-flow"
+GRANT_FORM = "standing grant | push_branch.py"
+# the grant itself, not a mention: a table row or a line `standing grant | push_branch.py`
+# (or `:`), backticks, a list marker and the case aside
+GRANT = re.compile(r"^[ \t]*(?:[-*][ \t]+)?\|?[ \t]*standing grant[ \t]*[|:][ \t]*"
+                   r"`?push_branch\.py`?[ \t]*\|?[ \t]*$", re.I | re.M)
 
 
 def git(path: str, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:
@@ -102,24 +113,32 @@ def hook_reason(path: str, top: str) -> str | None:
 
 
 def grant_reason(path: str, top: str, grant: str) -> str | None:
-    """None when the grant is written where --grant says; else the reason."""
+    """None when the grant is written where --grant says, as a GRANT line; else the reason."""
     if grant == "HANDOFF.md":
-        if SCRIPT in section(settings_text(path), "Standing permissions"):
+        if GRANT.search(section(settings_text(path), "Standing permissions")):
             return None
-        return f"HANDOFF.md on the default branch: §Standing permissions does not name {SCRIPT}"
+        return ("HANDOFF.md on the default branch: §Standing permissions has no line "
+                f"`{GRANT_FORM}`")
     file = os.path.realpath(os.path.expanduser(grant))
+    trees = [line[len("worktree "):] for line in git(path, "worktree", "list", "--porcelain")
+             .stdout.splitlines() if line.startswith("worktree ")]
     common = git(path, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
-    inside = [os.path.realpath(top)] + ([os.path.dirname(os.path.realpath(common))] if common
-                                        else [])
+    inside = [os.path.realpath(d) for d in [top] + trees + ([os.path.dirname(common)] if common
+                                                           else [])]
     if any(file == d or file.startswith(d + os.sep) for d in inside):
-        return f"the grant file {grant} is inside this repository: a grant is written elsewhere"
+        return f"the grant file {grant} is in a checkout of this repository: a grant is written " \
+               "elsewhere"
+    clone = os.path.realpath(os.path.expanduser(INSTALLED))
+    if file == clone or file.startswith(clone + os.sep):
+        return f"the grant file {grant} is part of the installed agentic-github-flow, which " \
+               "grants nothing"
     try:
         with open(file, encoding="utf-8", errors="replace") as f:
-            if SCRIPT in f.read():
+            if GRANT.search(f.read()):
                 return None
     except OSError as e:
         return f"cannot read the grant file {grant}: {e.strerror}"
-    return f"the grant file {grant} does not name {SCRIPT}"
+    return f"the grant file {grant} has no line `{GRANT_FORM}`"
 
 
 def open_pr(command: list, repo: str, branch: str) -> tuple:

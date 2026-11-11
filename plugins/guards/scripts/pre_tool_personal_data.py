@@ -77,6 +77,19 @@ An input it cannot read passes, as with the git guard: a fault must not stop all
 
 Usage as a hook: reads the PreToolUse JSON on stdin, prints the decision ("ask"; with `--codex`
 "deny") on stdout or nothing, and exits 0. Test: `python3 tests/personal_data_guard.py`.
+
+The push check, `--commits <remote URL>` (object ids on stdin, run in the repository): the
+`pre-push` hook (`templates/pre-push`) lists what a push sends and this judges it by the same
+identifiers and addresses: each line the commits add (a merge: what is new against every parent;
+UTF-16 text with its NUL bytes removed), each file name (reported as `(a file name)`, never
+printed), each commit message and each annotated tag's message, and the addresses of authors,
+committers and taggers other than the user's configured ones (global or the repository's
+user.email). The identity of each commit or tag is removed from its own message first, since the
+push sends it in the header anyway; the gh login passes when the remote is on GitHub;
+`exempt-dirs` applies to the repository's folder. It prints
+`personal-data<TAB>what<TAB>where<TAB>object` per finding, never the value, and exits 0 (nothing
+found), 1 (found) or 2 (usage or git error). Unlike the hook mode it fails closed. Test:
+`python3 tests/pre_push_checks.py`.
 """
 import importlib.util, json, os, re, shlex, subprocess, sys
 from urllib.parse import unquote, urlsplit
@@ -614,6 +627,14 @@ def git_to_known_remote(text, cwd):
     return sub != 'clone' and target in remotes(where)
 
 
+def personal_address(address):
+    """False for placeholder, no-reply and git-host addresses, and for file names that look
+    like one (an image name with `@2x`)."""
+    local, _, domain = address.partition('@')
+    return not (NOT_PERSONAL.search(local) or NOT_PERSONAL.search(domain) or
+                domain.rsplit('.', 1)[-1].lower() in FILE_TLDS)
+
+
 def mask(address):
     local, _, domain = address.partition('@')
     return '%s…@….%s' % (local[:1], domain.rsplit('.', 1)[-1])
@@ -651,9 +672,7 @@ def judge(event):
             for address in emails(t):
                 if t in exempt and any(p.fullmatch(address) for p in own):
                     continue  # the user's own address in a git command: the configured identity
-                local, _, domain = address.partition('@')
-                if NOT_PERSONAL.search(local) or NOT_PERSONAL.search(domain) or \
-                        domain.rsplit('.', 1)[-1].lower() in FILE_TLDS:
+                if not personal_address(address):
                     continue
                 if mask(address) not in others:
                     others.append(mask(address))
@@ -681,7 +700,203 @@ def codex_reason(what, carried, shell):
             'approval: no flag, variable, file or escalation unlocks it.' % (what, carried, then))
 
 
+# --- the push check: what a `git push` sends (templates/pre-push) ---------------------------
+# The same reading of a diff as the security plugin's scan_secrets.py (scan_diff, DIFF_*): the
+# two plugins are installed apart, so each holds its own copy; tests/pre_push_checks.py runs
+# both on the same pushes.
+
+PUSH_DIFF = ['-c', 'core.quotePath=false', '-c', 'diff.noprefix=false', '-c',
+             'diff.mnemonicPrefix=false', '-c', 'diff.relative=false', '-c', 'log.showRoot=true',
+             'log', '--no-walk=unsorted', '--stdin', '--cc', '--no-renames', '--no-color', '-U0',
+             '--no-ext-diff', '--text', '--no-textconv', '--format=@@commit %H']
+OBJECT_ID = re.compile(r'[0-9a-f]{40}(?:[0-9a-f]{24})?')
+OTHERS_LABEL = "an e-mail address (someone's personal data)"
+HEADER_LABEL = "someone's e-mail address as author or committer (or tagger)"
+
+
+def _git(repo, args, stdin=''):
+    """git's output decoded without newline translation, so a lone carriage return stays inside
+    its line."""
+    r = subprocess.run(['git', '-C', repo] + args, input=stdin.encode('utf-8'), capture_output=True)
+    if r.returncode != 0:
+        raise RuntimeError('git: %s' % r.stderr.decode('utf-8', 'replace').strip()[:200])
+    return r.stdout.decode('utf-8', 'replace')
+
+
+def added_lines(diff):
+    """(commit, path, line number, text) for each line a `git log --cc` diff adds; a merge's line
+    only when it is new against every parent (one prefix column per parent). Each file's name
+    comes first, as (commit, path, 0, None)."""
+    commit, path, line_no, header, width = '', '', 0, False, 1
+    for raw in diff.split('\n'):
+        if raw.startswith('@@commit '):
+            commit, header, path = raw[len('@@commit '):].strip()[:12], False, ''
+        elif raw.startswith('diff '):
+            header, path = True, ''
+        elif raw.startswith('@@'):
+            header = False
+            width = max(1, len(raw) - len(raw.lstrip('@')) - 1)
+            m = re.search(r' \+(\d+)', raw)
+            line_no = int(m.group(1)) - 1 if m else 0
+        elif header:
+            if raw.startswith('+++ '):
+                name = raw[4:].strip()
+                if name.startswith('"') and name.endswith('"'):
+                    name = name[1:-1]  # a C-quoted name: shown as git quotes it
+                path = name[2:] if name.startswith('b/') else name
+                if path != '/dev/null':
+                    yield commit, path, 0, None
+        elif path and path != '/dev/null' and raw[:1] in ('+', '-', ' '):
+            prefix = raw[:width]
+            if '-' in prefix:
+                continue
+            line_no += 1
+            if prefix == '+' * width:
+                yield commit, path, line_no, raw[width:]
+
+
+def outgoing_objects(repo, ids):
+    """(commits, tags) among the object ids; RuntimeError for anything else."""
+    bad = [i for i in ids if not OBJECT_ID.fullmatch(i)]
+    if bad:
+        raise RuntimeError('not an object id: %r' % bad[0][:80])
+    commits, tags = [], []
+    for line in _git(repo, ['cat-file', '--batch-check=%(objectname) %(objecttype)'],
+                     ''.join(i + '\n' for i in ids)).splitlines():
+        oid, _, kind = line.partition(' ')
+        if kind not in ('commit', 'tag'):
+            raise RuntimeError('%s is a %s, not a commit or tag' % (oid[:12], kind or 'unknown object'))
+        (commits if kind == 'commit' else tags).append(oid)
+    return commits, tags
+
+
+def remote_host(url):
+    if '://' in url:
+        return (urlsplit(url).hostname or '').lower()
+    scp = SCP_LIKE.match(url)
+    return scp.group(1).lower() if scp and not os.path.exists(url) else ''
+
+
+def push_labels(line, mine, github, own):
+    """What personal data one line of a push carries, as labels; never the value."""
+    text = home_routine(line.replace('\0', '') if '\0' in line else line)  # UTF-16 text
+    decoded = unquote(text) if '%' in text else text
+    labels = [label for label, pattern, is_login in mine
+              if not (is_login and github) and pattern.search(decoded)]
+    labels = [h for h in labels if 'e-mail name' not in h
+              or h.replace('e-mail name', 'e-mail address', 1) not in labels]
+    if any(personal_address(a) and not any(p.fullmatch(a) for p in own) for a in emails(decoded)):
+        labels.append(OTHERS_LABEL)
+    return labels
+
+
+def without(text, identity):
+    """The text without the given names and addresses: a commit's own author and committer
+    (or a tag's tagger), which the push sends in the object's header anyway."""
+    for value in identity:
+        if value and value.strip():
+            text = re.sub(_boundary(re.escape(value.strip())), ' ', text, flags=re.I)
+    return text
+
+
+def push_findings(repo, ids, url):
+    """[(label, where, object)] for the personal data in what a push sends: the lines its
+    commits add, their messages and the messages of its annotated tags."""
+    commits, tags = outgoing_objects(repo, ids)
+    mine = identifiers()
+    own = [pattern for label, pattern, _ in mine if 'e-mail address' in label]
+    configured = {a.strip().lower() for a in _run(['git', '-C', repo, 'config', '--get-all',
+                                                   'user.email']).splitlines() if a.strip()}
+    github = is_github(remote_host(url))
+    found = []
+
+    def judge_line(line, where, oid):
+        for label in push_labels(line, mine, github, own):
+            if (label, where, oid) not in found:
+                found.append((label, where, oid))
+
+    def judge_header(addresses, oid):
+        """Someone else's address as author, committer or tagger; the user's configured ones
+        (global or this repository's) are the identity the rule leaves out."""
+        for a in addresses:
+            if a and personal_address(a) and a.strip().lower() not in configured and \
+                    not any(p.fullmatch(a.strip()) for p in own):
+                finding = (HEADER_LABEL, '(header)', oid)
+                if finding not in found:
+                    found.append(finding)
+
+    if commits:
+        stdin = ''.join(c + '\n' for c in commits)
+        shown = {}
+        # every file name, also of an empty file (its diff has no `+++` header); an address in
+        # it is reported, never printed. `<address>.md` reads as a file name to emails(), so
+        # each part is judged without its extension too.
+        names, commit = _git(repo, PUSH_DIFF[:-1] + ['--name-only', '-z', PUSH_DIFF[-1]],
+                             stdin), ''
+        for field in names.split('\0'):
+            field = field[1:] if field.startswith('\n') else field
+            if field.startswith('@@commit '):
+                commit = field.split()[1][:12]
+            elif field and commit:
+                parts = ' '.join([field] + [os.path.splitext(p)[0] for p in field.split('/')])
+                if push_labels(parts, mine, github, own):
+                    shown[(commit, field)] = '(a file name)'
+                    judge_line(parts, '(a file name)', commit)
+        for commit, path, n, line in added_lines(_git(repo, PUSH_DIFF, stdin)):
+            if line is not None:
+                judge_line(line, '%s:%d' % (shown.get((commit, path), path), n), commit)
+        messages = _git(repo, ['-c', 'i18n.logOutputEncoding=UTF-8', 'log', '--no-walk=unsorted',
+                               '--stdin', '--format=%x00%H%x01%an%x01%ae%x01%cn%x01%ce%n%B'],
+                        stdin)
+        for chunk in messages.split('\0')[1:]:
+            head, _, body = chunk.partition('\n')
+            sha, *identity = head.split('\x01')
+            judge_header(identity[1::2], sha[:12])
+            for n, line in enumerate(without(body, identity).splitlines(), 1):
+                judge_line(line, '(commit message):%d' % n, sha[:12])
+    for tag in tags:
+        for _ in range(16):  # a chain of annotated tags
+            header, _, message = _git(repo, ['cat-file', 'tag', tag]).partition('\n\n')
+            fields = dict(l.split(' ', 1) for l in header.splitlines() if ' ' in l)
+            tagger = re.match(r'(.*?)\s*<([^>]*)>', fields.get('tagger', ''))
+            if tagger:
+                judge_header([tagger.group(2)], tag[:12])
+            for n, line in enumerate(without(message, tagger.groups() if tagger else ())
+                                     .splitlines(), 1):
+                judge_line(line, '(tag message):%d' % n, tag[:12])
+            if fields.get('type') != 'tag' or not OBJECT_ID.fullmatch(fields.get('object', '')):
+                break
+            tag = fields['object']
+    return found
+
+
+def push_main(args):
+    """`--commits <remote URL>`: the push check. Object ids on stdin, run in the repository.
+    Exit 0 nothing found (or the repository lies in an `exempt-dirs` folder), 1 found (each
+    finding printed as `personal-data<TAB>what<TAB>where<TAB>object`), 2 usage or git error.
+    Unlike the hook mode it fails closed: what cannot be read does not go out."""
+    if len(args) != 1:
+        sys.stderr.write('usage: pre_tool_personal_data.py --commits <remote URL> < object ids\n')
+        return 2
+    try:
+        bare = _git('.', ['rev-parse', '--is-bare-repository']).strip() == 'true'
+        repo = os.getcwd() if bare else _git('.', ['rev-parse', '--show-toplevel']).strip()
+        if exempt_session(os.path.normpath(repo)):
+            return 0
+        ids = [line.strip() for line in sys.stdin.read().splitlines() if line.strip()]
+        found = push_findings(repo, ids, args[0])
+    except Exception as exc:  # fail closed: the push is refused
+        sys.stderr.write('pre_tool_personal_data: %s\n' % (exc,))
+        return 2
+    for label, where, oid in found:
+        print('personal-data\t%s\t%s\t%s' % (label, where, oid))
+    return 1 if found else 0
+
+
+
 def main(argv):
+    if argv[:1] == ['--commits']:
+        return push_main(argv[1:])
     codex = argv == ['--codex']
     if argv and not codex:
         sys.stderr.write('usage: pre_tool_personal_data.py [--codex] < PreToolUse JSON\n')

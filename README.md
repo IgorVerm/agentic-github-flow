@@ -230,10 +230,11 @@ straight to the address, which the sandbox refuses. The exact rules are in the g
 
 The issue-chats plugin works a repository's GitHub issues one chat per issue: a chat takes a
 ready issue, works on its own branch in a new worktree until the branch is ready to push, then
-starts the chat for the next ready issue and asks you for the push. It leaves the sidebar only
-once its commits are on GitHub. In a repository that lands on local main, a chat lands its work
-there, starts the next chat and archives itself; you push `main` when you want the landings
-published. Every push still waits for your yes. A side chat, one that another chat started
+starts the chat for the next ready issue and asks you for the push, or pushes under your grant
+(above). It then sees its pull request through review and CI to the merge, yours or, where you
+switched it on, its own, and leaves the sidebar only after the merge and its cleanup. In a
+repository that lands on local main, a chat lands its work there, starts the next chat and
+archives itself; you push `main` when you want the landings published. A side chat, one that another chat started
 with `start_session`, archives itself once its work has landed or its pull request merged, not
 when it is merely pushed. A repository switches it on
 with a `## Issue chats settings` section in its `HANDOFF.md`, merged like any other change; the
@@ -249,19 +250,22 @@ For chains that run without a click, allow the start script alone in `~/.claude/
 `--dangerously-skip-permissions`:
 
 ```json
-"Bash(python3 <plugin folder>/scripts/start_issue_chat.py *)"
+"Bash(python3 ~/.agentic-github-flow/plugins/issue-chats/scripts/start_issue_chat.py *)"
 ```
 
-`<plugin folder>` is where Claude Code installed the plugin: the folder two levels above the
-`issue-handover` skill's folder (a session can tell you where it loaded the skill from). Write
-the rule in each spelling the agents use for that path. The folder names the plugin's version,
-so renew the rule after an update raises it. Where you grant unasked pushes or switch
-automatic merging on, allow the core plugin's two gates the same way, never `git push`,
-`gh pr ready` or `gh pr merge` themselves:
+Claude Code loads the plugin's skills from the installer's clone, `~/.agentic-github-flow`
+(measured with Claude Code 2.1.322), so the agents run the script by that path, which stays the
+same across versions. Write the rule, and a `sandbox.excludedCommands` entry for the script, in
+each spelling the agents use: with `~` and with your home folder written out. Never name the
+copy under `~/.claude/plugins/cache/`: its folder names the plugin's version, and the entry
+silently stops matching after an update. `install.sh --update` names every entry that still
+points there, and changes none. Where you grant unasked pushes or switch automatic merging
+on, allow the core plugin's two gates the same way, never `git push`, `gh pr ready` or
+`gh pr merge` themselves:
 
 ```json
-"Bash(python3 <core plugin folder>/scripts/push_branch.py *)",
-"Bash(python3 <core plugin folder>/scripts/merge_pr.py *)"
+"Bash(python3 ~/.agentic-github-flow/plugins/core/scripts/push_branch.py *)",
+"Bash(python3 ~/.agentic-github-flow/plugins/core/scripts/merge_pr.py *)"
 ```
 
 An allow rule for

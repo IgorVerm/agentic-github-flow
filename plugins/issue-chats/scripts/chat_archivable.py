@@ -12,8 +12,9 @@ mode, on the local landing branch:
             tracked change, no untracked file in any directory whatever status.showUntrackedFiles
             says, no change in a submodule, no file hidden from status by assume-unchanged or,
             outside a sparse checkout, skip-worktree, no git operation in progress; ignored
-            files are build output), and its HEAD is in a remote-tracking branch of origin
-            after a fetch: the default branch (`refs/remotes/origin/HEAD`, else origin/main,
+            files are build output; the paths merge_landing.py froze, skip-worktree or left
+            untracked, pass while each file on disk is the one its manifest recorded), and its
+            HEAD is in a remote-tracking branch of origin after a fetch: the default branch (`refs/remotes/origin/HEAD`, else origin/main,
             origin/master), the landing branch HANDOFF.md names, or the branch's own
             `origin/<branch>` (pushed by ship-change)
   ok        in local-main mode (landing.py beside this file, asked only then): clean as above,
@@ -81,19 +82,22 @@ def out(wt: str, *args: str) -> str | None:
 def hidden_paths(wt: str) -> list[str] | None:
     """Tracked paths whose changes git status does not show: assume-unchanged (a lowercase tag
     in `git ls-files -v`) always, skip-worktree (`S`) unless the worktree is a sparse checkout,
-    where that bit is how the excluded paths are marked."""
+    where that bit is how the excluded paths are marked, or unless merge_landing.py froze the
+    path and its file on disk is still the one its manifest recorded."""
     p = git(wt, "ls-files", "-v", "-z")
     if p.returncode != 0:
         return None
     sparse = (out(wt, "config", "--bool", "core.sparseCheckout") or "") == "true"
-    hidden = []
+    hidden, skipped = [], []
     for entry in p.stdout.split("\0"):
         if len(entry) < 3:
             continue
         tag, path = entry[0], entry[2:]
-        if tag.islower() or (tag == "S" and not sparse):
+        if tag.islower():
             hidden.append(path)
-    return hidden
+        elif tag == "S" and not sparse:
+            skipped.append(path)
+    return hidden + work_proof.frozen_unexplained(wt, skipped)
 
 
 def landed_locally(wt: str, head: str) -> str | None:
@@ -219,10 +223,21 @@ def held(wt: str, fetch: bool, landed: bool) -> tuple[int, str]:
     for op in OPERATIONS:
         if os.path.exists(os.path.join(gd, op)):
             return 1, f"keep: a git operation is in progress ({op})"
-    st = git(wt, "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none")
+    st = git(wt, "status", "--porcelain=v1", "-z", "--untracked-files=all",
+             "--ignore-submodules=none")
     if st.returncode != 0:
         return 1, f"keep: git status failed: {st.stderr.strip()[:200]}"
-    lines = [x for x in st.stdout.splitlines() if x.strip()]
+    records, rest = [], st.stdout.split("\0")
+    while rest:
+        record = rest.pop(0)
+        if record:
+            records.append(record)
+            if record[0] in "RC" and rest:  # a rename or copy: its source path follows
+                rest.pop(0)
+    # merge_landing.py's frozen leftovers are in the history while the disk matches its manifest
+    untracked = set(work_proof.frozen_unexplained(
+        wt, [r[3:] for r in records if r.startswith("?? ")]))
+    lines = [r for r in records if not r.startswith("?? ") or r[3:] in untracked]
     if lines:
         return 1, f"keep: {len(lines)} changed or untracked path(s), e.g. {lines[0][3:]}"
     hidden = hidden_paths(wt)

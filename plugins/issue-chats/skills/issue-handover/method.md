@@ -385,16 +385,19 @@ logged in; this plugin and the core plugin installed (the installer's `--with is
 The plugin's hook guards `archive_session` wherever the plugin is enabled. Then open a new chat,
 so it loads them.
 
-**Optionally, for unattended chains,** narrow allow rules in the user's Claude Code settings, added
-by the user (an agent never edits its own permissions): `start_issue_chat.py` by the exact path of
-the installed script, in each spelling the agents write it; the read-only scripts (`next_issue.py`,
-`chat_archivable.py`, the core plugin's `overlap_check.py`) the same way; and `start_session`,
-`detach_session` and `request_keep_awake`; an allow rule for `archive_session` only together with
-the guard hook; and, where the user grants the push of a chat's own task branch or switches
-automatic merging on, the core plugin's `push_branch.py` and `merge_pr.py` the same way (never `git
-push`, `gh pr merge` or `gh pr ready` themselves). Never a broad allow, and every ask and deny rule
-stays. The installed path names the plugin's version, so the rules are renewed after an update that
-raises it. The README of this repository has the rule's form.
+**Optionally, for unattended chains,** narrow allow rules in the user's Claude Code settings,
+added by the user (an agent never edits its own permissions): `start_issue_chat.py` by the exact
+path of the script in the installer's clone (`~/.agentic-github-flow/plugins/<plugin>/scripts/`,
+where Claude Code loads the skills from), in each spelling the agents write it; the read-only
+scripts (`next_issue.py`, `chat_archivable.py`, the core plugin's `overlap_check.py`) the same
+way; and `start_session`, `detach_session` and `request_keep_awake`; an allow rule for
+`archive_session` only together with the guard hook; and, where the user grants the push of a
+chat's own task branch or switches automatic merging on, the core plugin's `push_branch.py`
+and `merge_pr.py` the same way (never `git push`, `gh pr merge` or `gh pr ready`
+themselves). Never a broad allow, and every ask and deny
+rule stays. A rule or a sandbox exclusion never names the copy under `~/.claude/plugins/cache/`:
+its folder names the version, so an update silently breaks it; `install.sh --update` names each
+one left. The README of this repository has the rule's form.
 
 **Per repository,** on a branch, through a pull request the user approves:
 

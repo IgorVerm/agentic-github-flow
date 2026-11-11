@@ -19,7 +19,9 @@ the worktree is KEPT and the reasons, files and processes are printed:
             `baseRefName` the default branch), which covers squash and rebase merges.
             GitHub keeps a merged pull request's commits, so they are not lost with the branch
   clean     `git status --porcelain` is empty, and no index entry hides local edits
-            (assume-unchanged or skip-worktree in `git ls-files -v`)
+            (assume-unchanged or skip-worktree in `git ls-files -v`). Exempt are the paths
+            merge_landing.py froze, untracked or skip-worktree, while each file on disk is
+            still the one its manifest recorded (work_proof.frozen_unexplained)
   ignored   every ignored entry PROVES it is regenerable (below); anything else, including data
             no one has generated yet, keeps the worktree
   no strays every commit the worktree's own history records (HEAD, ORIG_HEAD, its HEAD reflog
@@ -128,7 +130,9 @@ other check still holds and the branch is never deleted in that mode; a later sw
 if it has been merged, an unmerged one stays. It refuses more than one path. It does not rely
 on options newer git added (`--path-format=absolute`, `--show-ref-format`): git before 2.31
 and 2.45 echoes them instead of applying them.
-Removal: `git worktree remove <path>` (never --force), then the local branch is deleted with
+Removal: the frozen leftovers merge_landing.py left untracked are deleted once proven again
+against its manifest, then `git worktree remove <path>` (never --force), then the local branch
+is deleted with
 `git update-ref -d refs/heads/<branch> <proven tip>`, which refuses if the branch moved since the
 check; a branch still checked out in another worktree is kept. The remote branch and the issue
 stay with the caller (the cleanup-merged skill). AGENTIC_GITHUB_FLOW_GH, a JSON list, replaces
@@ -145,9 +149,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from landing import SettingError, landing_setting  # noqa: E402  (owner of the setting)
-from work_proof import (existing_commits, gh_command, git, git_path,  # noqa: E402
-                        merged_pull_request, recorded_ids, ref_format, stranded_commits,
-                        worktrees)
+from work_proof import (existing_commits, frozen_unexplained, gh_command, git,  # noqa: E402
+                        git_path, merged_pull_request, recorded_ids, ref_format,
+                        stranded_commits, worktrees)
 
 CACHEDIR_SIGNATURE = b'Signature: 8a477f597d28d172789f06886806bc55'
 PACKAGE_STATE = {'.package-lock.json', '.modules.yaml', '.yarn-state.yml'}
@@ -528,9 +532,19 @@ def check(primary, tree, ref, patterns, approved):
         problem = (status.stderr or flags.stderr).strip().splitlines() or ['failed']
         return reasons + ['git status: ' + problem[0]], proofs, sha
     records = [r for r in status.stdout.split('\0') if r]
-    dirty = [r[3:] for r in records if not r.startswith('!! ')]
+    # merge_landing.py's frozen paths go while what is on disk is what it froze (#50)
+    untracked = [r[3:] for r in records if r.startswith('?? ')]
+    skipped = [r[2:] for r in flags.stdout.split('\0') if r and r[0] == 'S']
+    kept = set(frozen_unexplained(path, untracked + skipped))
+    exempt = [p for p in untracked + skipped if p not in kept]
+    if exempt:
+        proofs.append('frozen: by merge_landing.py, unchanged on disk since: '
+                      + ', '.join(exempt[:5]) + (' …' if len(exempt) > 5 else ''))
+    dirty = [r[3:] for r in records
+             if not r.startswith('!! ') and not (r.startswith('?? ') and r[3:] not in kept)]
     dirty += [f'{r[2:]} (hidden by {"skip-worktree" if r[0] == "S" else "assume-unchanged"})'
-              for r in flags.stdout.split('\0') if r and (r[0] == 'S' or r[0].islower())]
+              for r in flags.stdout.split('\0')
+              if r and ((r[0] == 'S' and r[2:] in kept) or r[0].islower())]
     if dirty:
         reasons.append('not clean: ' + ', '.join(dirty[:5]) + (' …' if len(dirty) > 5 else ''))
     blocked = []
@@ -555,6 +569,28 @@ def check(primary, tree, ref, patterns, approved):
     elif processes:
         reasons.append('in use by process ' + ', '.join(processes))
     return reasons, proofs, sha
+
+
+def drop_frozen_leftovers(path):
+    """Delete the untracked files merge_landing.py left behind (a protected file the landing
+    branch deleted, kept on disk by the sandbox), each proven again against the manifest:
+    `git worktree remove` without --force refuses a worktree with untracked files. Their
+    content was HEAD's when they were frozen, so it is in the history. None, or the problem."""
+    status = git(path, 'status', '--porcelain=v1', '-z', '--untracked-files=all')
+    if status.returncode:
+        return 'git status: ' + (status.stderr.strip().splitlines() or ['failed'])[0]
+    untracked = [r[3:] for r in status.stdout.split('\0') if r.startswith('?? ')]
+    if not untracked:
+        return None
+    left = frozen_unexplained(path, untracked)
+    if left:
+        return 'untracked files appeared since the check: ' + ', '.join(left[:5])
+    for name in untracked:
+        try:
+            os.remove(os.path.join(path, *name.split('/')))
+        except OSError as error:
+            return f'cannot delete the frozen leftover {name}: {error}'
+    return None
 
 
 def not_closed(primary, number):
@@ -889,9 +925,16 @@ def main(argv=None):
             continue
         branch = None if args.approved else tree['branch']
         for line in proofs:
-            print(f'  {line}' if line.startswith('branch: ') else f'  ignored {line}')
+            print(f'  {line}' if line.startswith(('branch: ', 'frozen: '))
+                  else f'  ignored {line}')
         if args.dry_run:
             print(f'WOULD REMOVE {path}' + (f' and branch {branch}' if branch else ''))
+            continue
+        problem = drop_frozen_leftovers(path)
+        if problem:
+            kept += 1
+            failed += 1
+            print(f'KEPT {path}: {problem}')
             continue
         result = git(primary, 'worktree', 'remove', path)
         if result.returncode:

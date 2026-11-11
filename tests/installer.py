@@ -16,8 +16,9 @@ merging and removing the settings, rules and hooks (the git guard and the person
 install), the opt-in sandbox-network guard (only with --guards sandbox, kept by a rerun and
 --update, removed by --uninstall), the Codex rules as regular copies (refreshed by
 --update, a link of an earlier version replaced, a changed copy left by --uninstall), --with
-issue-chats installed beside core in both clients and kept on a plain rerun, an unknown plugin
-refused, and an overlay in both blocks.
+issue-chats installed beside core in both clients and kept on a plain rerun, settings entries
+that name a plugin's version folder reported by an install and --update but left unchanged, an
+unknown plugin refused, and an overlay in both blocks.
 """
 import hashlib
 import importlib.util
@@ -305,6 +306,31 @@ class InstallerTests(unittest.TestCase):
         for client in ('claude', 'codex'):
             self.assertEqual({k for k in self.plugins(client) if k.startswith('agentic-github-flow')},
                              set())
+
+    def test_settings_naming_a_plugin_version_are_reported_not_changed(self):
+        with open(os.path.join(ROOT, 'plugins', 'issue-chats', '.claude-plugin', 'plugin.json'),
+                  encoding='utf-8') as f:
+            version = json.load(f)['version']
+        cache = '~/.claude/plugins/cache/agentic-github-flow/agentic-github-flow-issue-chats/'
+        current = 'python3 %s%s/scripts/start_issue_chat.py *' % (cache, version)
+        stale = 'Bash(python3 %s0.0.1/scripts/next_issue.py *)' % cache
+        clone = 'python3 ~/.agentic-github-flow/plugins/issue-chats/scripts/start_issue_chat.py *'
+        settings = json.dumps({'permissions': {'allow': [stale, 'Bash(gh *)']},
+                               'sandbox': {'enabled': True,
+                                           'excludedCommands': [clone, current]}}).encode()
+        self.write(settings, '.claude', 'settings.json')
+        for args in (('--with', 'issue-chats'), ('--update',)):
+            code, out = self.install(*args, clients=['claude'])
+            self.assertEqual(code, 0, out)
+            self.assertIn('permissions.allow in', out)
+            self.assertIn('names agentic-github-flow-issue-chats 0.0.1, but %s is installed'
+                          % version, out)
+            self.assertIn('sandbox.excludedCommands in', out)
+            self.assertIn('names the folder of agentic-github-flow-issue-chats %s' % version, out)
+            self.assertEqual(out.count('The same in the clone'), 2, out)  # the clone entry is fine
+            after = json.loads(self.read('.claude', 'settings.json'))  # a real client adds its
+            self.assertEqual({k: after.get(k) for k in ('permissions', 'sandbox')},  # own keys
+                             json.loads(settings), 'read-only')
 
     def test_unknown_plugin_is_refused(self):
         code, out = self.install('--with', 'issue-chat')

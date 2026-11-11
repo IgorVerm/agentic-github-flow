@@ -34,7 +34,9 @@
 # upstream, a first push of old history) is judged whole and may be refused for data that is
 # public elsewhere. Git LFS uploads file contents in its own hook: only the pointers are read.
 # Patterns are a known list (see each script): unknown token formats, encoded or archived
-# content and obfuscated addresses pass.
+# content and obfuscated addresses pass. A file that is binary in a commit (a NUL byte in its
+# first 8000 bytes) and no UTF-16 text has only its name judged there (#55), so text behind
+# such bytes, such as a .glb's JSON part, passes.
 # Install per repository (worktrees share it): cp pre-push "$(git rev-parse --git-path hooks)/pre-push"
 # and chmod +x it; an existing pre-push hook is chained by hand, never overwritten. On Windows,
 # Git for Windows runs it with its own sh.

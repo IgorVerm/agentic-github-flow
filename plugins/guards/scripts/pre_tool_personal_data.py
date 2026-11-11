@@ -81,7 +81,9 @@ Usage as a hook: reads the PreToolUse JSON on stdin, prints the decision ("ask";
 The push check, `--commits <remote URL>` (object ids on stdin, run in the repository): the
 `pre-push` hook (`templates/pre-push`) lists what a push sends and this judges it by the same
 identifiers and addresses: each line the commits add (a merge: what is new against every parent;
-UTF-16 text with its NUL bytes removed), each file name (reported as `(a file name)`, never
+UTF-16 text with its NUL bytes removed; not the content of a file that is binary in that commit
+and no UTF-16 text, as scan_secrets.py decides it: model data such as a `.glb` holds byte runs
+that read as addresses, #55), each file name (reported as `(a file name)`, never
 printed), each commit message and each annotated tag's message, and the addresses of authors,
 committers and taggers other than the user's configured ones (global or the repository's
 user.email). The identity of each commit or tag is removed from its own message first, since the
@@ -91,7 +93,7 @@ push sends it in the header anyway; the gh login passes when the remote is on Gi
 found), 1 (found) or 2 (usage or git error). Unlike the hook mode it fails closed. Test:
 `python3 tests/pre_push_checks.py`.
 """
-import importlib.util, json, os, re, shlex, subprocess, sys
+import importlib.util, json, os, re, shlex, subprocess, sys, tempfile
 from urllib.parse import unquote, urlsplit
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -705,10 +707,78 @@ def codex_reason(what, carried, shell):
 # two plugins are installed apart, so each holds its own copy; tests/pre_push_checks.py runs
 # both on the same pushes.
 
+# --- binary files in a push (#55). Twin: plugins/security/scripts/scan_secrets.py holds the
+# same code; tests/pre_push_checks.py checks that both tell the same files apart alike.
+FIRST_FEW_BYTES = 8000  # git calls a file binary when these hold a NUL byte (xdiff-interface.c)
+TEXT_BYTES = frozenset(range(32, 127)) | {9, 10, 13}
+
+
+def utf16_text(head):
+    """UTF-16 text (what Windows PowerShell 5.1 writes with `>`): a byte-order mark, or a NUL in
+    every other byte with mostly ASCII text in the bytes between."""
+    if head[:2] in (b'\xff\xfe', b'\xfe\xff'):
+        return True
+    pairs = len(head) // 2
+    for nul, char in ((1, 0), (0, 1)):  # little-endian, big-endian
+        nuls = head[nul::2][:pairs].count(0)
+        chars = sum(1 for b in head[char::2][:pairs] if b in TEXT_BYTES)
+        if pairs and nuls >= 0.9 * pairs and chars >= 0.7 * pairs:
+            return True
+    return False
+
+
+def skipped_binary(head):
+    """Whether a push check skips a file's content: git calls it binary and it is no UTF-16
+    text. `head` is (at least) the file's first 8000 bytes."""
+    head = head[:FIRST_FEW_BYTES]
+    return b'\0' in head and not utf16_text(head)
+
+
+def binary_blobs(repo, oids):
+    """The blobs among `oids` whose content is skipped (skipped_binary). An object git does not
+    have (a submodule's commit) is none. Only the first bytes of each stay in memory."""
+    oids = sorted(set(o for o in oids if o.strip('0')))
+    found = set()
+    if not oids:
+        return found
+    with tempfile.TemporaryFile() as ids:
+        ids.write(''.join(o + '\n' for o in oids).encode('ascii'))
+        ids.seek(0)
+        proc = subprocess.Popen(['git', '-C', repo, 'cat-file', '--batch'], stdin=ids,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            for _ in oids:
+                header = proc.stdout.readline().decode('ascii', 'replace').split()
+                if len(header) == 2 and header[1] == 'missing':
+                    continue
+                if len(header) != 3 or not header[2].isdigit():
+                    raise RuntimeError('git cat-file: unexpected output %r' % ' '.join(header)[:80])
+                size = int(header[2])
+                head = proc.stdout.read(min(size, FIRST_FEW_BYTES))
+                left = size - len(head) + 1  # the rest and the newline after it
+                while left > 0:
+                    chunk = proc.stdout.read(min(left, 1 << 20))
+                    if not chunk:
+                        raise RuntimeError('git cat-file: output ends early')
+                    left -= len(chunk)
+                if header[1] == 'blob' and skipped_binary(head):
+                    found.add(header[0])
+        finally:
+            proc.stdout.close()
+            err = proc.stderr.read().decode('utf-8', 'replace').strip()
+            proc.stderr.close()
+            proc.wait()
+    if proc.returncode != 0:
+        raise RuntimeError('git cat-file: %s' % err[:200])
+    return found
+
+
+NEW_BLOB = re.compile(r'^index [0-9a-f,]+\.\.([0-9a-f]+)', re.M)
+
 PUSH_DIFF = ['-c', 'core.quotePath=false', '-c', 'diff.noprefix=false', '-c',
              'diff.mnemonicPrefix=false', '-c', 'diff.relative=false', '-c', 'log.showRoot=true',
              'log', '--no-walk=unsorted', '--stdin', '--cc', '--no-renames', '--no-color', '-U0',
-             '--no-ext-diff', '--text', '--no-textconv', '--format=@@commit %H']
+             '--no-ext-diff', '--text', '--no-textconv', '--full-index', '--format=@@commit %H']
 OBJECT_ID = re.compile(r'[0-9a-f]{40}(?:[0-9a-f]{24})?')
 OTHERS_LABEL = "an e-mail address (someone's personal data)"
 HEADER_LABEL = "someone's e-mail address as author or committer (or tagger)"
@@ -723,22 +793,26 @@ def _git(repo, args, stdin=''):
     return r.stdout.decode('utf-8', 'replace')
 
 
-def added_lines(diff):
+def added_lines(diff, skip=frozenset()):
     """(commit, path, line number, text) for each line a `git log --cc` diff adds; a merge's line
-    only when it is new against every parent (one prefix column per parent). Each file's name
-    comes first, as (commit, path, 0, None)."""
-    commit, path, line_no, header, width = '', '', 0, False, 1
+    only when it is new against every parent (one prefix column per parent); none of a file
+    whose new blob (its `index` header) is in `skip`. Each file's name comes first, as
+    (commit, path, 0, None)."""
+    commit, path, line_no, header, width, blob = '', '', 0, False, 1, ''
     for raw in diff.split('\n'):
         if raw.startswith('@@commit '):
             commit, header, path = raw[len('@@commit '):].strip()[:12], False, ''
         elif raw.startswith('diff '):
-            header, path = True, ''
+            header, path, blob = True, '', ''
         elif raw.startswith('@@'):
             header = False
             width = max(1, len(raw) - len(raw.lstrip('@')) - 1)
             m = re.search(r' \+(\d+)', raw)
             line_no = int(m.group(1)) - 1 if m else 0
         elif header:
+            new_blob = NEW_BLOB.match(raw)
+            if new_blob:
+                blob = new_blob.group(1)
             if raw.startswith('+++ '):
                 name = raw[4:].strip()
                 if name.startswith('"') and name.endswith('"'):
@@ -751,7 +825,7 @@ def added_lines(diff):
             if '-' in prefix:
                 continue
             line_no += 1
-            if prefix == '+' * width:
+            if prefix == '+' * width and blob not in skip:
                 yield commit, path, line_no, raw[width:]
 
 
@@ -801,7 +875,8 @@ def without(text, identity):
 
 def push_findings(repo, ids, url):
     """[(label, where, object)] for the personal data in what a push sends: the lines its
-    commits add, their messages and the messages of its annotated tags."""
+    commits add (not a binary file's, skipped_binary), their messages and the messages of its
+    annotated tags."""
     commits, tags = outgoing_objects(repo, ids)
     mine = identifiers()
     own = [pattern for label, pattern, _ in mine if 'e-mail address' in label]
@@ -842,7 +917,9 @@ def push_findings(repo, ids, url):
                 if push_labels(parts, mine, github, own):
                     shown[(commit, field)] = '(a file name)'
                     judge_line(parts, '(a file name)', commit)
-        for commit, path, n, line in added_lines(_git(repo, PUSH_DIFF, stdin)):
+        diff = _git(repo, PUSH_DIFF, stdin)
+        skip = binary_blobs(repo, NEW_BLOB.findall(diff))
+        for commit, path, n, line in added_lines(diff, skip):
             if line is not None:
                 judge_line(line, '%s:%d' % (shown.get((commit, path), path), n), commit)
         messages = _git(repo, ['-c', 'i18n.logOutputEncoding=UTF-8', 'log', '--no-walk=unsorted',

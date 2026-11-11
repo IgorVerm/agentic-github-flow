@@ -56,9 +56,11 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
   independent review, the fixes and the merge; an issue chat stays until the merge and its
   cleanup (`issue-handover` step 7).
 - The pre-push hook (#40): besides force pushes, tag moves and unmerged deletions,
-  `templates/pre-push` refuses every push whose outgoing commits carry a secret (`scan_secrets.py
-  --commits`) or personal data (`pre_tool_personal_data.py --commits`), run from the installed clone
-  `~/.agentic-github-flow`, failing closed. Its protected-path check
+  `templates/pre-push` refuses every push whose outgoing commits carry a secret
+  (`scan_secrets.py --commits`) or personal data (`pre_tool_personal_data.py --commits`), run
+  from the installed clone `~/.agentic-github-flow`, failing closed. Both skip the content of
+  a file that is binary in a commit and no UTF-16 text (#55: `.glb` model data read as
+  addresses); its name is still judged. Its protected-path check
   (`plugins/core/scripts/push_paths.py`, the paths of `merge_pr.py`) runs only when
   `AGENTIC_GITHUB_FLOW_UNASKED_PUSH` is set: `push_branch.py` sets it for its own push. This
   repository's tests build their planted tokens and addresses by concatenation, or the hook refuses

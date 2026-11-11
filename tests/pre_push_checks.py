@@ -11,8 +11,10 @@ e-mail address is built by concatenation, so this file holds nothing the scanner
 tests/repo_checks.py would report. A refusal must name the file and the rule and never print
 the value. The force, tag and deletion refusals are tests/worktree_tools.py's.
 """
+import importlib.util
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -27,6 +29,14 @@ EMAIL = 'fixture.persona' + '@' + 'fixture-persona.eu'
 OTHER = 'jan.peeters' + '@' + 'acme-bouw.be'
 TOKEN = 'ghp_' + 'Q7m' * 12  # github-token: ghp_ and 36 letters or digits
 NOREPLY = 'Co-Authored-By: Claude <' + 'noreply' + '@' + 'anthropic.com>'
+# model bytes of a .glb that read as an address (#55: `lacus_early.glb` in pax_deorum)
+MODEL_ADDRESS = 'D-D.D' + '@' + 'DAD.DAD'
+
+
+def glb(*runs):
+    """A .glb-like binary file: the glTF header, NUL bytes, noise and the given byte runs."""
+    body = b''.join(b'\x00\x01\xfe\x9c ' + run.encode('ascii') + b' \x00\x00\xa7' for run in runs)
+    return b'glTF' + struct.pack('<II', 2, 12 + len(body)) + body
 
 
 def install_clone(home):
@@ -89,6 +99,14 @@ class Push(unittest.TestCase):
             f.write(text)
         self.git(repo, 'add', '--', rel)
         self.git(repo, 'commit', '-q', '-m', message)
+
+    def commit_bytes(self, rel, data, message):
+        path = os.path.join(self.repo, *rel.split('/'))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'wb') as f:
+            f.write(data)
+        self.git(self.repo, 'add', '--', rel)
+        self.git(self.repo, 'commit', '-q', '-m', message)
 
     def push(self, *args, env=None):
         return self.git(self.repo, 'push', '-q', 'origin', *args, check=False, env=env)
@@ -218,6 +236,45 @@ class Push(unittest.TestCase):
             self.git(self.repo, 'add', '--', name)
             self.git(self.repo, 'commit', '-q', '-m', name)
             self.refused(self.push(b), rule, name)
+
+    # --- binary files (#55): their content is not read, their names are ---------------------
+
+    def test_binary_file_content_is_not_read(self):
+        b = self.branch()
+        self.commit_bytes('models/lacus_early.glb', glb(MODEL_ADDRESS, OTHER, TOKEN, 'GH=' + TOKEN),
+                          'model')
+        self.commit_bytes('models/lacus_early.glb', glb(TOKEN, MODEL_ADDRESS, OTHER), 'remodel')
+        r = self.push(b)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_utf16_and_plain_text_are_still_read(self):
+        for codec, bom in (('utf-16-le', True), ('utf-16-le', False), ('utf-16-be', True),
+                           ('utf-16-be', False), ('utf-8', False)):
+            for text, rule in (('GH=' + TOKEN, 'github-token'),
+                               ('mail ' + OTHER, 'e-mail address')):
+                self.git(self.repo, 'switch', '-q', '-C', 'agent/u', 'main')
+                data = (('\ufeff' if bom else '') + 'notes\r\n' + text + '\r\n').encode(codec)
+                self.commit_bytes('out.txt', data, 'out')
+                self.refused(self.push('agent/u'), rule, 'out.txt:2')
+
+    def test_a_binary_files_name_is_still_judged(self):
+        for name, rule in (('models/' + OTHER + '.glb', 'e-mail address'),
+                           ('models/' + TOKEN + '.glb', 'github-token'),
+                           ('deploy/.env', 'secret-file-name')):
+            self.git(self.repo, 'switch', '-q', '-C', 'agent/n', 'main')
+            self.commit_bytes(name, glb('mesh'), 'model')
+            self.refused(self.push('agent/n'), rule)
+
+    def test_a_file_that_is_text_in_one_commit_is_read_there(self):
+        for text, rule in (('GH=' + TOKEN, 'github-token'), ('mail ' + OTHER, 'e-mail address')):
+            self.git(self.repo, 'switch', '-q', '-C', 'agent/t', 'main')
+            self.commit_bytes('data.bin', (text + '\n').encode('ascii'), 'text first')
+            self.commit_bytes('data.bin', glb('mesh'), 'then binary')
+            self.refused(self.push('agent/t'), rule, 'data.bin:1')
+            self.git(self.repo, 'switch', '-q', '-C', 'agent/b', 'main')
+            self.commit_bytes('data.bin', glb('mesh'), 'binary first')
+            self.commit_bytes('data.bin', (text + '\n').encode('ascii'), 'then text')
+            self.refused(self.push('agent/b'), rule, 'data.bin:1')
 
     def test_blob_and_tree_pushes_are_refused(self):
         blob = \
@@ -382,6 +439,44 @@ class Units(unittest.TestCase):
         r = subprocess.run([sys.executable, hook, '--bogus'], input='{}', capture_output=True,
                            text=True)
         self.assertEqual((r.returncode, r.stdout), (0, ''))  # hook mode: a wiring mistake passes
+
+    def test_both_checks_tell_binary_files_alike(self):
+        # the two plugins are installed apart, so each holds its own copy of the classifier
+        def load(rel):
+            spec = importlib.util.spec_from_file_location(rel.replace('/', '_'),
+                                                          os.path.join(ROOT, *rel.split('/')))
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module.skipped_binary
+        secrets = load('plugins/security/scripts/scan_secrets.py')
+        personal = load('plugins/guards/scripts/pre_tool_personal_data.py')
+        text = 'GH=' + TOKEN + ' mail ' + OTHER + '\r\n'
+        cases = [
+            (glb(MODEL_ADDRESS, TOKEN), True),
+            (b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR' + bytes(range(256)) * 8, True),
+            (b'\x00' * 64, True),
+            (b'\xff\xfe' + bytes(range(256)) * 4, False),  # a byte-order mark: read as UTF-16
+            (('\ufeff' + text).encode('utf-16-le'), False),
+            (('\ufeff' + text).encode('utf-16-be'), False),
+            ((text * 400).encode('utf-16-le'), False),  # no mark, past the first 8000 bytes
+            ((text * 400).encode('utf-16-be'), False),
+            (('Caf\u00e9 na\u00efef ' + text).encode('utf-16-le'), False),
+            (text.encode('utf-8'), False),
+            ('caf\u00e9 \u2014 ok\n'.encode('utf-8'), False),
+            (b'', False),
+            (b'a' * 8000 + b'\x00tail', False),  # git reads only the first 8000 bytes
+            (b'a' * 7999 + b'\x00tail', True),
+        ]
+        for data, skipped in cases:
+            self.assertEqual((secrets(data), personal(data)), (skipped, skipped), data[:40])
+        twins = []
+        for rel in ('plugins/security/scripts/scan_secrets.py',
+                    'plugins/guards/scripts/pre_tool_personal_data.py'):
+            with open(os.path.join(ROOT, *rel.split('/')), encoding='utf-8') as f:
+                text = f.read()
+            start = text.index('FIRST_FEW_BYTES = ')
+            twins.append(text[start:text.index('\n', text.index('NEW_BLOB = ', start))])
+        self.assertEqual(twins[0], twins[1], 'the binary-file code of the two checks differs')
 
 
 if __name__ == '__main__':

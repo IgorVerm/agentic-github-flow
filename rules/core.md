@@ -24,8 +24,8 @@ policy is and which data may go into a prompt, and follow the answer.
   commenting on and assigning issues.
 - **Ask the user first for anything outside that,** and prepare it before you ask, so that the
   approval is the last step:
-  - what leaves the machine or reaches other people: a push, a pull request, a deployment, a
-    publication, a message, a production change;
+  - what leaves the machine or reaches other people: a push or pull request (§Git), a
+    deployment, a publication, a message, a production change;
   - what cannot be undone or destroys work: the git operations below, deleting data;
   - what costs money or adds a dependency;
   - what changes what gets built: growing the scope, an architecture choice the task did not
@@ -78,10 +78,10 @@ Agents have destroyed hours of uncommitted work with `reset --hard` and `checkou
   (`git commit -m "…" -- <paths>`, never `add -A`, `add .`, `add -f` or `commit -a`), the
   subject ending in the issue reference `(#n)`, never a closing keyword, with a
   `Co-Authored-By` trailer naming the agent. Never commit a file over 50 MB.
-- **Ask before every push** (a task branch; `main` only in local-main mode), with the checks
-  and the pull request text prepared. Merge a pull request or mark a draft ready only on the
-  user's word for it, or where `HANDOFF.md` §Standing permissions or an overlay grants automatic
-  merging: then `merge_pr.py` decides.
+- **Ask before every push** (a task branch; `main` only in local-main mode), unless a standing
+  grant covers your own task branch: then push it through `push_branch.py`. Mark ready or merge
+  only on the user's word for it, or through `merge_pr.py` where `HANDOFF.md` switches
+  automatic merging on.
 - **After the merge or the push of `main`,** the `cleanup-merged` skill removes the worktree and
   branch and closes the issue.
 - **Never commit, print or log a secret.** Real configuration lives in ignored `.env` files;

@@ -1,6 +1,6 @@
 # agentic-github-flow: current state
 
-Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard of #20, the pre-push checks of #40, the reviewer skill of #39, issue chats switched on by #51).
+Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard of #20, the pre-push checks of #40, the reviewer skill of #39, issue chats switched on by #51, the unasked push and the per-repository merge switch of #26).
 
 ## State
 
@@ -41,11 +41,20 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
   Code sandbox and keeps the worktree's `.claude/` and `.mcp.json` on disk as the chat started
   with them; the cleanup and archive checks accept those paths while they match its manifest.
   Not measured yet in a real issue chat whose landing branch changed `.claude/`.
-- Automatic merging (#13, `DESIGN_DECISIONS.md`): under a standing grant, `merge_pr.py` merges
-  an agent's own pull request when its checks, review, overlap line and paths allow it. This
-  repository grants nothing (Standing permissions below). The review it needs comes from the
-  core skill `review-change` (#39), whose `review_verdict.py` writes the verdict comment and
-  owns its format; `merge_pr.py` parses it through the same module.
+- Automatic merging (#13, narrowed by #26, `DESIGN_DECISIONS.md`): off by default, switched on per
+  repository by the row `automatic merge` | `on` in `HANDOFF.md` §Landing settings, next to the
+  landing mode (`landing.py` owns it, `--explain` reports it); an overlay cannot switch it on. There
+  `merge_pr.py --ready` marks an agent's own draft ready and merges it when its checks, review,
+  overlap line and paths allow it. It is off here (Landing settings below). The review it needs
+  comes from the core skill `review-change` (#39), whose `review_verdict.py` writes the verdict
+  comment and owns its format; `merge_pr.py` parses it through the same module.
+- Unasked push (#26): under a standing grant (`HANDOFF.md` §Standing permissions or an overlay)
+  an agent pushes its own task branch in pull-request mode and opens its pull request through
+  `plugins/core/scripts/push_branch.py`, which refuses without the pre-push hook, for a
+  protected path or without the overlap line, and pushes with `AGENTIC_GITHUB_FLOW_UNASKED_PUSH`
+  set. After the pull request is open, `ship-change` step 8 runs the CI monitor, the
+  independent review, the fixes and the merge; an issue chat stays until the merge and its
+  cleanup (`issue-handover` step 7).
 - The pre-push hook (#40): besides force pushes, tag moves and unmerged deletions,
   `templates/pre-push` refuses every push whose outgoing commits carry a secret
   (`scan_secrets.py --commits`) or personal data (`pre_tool_personal_data.py --commits`), run
@@ -53,9 +62,9 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
   a file that is binary in a commit and no UTF-16 text (#55: `.glb` model data read as
   addresses); its name is still judged. Its protected-path check
   (`plugins/core/scripts/push_paths.py`, the paths of `merge_pr.py`) runs only when
-  `AGENTIC_GITHUB_FLOW_UNASKED_PUSH` is set: nothing sets it until the route of #26 pushes
-  without asking. This repository's tests build their planted tokens and addresses by
-  concatenation, or the hook refuses the push that carries them.
+  `AGENTIC_GITHUB_FLOW_UNASKED_PUSH` is set: `push_branch.py` sets it for its own push. This
+  repository's tests build their planted tokens and addresses by concatenation, or the hook refuses
+  the push that carries them.
 - Not run yet: the live skill-choice probe for the new and changed descriptions, an end-to-end
   issue-chat chain in the desktop app or in Codex.
 
@@ -77,7 +86,7 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
 | a skill | its `SKILL.md`, `plugins/core/skills/repo-docs/skill-standard.md`, `tests/skills_format.py` |
 | the installer | `tools/installer.py` (its docstring owns the behaviour), `tests/installer.py` |
 | the guards | `plugins/guards/scripts/*.py` headers, `plugins/guards/policy/*.rules`, `tests/git_guard.py`, `tests/delete_guard.py` (cases in `tests/delete_guard_cases.py`; `tests/delete_guard_differential.py` checks it never asks less than before issue 4), `tests/personal_data_guard.py`, `tests/sandbox_network_guard.py` (with `--guards sandbox` in `tools/installer.py`), `tests/codex_policy.py` |
-| automatic merging | `plugins/core/scripts/merge_pr.py` and `review_verdict.py` headers, `plugins/core/skills/review-change/SKILL.md`, `DESIGN_DECISIONS.md`, `tests/merge_pr.py`, `tests/review_verdict.py` |
+| automatic merging and the unasked push | `plugins/core/scripts/merge_pr.py`, `push_branch.py` and `review_verdict.py` headers, `plugins/core/skills/ship-change/SKILL.md` steps 6 to 8, `plugins/core/skills/review-change/SKILL.md`, `DESIGN_DECISIONS.md`, `tests/merge_pr.py`, `tests/push_branch.py`, `tests/review_verdict.py` |
 | landing modes | `plugins/core/scripts/landing.py` and `promote_main.py` headers, `plugins/core/skills/ship-change/` (`SKILL.md`, `local-main.md`), `tests/landing.py`, `tests/promote_main.py` |
 | worktrees and cleanup | `plugins/core/scripts/*.py` headers, `plugins/core/skills/cleanup-merged/SKILL.md`, `tests/worktree_tools.py`, `tests/new_worktree.py`, `tests/overlap_check.py` |
 | merging the landing branch in the sandbox | `plugins/core/scripts/merge_landing.py` header, `frozen_unexplained` in `plugins/core/scripts/work_proof.py`, `plugins/core/skills/ship-change/SKILL.md` step 2, `DESIGN_DECISIONS.md`, `tests/merge_landing.py` |
@@ -96,10 +105,11 @@ requests, whatever the detection would say about its one writer.
 
 ## Issue chats settings
 
-The method: the `issue-handover` skill's method file (agentic-github-flow-issue-chats plugin).
-This section switches on its standing permission in this repository: picking and claiming the
-next ready issue, starting its chat, and archiving chats that pass the worktree check. Every
-push, merge and ready-marking stays on the user's word. Switched on by Igor, 2026-11-11: "zet de
+The method: the `issue-handover` skill's method file (agentic-github-flow-issue-chats plugin). This
+section switches on its standing permission in this repository: picking and claiming the next ready
+issue, starting its chat, and archiving chats that pass the worktree check. Pushes, merges and
+ready-marking follow the `ship-change` skill: the user's word, unless a standing grant or the
+`automatic merge` row of §Landing settings says otherwise. Switched on by Igor, 2026-11-11: "zet de
 knop aan" (#51).
 
 | Setting | Value |

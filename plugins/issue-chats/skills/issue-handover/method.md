@@ -2,8 +2,9 @@
 
 A method for a repository whose work is its GitHub issues: each chat takes one ready issue,
 claims it, works on its own branch in a new worktree until the branch is ready to push, picks
-the next ready issue, starts the chat for it, and archives itself once the user has said push
-and its work is on GitHub, or, in local-main mode, once its work has landed on local main. Several such chains run at once, at most five (§1). *The guide*
+the next ready issue, starts the chat for it, sees its pull request through review and CI to the
+merge and then archives itself, or, in local-main mode, archives itself once its work has landed
+on local main. Several such chains run at once, at most five (§1). *The guide*
 below is Anthropic's <https://code.claude.com/docs/en/best-practices>, cited by section.
 
 This file owns the method, the repository settings, the chat title form, the limit of five
@@ -17,10 +18,13 @@ is the core plugin's, run as `ship-change` names it. Codex follows the same life
 own chat tools: [the Codex adapter](codex.md).
 
 **In the pull-request flow.** The core rules hold here unchanged: work on a branch in a
-worktree, ask the user before every push, never merge, never mark a pull request ready without
-the user's word for that pull request. So a chat's task ends when its branch is *ready to push*,
-not when it is merged; the chat hands over without waiting for the push, and it leaves the
-sidebar only once its commits are on GitHub.
+worktree; push on the user's yes, or under a standing grant through `push_branch.py`; mark ready
+and merge on the user's word for that pull request, or through `merge_pr.py` where the user
+switched automatic merging on in the repository (`ship-change` steps 6 to 8). So a chat's task
+ends when its branch is *ready to push*: the chat hands over then, without waiting for the push
+or for CI, so the chain goes on. It stays to see its own pull request through (`ship-change`
+step 8: the CI monitor, an independent review, fixes as new commits, the merge) and leaves the
+sidebar only after the merge and its cleanup.
 
 **In local-main mode** (the core plugin's `landing.py` decides per repository, `ship-change`
 step 1): a chat's task ends when its work has *landed* on the local landing branch (the
@@ -40,7 +44,9 @@ That section is also the **standing permission** for the repository: a chat pick
 the next ready issue, starts the chat for it and archives chats that pass the worktree check,
 without asking again, and in local-main mode lands the chat's work on local main (local work).
 It never covers a push, a merge or marking a pull request ready: those stay on the user's word
-for each push and each pull request. Deleting the section switches all of it off.
+for each push and each pull request, unless a standing grant covers the push of a chat's own
+task branch, or the user switched automatic merging on in `## Landing settings`
+(`ship-change` steps 1 and 6 to 8). Deleting the section switches all of it off.
 
 The skills read their values from it; a row left out takes its default:
 
@@ -84,8 +90,9 @@ The section, to copy into `HANDOFF.md` and fill in:
 
 The method: the `issue-handover` skill's method file (agentic-github-flow-issue-chats plugin).
 This section switches on its standing permission in this repository: picking and claiming the
-next ready issue, starting its chat, and archiving chats that pass the worktree check. Every
-push, merge and ready-marking stays on the user's word.
+next ready issue, starting its chat, and archiving chats that pass the worktree check. Pushes,
+merges and ready-marking follow the `ship-change` skill: the user's word, unless a standing
+grant or the `automatic merge` row of §Landing settings says otherwise.
 
 | Setting | Value |
 |---|---|
@@ -139,12 +146,12 @@ goes once its worktree passes the worktree check.
 9. **Work in flight stays in its worktree.** A chat that takes over a branch in flight, named in
    the issue's newest state comment, works in that branch's worktree; its own new worktree stays
    unused until the `cleanup-merged` skill removes it.
-10. **Review comments on an open pull request** are work on the same branch, done by a chat
-    that takes the branch over as work in flight (item 9): the user opens a chat on the issue,
-    or a running chat starts one, with the branch and its worktree named in a state comment
-    (when that worktree is gone, a new one on the branch from `origin/<branch>`).
-    The chat that opened the pull request has archived itself and may have no checkout left;
-    it is not unarchived for this.
+10. **Review comments on an open pull request** are work on the same branch, done by the chat
+    that opened it, which stays until the merge (§4) and is woken by the CI monitor where the
+    client has one. When that chat is gone, a chat takes the branch over as work in flight
+    (item 9): the user opens a chat on the issue, or a running chat starts one, with the branch
+    and its worktree named in a state comment (when that worktree is gone, a new one on the
+    branch from `origin/<branch>`). An archived chat is not unarchived for this.
 
 ## 4. The chat lifecycle
 
@@ -174,15 +181,23 @@ Each issue chat runs this:
    issue (it stays open and assigned until the merge closes it); pick the next ready issue
    (`next_issue.py`) and run the overlap check on its paths; start the next chat on the
    settings' model and effort, claim its issue and hand it a complete brief; then ask the user
-   for the push of this chat's branch (`ship-change` step 6) and end the turn. In local-main
+   for the push of this chat's branch (`ship-change` step 6) and end the turn. Under a standing
+   grant for the push the chat pushed and opened the pull request before the pick (the comment
+   then opens `pull request opened: #<n>`): it tells the user and goes on with item 4 in the
+   same turn. In local-main
    mode the comment opens `landed on local <branch> at <commit>`, the chat tells the user what
    landed in place of asking for a push, ends its own live work and archives itself (item 4
    does not apply).
-4. **Push and leave:** when the user says yes, in a later turn, the chat pushes and opens the
-   pull request (`ship-change` step 7), comments `pull request opened: #<n>` on the issue, ends
-   its own live work, checks that its worktree passes the worktree check and archives itself.
-   Without a yes it stays; the user can say push in it at any time, or tell it what to change
-   first.
+4. **Push, see it through, and leave:** when the user says yes, in a later turn, or right
+   after a push under a grant, the chat pushes and opens the pull request (`ship-change`
+   step 7) and comments `pull request opened: #<n>` on the issue. Then `ship-change` step 8:
+   the CI monitor on, a review subagent given only the pull request number, findings as new
+   commits and a new review, the wait for CI; with automatic merging switched on,
+   `merge_pr.py --ready` merges, otherwise the chat tells the user the pull request is ready to
+   merge and waits for their word in a later turn. After the merge: `cleanup-merged`, a signed
+   `merged: #<n> at <commit>` comment on the issue, its own live work ended, the worktree check,
+   the archive. Without a yes for the push it stays; the user can say push in it at any time, or
+   tell it what to change first.
 
 Why that order. The claim and the brief name the issue, so the next chat reads its state from
 GitHub, not from a document. The CLI starts the next chat, not this one's `start_session`, so it
@@ -236,13 +251,15 @@ which has not been measured; on Windows it refuses, and the chat gives the user 
 
 ### Unattended up to the ask for the push
 
-An issue chat works without the user from its start brief to the ask for the push. Unattended
+An issue chat works without the user from its start brief to the ask for the push, and, under a
+standing grant for the push and the automatic-merge switch, on to the merge. Unattended
 chats stop on ask rules (which prompt even in auto mode), on the auto-mode classifier denying
 what no narrow allow rule covers, and on `start_session` leaving a card in a turn a background
 notification began. So:
 
-- **A chat pushes only on the user's yes for that push,** typed in that chat; the standing
-  permission never covers a push.
+- **A chat pushes only on the user's yes for that push,** typed in that chat, or under a
+  standing grant through `push_branch.py`; the settings section never covers a push. The one
+  narrow allow rule each of `push_branch.py` and `merge_pr.py` needs is the user's to add (§7).
 - **No `--amend`:** a fix is a new commit.
 - **A correction to an issue comment is a new comment,** never an edit.
 - **Commands run as single calls,** not chained with other steps: `git commit -m "…" --
@@ -374,7 +391,10 @@ path of the script in the installer's clone (`~/.agentic-github-flow/plugins/<pl
 where Claude Code loads the skills from), in each spelling the agents write it; the read-only
 scripts (`next_issue.py`, `chat_archivable.py`, the core plugin's `overlap_check.py`) the same
 way; and `start_session`, `detach_session` and `request_keep_awake`; an allow rule for
-`archive_session` only together with the guard hook. Never a broad allow, and every ask and deny
+`archive_session` only together with the guard hook; and, where the user grants the push of a
+chat's own task branch or switches automatic merging on, the core plugin's `push_branch.py`
+and `merge_pr.py` the same way (never `git push`, `gh pr merge` or `gh pr ready`
+themselves). Never a broad allow, and every ask and deny
 rule stays. A rule or a sandbox exclusion never names the copy under `~/.claude/plugins/cache/`:
 its folder names the version, so an update silently breaks it; `install.sh --update` names each
 one left. The README of this repository has the rule's form.

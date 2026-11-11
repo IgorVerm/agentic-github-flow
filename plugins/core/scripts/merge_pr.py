@@ -1,19 +1,28 @@
 #!/usr/bin/env python3
-"""Merge an agent's own pull request, only where a standing grant allows it and every check holds.
+"""Merge an agent's own pull request, only where the repository switched automatic merging on and
+every check holds.
 
-Usage: python3 merge_pr.py <number> --grant "<where the grant is written>" [--method merge|squash]
-                           [--dry-run] [-C <checkout>] [-R <owner>/<repo>]
+Usage: python3 merge_pr.py <number> [--ready] [--method merge|squash] [--dry-run]
+                           [-C <checkout>] [-R <owner>/<repo>] [--grant "<text>"]
 
-Merging is the user's word for each pull request, unless the repository's `HANDOFF.md`
-§Standing permissions, or an overlay the user installed, grants automatic merging (the core
-rules). This script is how an agent uses such a grant: --grant names where it is written, and is
-printed with the result. It fetches, then checks, reading git and `gh` only, and merges only
-when all hold:
+Merging, and marking a draft ready, is the user's word for each pull request, unless the
+repository switched automatic merging on (the core rules): the row `automatic merge` with the
+value `on` in HANDOFF.md's `## Landing settings`, next to the landing mode, as the default branch
+holds it; off when it is missing (landing.py, beside this file, owns the setting; the
+maintainer's rulings of 2026-11-11, DESIGN_DECISIONS.md). An overlay cannot switch it on: while
+it is off this script refuses, whatever a grant says. --grant is still accepted from older
+callers and only printed. The script fetches, then checks, reading git and `gh` only, and merges
+only when all hold:
 
+  switch    automatic merging is on (landing.py's automatic_merge());
   mode      landing.py (beside this file) decides pull request for the repository, and the pull
             request's base is the landing branch;
   state     open, not a draft, merge state CLEAN (GitHub's own rules and checks satisfied), and
-            no review decision CHANGES_REQUESTED;
+            no review decision CHANGES_REQUESTED. With --ready a draft passes (merge state DRAFT
+            or CLEAN) when every other condition holds: the script then marks it ready
+            (`gh pr ready`), reads the pull request again until GitHub has computed its merge
+            state, and merges only when it is CLEAN at the same head; otherwise it reports, and
+            the pull request stays ready for the user;
   checks    every required check is on the head commit and SUCCESS (a skipped one is not; one
             GitHub ties to an app only as a check run), and no other check failed or is
             unfinished. Required: the checks GitHub requires on the landing branch (ruleset or
@@ -44,7 +53,7 @@ when all hold:
             below (a plugin manifest whose versions alone changed excepted: MANIFESTS), and the
             patterns (comma-separated, `*` matches across `/`) of the row `merge on the user's
             word`; and the sections `## Standing permissions` and `## Landing settings` of
-            HANDOFF.md (any case of its name), which hold the grant and these settings, are
+            HANDOFF.md (any case of its name), which hold the switch and these settings, are
             unchanged, as is every line that names either.
 
 Then `gh pr merge <n> --match-head-commit <sha> --delete-branch --merge` (or --squash), so a
@@ -62,10 +71,11 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from landing import (PR, GITHUB_URL, SettingError, Unknown, decide, gh_command,  # noqa: E402
-                     gh_json, row, settings_text)
+from landing import (AUTO_MERGE, PR, GITHUB_URL, SettingError, Unknown,  # noqa: E402
+                     automatic_merge, decide, gh_command, gh_json, row, settings_text)
 from review_verdict import verdict  # noqa: E402
 
 # Paths that merge only on the user's word: the always-loaded rules and a repository's own
@@ -74,7 +84,7 @@ from review_verdict import verdict  # noqa: E402
 EXCLUDED = (
     "rules/core.md", "AGENTS.md", "*/AGENTS.md", "AGENTS.override.md", "*/AGENTS.override.md",
     "CLAUDE.md", "*/CLAUDE.md",
-    "*/merge_pr.py", "*/landing.py", "*/review_verdict.py",
+    "*/merge_pr.py", "*/landing.py", "*/review_verdict.py", "*/push_branch.py", "*/push_paths.py",
     "plugins/guards/*", "*/settings.json", "*/settings.local.json", ".claude/*", ".codex/*",
     "*.claude-plugin/*", "*.codex-plugin/*", ".agents/*",  # but see MANIFESTS
     "hooks/*", "plugins/*/hooks/*", "hooks.json", "*/hooks.json", "templates/pre-push",
@@ -89,6 +99,7 @@ EXCLUDED = (
 # raises it) passes; any other change, such as a hook a manifest declares, is held.
 MANIFESTS = ("*.claude-plugin/*.json", "*.codex-plugin/*.json", ".agents/plugins/*.json")
 GUARDED_SECTIONS = ("Standing permissions", "Landing settings")
+READY_WAIT_S, READY_POLL_S = 60, 5
 GUARDED_LINE = re.compile(r"standing permission|landing setting", re.I)
 PASSED_RUNS = {"SUCCESS", "NEUTRAL", "SKIPPED"}
 OVERLAP = re.compile(r"^\s*(?:[-*]\s*)?(?:\*\*)?overlap", re.I | re.M)
@@ -272,13 +283,42 @@ def review_reason(path: str, pr: dict, login: str, head: str, base_ref: str) -> 
     return None, f"approved {resolved[:10]}; since then only conflict-free merges of the base"
 
 
+def mark_ready(command: list, repo: str, number: str, head: str) -> str | None:
+    """Mark the draft ready and wait until GitHub has computed its merge state: None when it is
+    CLEAN at <head>, else the reason."""
+    r = gh(command, "pr", "ready", number, "-R", repo)
+    if r.returncode != 0:
+        return f"gh pr ready failed: {(r.stderr or r.stdout).strip()[:200]}"
+    state, waited = "UNKNOWN", 0
+    while True:
+        r = gh(command, "pr", "view", number, "-R", repo, "--json",
+               "isDraft,mergeStateStatus,headRefOid")
+        try:
+            now = json.loads(r.stdout) if r.returncode == 0 else {}
+        except ValueError:
+            now = {}
+        if not isinstance(now, dict):
+            now = {}
+        if now.get("headRefOid") and now.get("headRefOid") != head:
+            return f"the head moved to {str(now.get('headRefOid'))[:10]}"
+        state = str(now.get("mergeStateStatus") or "UNKNOWN")
+        if not now.get("isDraft") and state not in ("UNKNOWN", "DRAFT"):
+            break
+        if waited >= READY_WAIT_S:
+            break
+        time.sleep(READY_POLL_S)
+        waited += READY_POLL_S
+    return None if state == "CLEAN" else f"merge state {state}, not CLEAN"
+
+
 def main(argv: list) -> int:
     try:
         sys.stdout.reconfigure(errors="replace")
         sys.stderr.reconfigure(errors="replace")
     except AttributeError:
         pass
-    number, grant, method, dry, path, repo, i = None, None, "merge", False, ".", None, 0
+    number, grant, method, path, repo, i = None, "", "merge", ".", None, 0
+    dry = ready = False
     while i < len(argv):
         a = argv[i]
         if a in ("--grant", "--method", "-C", "-R") and i + 1 < len(argv) \
@@ -296,6 +336,8 @@ def main(argv: list) -> int:
             continue
         if a == "--dry-run":
             dry = True
+        elif a == "--ready":
+            ready = True
         elif a in ("-h", "--help"):
             print(__doc__)
             return 0
@@ -305,9 +347,9 @@ def main(argv: list) -> int:
             print(__doc__, file=sys.stderr)
             return 2
         i += 1
-    if number is None or not (grant or "").strip() or method not in ("merge", "squash"):
-        print("merge_pr: usage: merge_pr.py <number> --grant \"<where the grant is written>\" "
-              "[--method merge|squash] [--dry-run]", file=sys.stderr)
+    if number is None or method not in ("merge", "squash"):
+        print("merge_pr: usage: merge_pr.py <number> [--ready] [--method merge|squash] "
+              "[--dry-run]", file=sys.stderr)
         return 2
 
     command = gh_command()
@@ -359,13 +401,18 @@ def main(argv: list) -> int:
     named = [p.strip() for p in (row(text, "required checks") or "").split(";") if p.strip()]
 
     reasons = []
+    if not automatic_merge(path):
+        reasons.append("automatic merging is off in this repository: the user switches it on "
+                       f"with the row `{AUTO_MERGE}` | `on` in HANDOFF.md §Landing settings")
     if mode != PR:
         reasons.append(f"the repository lands on {mode}, not through pull requests")
     if pr.get("state") != "OPEN":
         reasons.append(f"state {pr.get('state')}")
-    if pr.get("isDraft"):
-        reasons.append("a draft")
-    if pr.get("mergeStateStatus") != "CLEAN":
+    draft = bool(pr.get("isDraft"))
+    if draft and not ready:
+        reasons.append("a draft (--ready marks it ready when everything else holds)")
+    if pr.get("mergeStateStatus") != "CLEAN" and not (
+            draft and ready and pr.get("mergeStateStatus") == "DRAFT"):
         reasons.append(f"merge state {pr.get('mergeStateStatus')}, not CLEAN")
     if str(pr.get("reviewDecision") or "").upper() == "CHANGES_REQUESTED":
         reasons.append("a review requests changes")
@@ -416,15 +463,23 @@ def main(argv: list) -> int:
                 reasons.append(f"{name}: §Standing permissions, §Landing settings or a line "
                                "naming them changes: that merges only on the user's word")
 
-    print(f"merge_pr: #{number} in {repo}, head {head[:10]}, grant: {grant.strip()}")
+    print(f"merge_pr: #{number} in {repo}, head {head[:10]}, switch: HANDOFF.md §Landing "
+          f"settings, {AUTO_MERGE}" + (f"; grant named: {grant.strip()}" if grant.strip() else ""))
     print(f"merge_pr: mode {mode}; {found or 'no approved review'}")
     if reasons:
         for reason in reasons:
             print(f"merge_pr: REFUSED: {reason}")
         return 1
     if dry:
-        print(f"merge_pr: would merge #{number} at {head[:10]} (--{method})")
+        print(f"merge_pr: would {'mark ready and ' if draft else ''}merge #{number} at "
+              f"{head[:10]} (--{method})")
         return 0
+    if draft:
+        why = mark_ready(command, repo, number, head)
+        if why:
+            print(f"merge_pr: REFUSED after marking #{number} ready: {why}; it stays ready for "
+                  "the user")
+            return 1
     r = gh(command, "pr", "merge", number, "-R", repo, f"--{method}", "--match-head-commit",
            head, "--delete-branch")
     if r.returncode != 0:

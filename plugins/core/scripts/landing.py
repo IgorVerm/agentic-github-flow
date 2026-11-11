@@ -5,8 +5,9 @@ Usage: python3 landing.py [-C <checkout>] [--explain | --branch]
 
 The ship-change skill runs it at every landing and follows its last line; promote_main.py and the
 issue chats ask it too. It prints `landing branch: <name>` and last `landing: pull request` or
-`landing: local main`; --explain first prints one `check:` line per signal it read. With
---branch it prints only the landing branch. First match wins:
+`landing: local main`; --explain first prints one `check:` line per signal it read and the line
+`automatic merge: on` or `automatic merge: off`. With --branch it prints only the landing branch.
+First match wins:
 
   1. setting   HANDOFF.md, section `## Landing settings`, row `landing`: `pull request` gives
                pull request; `local main` gives local main unless the server is seen to
@@ -26,13 +27,19 @@ issue chats ask it too. It prints `landing branch: <name>` and last `landing: pu
                landing branch (unfetched: unknown), or someone else (not a bot) merged a pull
                request into it in the last 90 days: pull request.
   5. unknown   origin not on github.com, no gh, not signed in, a network or API error: pull
-               request.
+               request. Such a decision, and one for an unknown setting value, ends its check line
+               with SAFE_DEFAULT: safe for a merge, not for a push without asking, which
+               push_branch.py (beside this file) refuses on it.
   6. otherwise one writer, a User owner, no protection, no team signal: local main.
 
 The settings are read from HANDOFF.md as the default branch holds it, as last fetched
 (`refs/remotes/origin/HEAD`, else origin/main or origin/master, else local main or master); a
 change to them counts once it has landed. The landing branch is the row `landing branch`, else
-the remote's default branch (`origin/HEAD`), else `main`. The scripts that count "merged" or
+the remote's default branch (`origin/HEAD`), else `main`. The row `automatic merge` switches
+automatic merging on for this repository when its value is `on`; missing or any other value is
+off (the maintainer's ruling of 2026-11-11: off by default, switched on at will like the mode).
+merge_pr.py (beside this file) reads it through automatic_merge() and refuses while it is off.
+The scripts that count "merged" or
 "landed" and the worktree tool read it through landing_setting() here; the worktree tool and
 the overlap check start from the local landing branch while it holds unpushed landings in
 local-main mode (unpushed_landings()).
@@ -52,6 +59,8 @@ import subprocess
 import sys
 
 PR, LOCAL = "pull request", "local main"
+AUTO_MERGE = "automatic merge"
+SAFE_DEFAULT = "the safe default"  # ends the check line of a pull request it could not tell
 SECTION = re.compile(r"^## Landing settings[ \t]*$(.*?)(?=^## |\Z)", re.M | re.S)
 # Ruleset rule types that make a direct push of a reviewed commit fail: it needs a pull request,
 # a merge queue, checks or a deployment first, or updates are blocked outright.
@@ -130,6 +139,11 @@ def landing_setting(path: str = ".") -> str | None:
                   git(path, "check-ref-format", "--branch", value).returncode != 0):
         raise SettingError(f"`landing branch` in HANDOFF.md is not a branch name: {value!r}")
     return value
+
+
+def automatic_merge(path: str = ".") -> bool:
+    """Whether the row `automatic merge` is `on`; off when it is missing or says anything else."""
+    return (row(settings_text(path), AUTO_MERGE) or "").lower() == "on"
 
 
 def landing_branch(path: str = ".") -> str:
@@ -331,7 +345,7 @@ def decide(path: str = ".") -> tuple[str, str, list]:
     setting = (row(text, "landing") or "auto").lower()
     checks.append(f"setting `landing`: {setting}" + ("" if row(text, "landing") else " (no row)"))
     if setting not in (PR, LOCAL, "auto"):
-        checks.append(f"unknown value {setting!r}: the safe default")
+        checks.append(f"unknown value {setting!r}: {SAFE_DEFAULT}")
         return PR, branch, checks
     if setting == PR:
         return PR, branch, checks
@@ -345,7 +359,7 @@ def decide(path: str = ".") -> tuple[str, str, list]:
             checks.append("remote origin: none (other remotes), server not checked: the setting "
                           "holds")
             return LOCAL, branch, checks
-        checks.append("remote origin: none, but other remotes: unknown, the safe default")
+        checks.append(f"remote origin: none, but other remotes: unknown, {SAFE_DEFAULT}")
         return PR, branch, checks
     m = GITHUB_URL.match(url)
     if not m:
@@ -353,7 +367,7 @@ def decide(path: str = ".") -> tuple[str, str, list]:
             checks.append("remote origin: not on github.com, server not checked: the setting "
                           "holds, and a push the server rejects stops there")
             return LOCAL, branch, checks
-        checks.append("remote origin: not on github.com: unknown, the safe default")
+        checks.append(f"remote origin: not on github.com: unknown, {SAFE_DEFAULT}")
         return PR, branch, checks
     repo = f"{m.group(1)}/{m.group(2)}"
     checks.append(f"remote origin: github.com/{repo}")
@@ -376,7 +390,7 @@ def decide(path: str = ".") -> tuple[str, str, list]:
             checks.append(f"server not checked ({e}): the setting holds, and a push the server "
                           "rejects stops there")
             return LOCAL, branch, checks
-        checks.append(f"unknown: {e}: the safe default")
+        checks.append(f"unknown: {e}: {SAFE_DEFAULT}")
         return PR, branch, checks
     return LOCAL, branch, checks
 
@@ -408,6 +422,8 @@ def main(argv: list) -> int:
         return 2
     for line in checks if explain else ():
         print(f"check: {line}")
+    if explain:
+        print(f"automatic merge: {'on' if automatic_merge(path) else 'off'}")
     print(f"landing branch: {branch}")
     print(f"landing: {mode}")
     return 0

@@ -52,12 +52,26 @@ repository lands finished work, and states the answer with its reasons on the is
   private repository cannot have protection at all; that counts as "no protection", not as
   unknown.
 
-In pull-request mode you merge, unless you grant automatic merging in the repository's
-`HANDOFF.md` (§Standing permissions) or in your own overlay: then an agent merges its own pull
-request through `merge_pr.py`, only with every required check green, an approving review of
-the head commit by another agent, the overlap result in the body, and no change to rules,
-guards, permission settings, hooks, the installer, CI or deployment configuration, the merge
-gate, or the grant and landing settings in `HANDOFF.md`.
+In pull-request mode you merge, unless you switch automatic merging on for that repository, like its
+landing mode: the row `automatic merge` with the value `on` in its `HANDOFF.md` §Landing settings
+(below); it is off by default, and an overlay cannot switch it on. Then an agent marks its own pull
+request ready and merges it through `merge_pr.py`, only with every required check green, an
+approving review of the head commit by another agent, the overlap result in the body, and no change
+to rules, guards, permission settings, hooks, the installer, CI or deployment configuration, the
+merge and push gates, or the switch and landing settings in `HANDOFF.md`.
+
+You also decide every push, unless you grant the push of an agent's own task branch with the
+line `standing grant | push_branch.py` (a table row works too): in the repository's
+`HANDOFF.md` §Standing permissions, or in your own overlay file outside the repository and
+outside the installed clone. Then the agent pushes through `push_branch.py` and opens its pull
+request without asking; the script reads the grant where the agent names it (a mere mention of
+the script is no grant), and pushes only the branch, only in pull-request mode read from the
+setting or from GitHub, with the `pre-push` template installed (so the secret scan and the
+personal-data check run on every outgoing commit), the overlap result in the body, and no
+change to the paths above; whatever it refuses still asks. The allow rule below holds in every
+repository, so the grant is what limits it: an overlay without that line, an employer's for
+example, grants nothing, and a personal overlay that has it says in which repositories it
+holds.
 
 A repository can fix its mode, and name a landing branch other than its default branch, in its
 `HANDOFF.md`; `local main` there cannot overrule a server that requires pull requests. Pull
@@ -216,10 +230,11 @@ straight to the address, which the sandbox refuses. The exact rules are in the g
 
 The issue-chats plugin works a repository's GitHub issues one chat per issue: a chat takes a
 ready issue, works on its own branch in a new worktree until the branch is ready to push, then
-starts the chat for the next ready issue and asks you for the push. It leaves the sidebar only
-once its commits are on GitHub. In a repository that lands on local main, a chat lands its work
-there, starts the next chat and archives itself; you push `main` when you want the landings
-published. Every push still waits for your yes. A side chat, one that another chat started
+starts the chat for the next ready issue and asks you for the push, or pushes under your grant
+(above). It then sees its pull request through review and CI to the merge, yours or, where you
+switched it on, its own, and leaves the sidebar only after the merge and its cleanup. In a
+repository that lands on local main, a chat lands its work there, starts the next chat and
+archives itself; you push `main` when you want the landings published. A side chat, one that another chat started
 with `start_session`, archives itself once its work has landed or its pull request merged, not
 when it is merely pushed. A repository switches it on
 with a `## Issue chats settings` section in its `HANDOFF.md`, merged like any other change; the
@@ -244,7 +259,16 @@ same across versions. Write the rule, and a `sandbox.excludedCommands` entry for
 each spelling the agents use: with `~` and with your home folder written out. Never name the
 copy under `~/.claude/plugins/cache/`: its folder names the plugin's version, and the entry
 silently stops matching after an update. `install.sh --update` names every entry that still
-points there, and changes none. An allow rule for
+points there, and changes none. Where you grant unasked pushes or switch automatic merging
+on, allow the core plugin's two gates the same way, never `git push`, `gh pr ready` or
+`gh pr merge` themselves:
+
+```json
+"Bash(python3 ~/.agentic-github-flow/plugins/core/scripts/push_branch.py *)",
+"Bash(python3 ~/.agentic-github-flow/plugins/core/scripts/merge_pr.py *)"
+```
+
+An allow rule for
 `mcp__ccd_session_mgmt__archive_session` lets chats archive themselves without a click; the
 plugin's hook still denies any archive whose worktree is not clean and on GitHub (or, in
 local-main mode, landed). The installer

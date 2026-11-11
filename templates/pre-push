@@ -22,9 +22,9 @@
 # - the secret scan: plugins/security/scripts/scan_secrets.py --commits;
 # - the personal-data check: plugins/guards/scripts/pre_tool_personal_data.py --commits;
 # - only when AGENTIC_GITHUB_FLOW_UNASKED_PUSH is set (not empty, not 0), the protected-path
-#   check: plugins/core/scripts/push_paths.py. Nothing sets it today; the route that pushes a
-#   task branch without the user's yes (#26) will set it for its own `git push`, so CI
-#   workflows, hooks, permission settings, the installer and rules/core.md still ask.
+#   check: plugins/core/scripts/push_paths.py. plugins/core/scripts/push_branch.py, the route
+#   that pushes a task branch without the user's yes (#26), sets it for its own `git push`, so
+#   CI workflows, hooks, permission settings, the installer and rules/core.md still ask.
 # Each script's header owns what it looks for. A finding refuses the push and names the rule,
 # the file and the commit, never the value. The checks fail closed: a missing clone or Python, a
 # script that cannot run, a pushed blob or tree refuses the push. Offline.

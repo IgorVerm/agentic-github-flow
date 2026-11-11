@@ -32,8 +32,9 @@ The issue stays open, assigned to you, until the push.
 
 ## 2. Independent review: the reviewer lands it
 
-1. **The author** hands over a clean branch at an exact commit S, with what was checked and what
-   is not covered (on the issue), and stops writing to it.
+1. **The author** hands over a clean branch at an exact commit S, with what was checked, what
+   is not covered and the `Efficient design:` line (SKILL step 4) on the issue, and stops
+   writing to it.
 2. **The reviewer,** a fresh session or subagent that did not write the change, reviews the diff
    and the evidence of S. What affects correctness or the stated requirements goes back to the
    author; a new author commit needs a new review.
@@ -48,7 +49,7 @@ The issue stays open, assigned to you, until the push.
    that result M, then the overlap check, then `promote_main.py <M>`. Its refusals are handled
    as in §1: a moved landing branch is merged into the integration branch and checked per §3.
 4. **It records** on the issue: the landing branch's commit before, S, the landed commit, the
-   reviewer, and which commit each check covered.
+   reviewer, which commit each check covered, and the `Efficient design:` line as checked.
 
 ## 3. When the landing branch moved: reusing evidence
 

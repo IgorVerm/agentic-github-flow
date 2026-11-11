@@ -56,7 +56,7 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
    The issue stays open and assigned; the merge closes it. **In local-main mode** land the work
    instead (`local-main.md` §1; for the independent route a subagent that did not write it
    reviews and lands it, §2), then the signed comment opens with
-   `landed on local <landing branch> at <commit>`: what landed, the checks, the overlap lines;
+   `landed on local <landing branch> at <commit>` and the fields of `local-main.md` §1;
    the issue stays open and assigned until the push's cleanup closes it. Landing refused: stop
    and report, no hand-over. A correction to an earlier comment is a new comment, never an edit. Each open question for the user stands on its owning issue,
    signed, with the question label.
@@ -135,8 +135,7 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
    claims its issue itself (method.md §4 step 1.2). Without the session tools, give the brief as
    one block for the user to paste into a new chat. Either way, report how the calls came back.
 6. **Tell the user and ask for the push,** in a few lines and in their language: what is ready
-   to push (`ship-change` step 6: the branch, how many commits, the checks and their results,
-   the overlap check's result, the pull request title, draft or ready); which chat started with
+   to push (what `ship-change` step 6 lists); which chat started with
    which model and effort, and its issue; anything that stopped you. Then end the turn: this
    chat waits for the yes and does not archive now. **In local-main mode** tell the user what
    landed (the commits and checks; the landing branch now holds unpushed landings, pushed on

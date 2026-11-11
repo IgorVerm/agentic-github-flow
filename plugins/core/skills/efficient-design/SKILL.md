@@ -61,8 +61,8 @@ Write the line of item 5 in the design note or the issue before building; it bec
 ## At review
 
 The reviewer goes through the checklist on the diff and checks the author's `Efficient design:`
-line against it, one entry per part that runs repeatedly, and corrects or rejects it, for
-example:
+line against it, one entry per part that runs repeatedly, and names any correction in its
+verdict; a wrong or missing line goes back to the author. For example:
 
 `Efficient design: building colours per frame O(changed buildings) via change filter; tooltip
 lookup O(1) map; full rebuild O(buildings) at load only.`

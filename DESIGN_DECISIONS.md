@@ -18,8 +18,7 @@ comment, the reviewer checks it against the diff, and a cost growing with all da
 changed would do goes back, unless its bound is stated.
 **Why not a hook:** a hook sees a command or a file, not a design.
 **Binds:** `rules/core.md` §How to work, `plugins/core/skills/efficient-design/SKILL.md`,
-`plugins/core/skills/ship-change/SKILL.md` steps 1, 4 and 6, `local-main.md` (the landing
-comment).
+`plugins/core/skills/ship-change/SKILL.md` steps 1, 4 and 6, `local-main.md` §1 and §2.
 **Detail:** issue #37.
 
 ## Agents may merge their own pull request under a standing grant, 2026-11-09

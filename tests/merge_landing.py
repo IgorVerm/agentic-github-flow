@@ -25,6 +25,8 @@ TOOL = os.path.join(ROOT, 'plugins', 'core', 'scripts', 'merge_landing.py')
 REMOVE = os.path.join(ROOT, 'plugins', 'core', 'scripts', 'remove_merged_worktree.py')
 ARCHIVABLE = os.path.join(ROOT, 'plugins', 'issue-chats', 'scripts', 'chat_archivable.py')
 CAN_PROTECT = os.name != 'nt' and os.geteuid() != 0
+sys.path.insert(0, os.path.join(ROOT, 'plugins', 'core', 'scripts'))
+import work_proof  # noqa: E402
 
 
 class FrozenMerge(unittest.TestCase):
@@ -307,6 +309,26 @@ class FrozenMerge(unittest.TestCase):
         code, out = self.tool('--abort')
         self.assertEqual(code, 1, out)
         self.assertIn('no merge in progress', out)
+
+    def test_abort_after_an_earlier_freeze_keeps_the_worktree_usable(self):
+        # second review of #54: on a writable disk the stopped merge deletes a file an earlier
+        # merge froze; --abort writes HEAD's version back and the manifest must follow it
+        self.land_on_main('main settings', writes=[('.claude/settings.json', 's2\n')])
+        self.assertEqual(self.tool('origin/main')[0], 0)  # disk keeps s1, HEAD has s2
+        self.write(self.wt, 'README.md', 'task\n')
+        self.commit(self.wt, 'task readme', 'README.md')
+        self.land_on_main('main deletes settings', writes=[('README.md', 'main\n')],
+                          deletes=['.claude/settings.json'])
+        code, out = self.tool('origin/main')
+        self.assertEqual(code, 1, out)
+        self.assertIsNone(work_proof.disk_state(self.wt, '.claude/settings.json'))
+        code, out = self.tool('--abort')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.read('.claude/settings.json'), 's2\n')
+        self.assertEqual(work_proof.frozen_unexplained(self.wt, ['.claude/settings.json']), [])
+        code, out = self.tool('origin/main')  # the same merge again: a conflict, not a refusal
+        self.assertEqual(code, 1, out)
+        self.assertNotIn('refused', out)
 
     def test_a_claude_conflict_resolved_in_another_worktree_comes_in_as_a_fast_forward(self):
         # review of #54, finding 3: the route ship-change step 2 gives for a .claude conflict

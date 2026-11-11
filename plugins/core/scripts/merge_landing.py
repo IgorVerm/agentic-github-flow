@@ -170,25 +170,36 @@ def settle(tree):
 def restore_missing(tree):
     """After `--abort`: a frozen file the stopped merge deleted (where the disk was writable)
     is back in the index, but git leaves a skip-worktree file off the disk. Write it back from
-    the index, which is HEAD's version, the one the manifest recorded; nothing is overwritten."""
+    the index, which is HEAD's version, and record that in the manifest: for a path frozen by an
+    earlier merge HEAD's version is newer than what was frozen, and both are in the history.
+    Nothing on disk is overwritten. Returns the paths it could not write back."""
     frozen = frozen_manifest(tree) or {}
     missing = [p for p in frozen if frozen[p] is not None and disk_state(tree, p) is None]
     if not missing:
-        return
+        return []
+    failed = []
     for record in zlist(git(tree, 'ls-files', '-s', '-z', '--', *missing).stdout):
         info, _, path = record.partition('\t')
         mode, blob = info.split()[:2]
         data = subprocess.run(['git', '-C', tree, 'cat-file', 'blob', blob],
                               capture_output=True).stdout
         full = os.path.join(tree, *path.split('/'))
-        os.makedirs(os.path.dirname(full), exist_ok=True)
-        if mode == '120000':
-            os.symlink(data.decode('utf-8', 'surrogateescape'), full)
-        else:
-            with open(full, 'wb') as handle:
-                handle.write(data)
-            if mode == '100755':
-                os.chmod(full, os.stat(full).st_mode | 0o111)
+        try:
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            if mode == '120000':  # Windows without the symlink privilege refuses this
+                os.symlink(data.decode('utf-8', 'surrogateescape'), full)
+            else:
+                with open(full, 'wb') as handle:
+                    handle.write(data)
+                if mode == '100755':
+                    os.chmod(full, os.stat(full).st_mode | 0o111)
+        except OSError as error:
+            failed.append(f'{path} ({error})')
+            continue
+        frozen[path] = disk_state(tree, path)
+    with open(git_path(tree, FROZEN_MANIFEST), 'w', encoding='utf-8') as handle:
+        handle.write(json.dumps({'frozen': frozen}, indent=1, sort_keys=True) + '\n')
+    return failed
 
 
 def main(argv):
@@ -216,7 +227,12 @@ def main(argv):
                              stdin=subprocess.DEVNULL)
         if run.returncode:
             return 1
-        restore_missing(tree)
+        failed = restore_missing(tree)
+        if failed:
+            print('merge aborted, but these frozen files could not be written back from HEAD: '
+                  + ', '.join(failed) + '; the cleanup keeps this worktree until they are',
+                  file=sys.stderr)
+            return 1
         return 0
     if git(tree, 'rev-parse', '-q', '--verify', ref + '^{commit}').returncode:
         print(f'not a commit: {ref}', file=sys.stderr)

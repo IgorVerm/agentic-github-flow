@@ -31,6 +31,14 @@
       "Run the unit tests for the parser module and tell me which fail."
     ]
   },
+  "review-change": {
+    "should": [
+      "Review pull request #42. Another agent wrote it and asked for an independent review before it merges."
+    ],
+    "should_not": [
+      "Address the review comments on my pull request #42 and push the fixes."
+    ]
+  },
   "cleanup-merged": {
     "should": [
       "I just pushed main with the landed fix for issue 7. Clean up its worktree and branch and close the issue."

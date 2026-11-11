@@ -47,15 +47,12 @@ The review route, in both modes:
   rollback (copy, documentation, an isolated fix that keeps existing contracts). You check it.
 - **Independent review:** anything larger or risky regardless of size: several components, a
   shared interface, a data migration, authentication, permissions, security, deployment,
-  dependencies, agent rules. A context that did not write the change reviews it: `/code-review`
-  in Claude Code, `/review` in Codex, run in a fresh session or subagent. In pull-request mode
-  that happens before the pull request is marked ready, and the repository's own required
-  reviewers still review it on GitHub; the reviewer's verdict is a comment on the pull
-  request signed with the role `review` (`🤖 <agent> (review): Approved <sha>`, the commit it
-  reviewed) or listing its findings. In
-  local-main mode the reviewer also lands it. A change
-  touching authentication, permissions, secrets, dependencies or deployment also gets the
-  `review-security` skill when it is installed.
+  dependencies, agent rules. A context that did not write the change reviews it with the
+  `review-change` skill, in a fresh session or a subagent given the pull request number: it
+  runs the client's code review, `review-security` where the change needs it, and posts the
+  verdict for the commit it reviewed in the form `merge_pr.py` reads. In pull-request mode that
+  happens before the pull request is marked ready, and the repository's own required reviewers
+  still review it on GitHub. In local-main mode the reviewer also lands it.
 
 On either route, whoever checks the change checks the `Efficient design:` line of step 4
 against the diff (the core rule *Work grows with what changed*).

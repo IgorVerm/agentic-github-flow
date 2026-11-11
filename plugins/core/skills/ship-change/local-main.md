@@ -36,8 +36,8 @@ The issue stays open, assigned to you, until the push.
    is not covered and the `Efficient design:` line (SKILL step 4) on the issue, and stops
    writing to it.
 2. **The reviewer,** a fresh session or subagent that did not write the change, reviews the diff
-   and the evidence of S. What affects correctness or the stated requirements goes back to the
-   author; a new author commit needs a new review.
+   and the evidence of S with the `review-change` skill. What affects correctness or the stated
+   requirements goes back to the author; a new author commit needs a new review.
 3. **It lands S.** `git fetch origin` first. When the local `<landing>` and the fetched
    `origin/<landing>` are both in S: the overlap check (SKILL step 5) on S's branch, then
    `promote_main.py <S>`. Otherwise it builds away from the landing branch:

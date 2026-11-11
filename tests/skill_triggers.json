@@ -15,6 +15,14 @@
       "Fix the failing test in tests/test_io.py."
     ]
   },
+  "efficient-design": {
+    "should": [
+      "Add a system that tints every building on the map by its owner's colour and keeps it right when ownership changes."
+    ],
+    "should_not": [
+      "Fix the typo in the README heading."
+    ]
+  },
   "ship-change": {
     "should": [
       "The fix for issue 12 is committed on my task branch and the tests pass. Land it the way this repository lands work."

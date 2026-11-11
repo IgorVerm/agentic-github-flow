@@ -26,6 +26,10 @@ Checked on 2026-11-10 (v2, the landing modes of #13, the sandbox-network guard o
     side chat started with `start_session` only once its work landed or its pull request merged. The method: `plugins/issue-chats/skills/issue-handover/method.md`.
     The automatic start of the next chat needs the Claude Code CLI and desktop app (measured on
     macOS only); Codex uses its own thread tools; elsewhere the chat hands over a brief to paste.
+- Efficient design (#37): the core skill `efficient-design` is a checklist at design and review
+  (work per frame, request or job run grows with what changed, not with all data), and the core
+  rule *Work grows with what changed* has the author write an `Efficient design:` line in the
+  pull request body or landing comment and the reviewer check it.
 - Landing modes (#13): finished work lands through a pull request or on local main, detected
   per repository at every landing by `plugins/core/scripts/landing.py` (its header owns the
   rule; a copy in the issue-chats plugin). Local main lands with `promote_main.py` and pushes

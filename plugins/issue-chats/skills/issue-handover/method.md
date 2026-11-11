@@ -370,12 +370,14 @@ so it loads them.
 
 **Optionally, for unattended chains,** narrow allow rules in the user's Claude Code settings,
 added by the user (an agent never edits its own permissions): `start_issue_chat.py` by the exact
-path of the installed script, in each spelling the agents write it; the read-only scripts
-(`next_issue.py`, `chat_archivable.py`, the core plugin's `overlap_check.py`) the same way; and
-`start_session`, `detach_session` and `request_keep_awake`; an allow rule for `archive_session`
-only together with the guard hook. Never a broad allow, and every ask and deny rule stays. The
-installed path names the plugin's version, so the rules are renewed after an update that raises
-it. The README of this repository has the rule's form.
+path of the script in the installer's clone (`~/.agentic-github-flow/plugins/<plugin>/scripts/`,
+where Claude Code loads the skills from), in each spelling the agents write it; the read-only
+scripts (`next_issue.py`, `chat_archivable.py`, the core plugin's `overlap_check.py`) the same
+way; and `start_session`, `detach_session` and `request_keep_awake`; an allow rule for
+`archive_session` only together with the guard hook. Never a broad allow, and every ask and deny
+rule stays. A rule or a sandbox exclusion never names the copy under `~/.claude/plugins/cache/`:
+its folder names the version, so an update silently breaks it; `install.sh --update` names each
+one left. The README of this repository has the rule's form.
 
 **Per repository,** on a branch, through a pull request the user approves:
 

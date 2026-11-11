@@ -10,6 +10,11 @@ Between pushes the local landing branch is ahead of origin's: `new_worktree.py` 
 check start from it then, and SKILL step 2 merges it in. A repository without a remote has
 nothing to fetch or push; `promote_main.py` says so and lands all the same.
 
+Land from a worktree, not from a session whose working directory is the primary checkout: when
+the landing branch changed `.claude/` or `.mcp.json`, the sandbox keeps that session from
+writing them there, and `merge_landing.py` refuses to freeze them in a primary checkout, where
+they would stay behind for good.
+
 ## 1. Small change: the author lands it
 
 After SKILL steps 1 to 3 and 5, from your worktree:
@@ -43,7 +48,10 @@ The issue stays open, assigned to you, until the push.
    `promote_main.py <S>`. Otherwise it builds away from the landing branch:
    `python3 <plugin>/scripts/new_worktree.py <n>-integrate --branch integrate/<n> --base <landing>`,
    there `git merge origin/<landing>` when the local `<landing>` lacks it, then
-   `git merge --no-ff <S>`. Conflicts whose combined intent is unclear go back to the
+   `git merge --no-ff <S>`: plain merges, since this worktree is not the reviewing session's
+   working directory and the sandbox does not protect its `.claude/`, so the gate runs on M's
+   own `.claude/`. A reviewer that is a session working in this worktree uses
+   `merge_landing.py` for both merges (SKILL step 2). Conflicts whose combined intent is unclear go back to the
    author or the user. A merge commit commits the whole reviewed merge index: stage the resolved
    paths by name, read the complete staged diff, then commit without paths. The full gate runs on
    that result M, then the overlap check, then `promote_main.py <M>`. Its refusals are handled

@@ -235,13 +235,16 @@ For chains that run without a click, allow the start script alone in `~/.claude/
 `--dangerously-skip-permissions`:
 
 ```json
-"Bash(python3 <plugin folder>/scripts/start_issue_chat.py *)"
+"Bash(python3 ~/.agentic-github-flow/plugins/issue-chats/scripts/start_issue_chat.py *)"
 ```
 
-`<plugin folder>` is where Claude Code installed the plugin: the folder two levels above the
-`issue-handover` skill's folder (a session can tell you where it loaded the skill from). Write
-the rule in each spelling the agents use for that path. The folder names the plugin's version,
-so renew the rule after an update raises it. An allow rule for
+Claude Code loads the plugin's skills from the installer's clone, `~/.agentic-github-flow`
+(measured with Claude Code 2.1.322), so the agents run the script by that path, which stays the
+same across versions. Write the rule, and a `sandbox.excludedCommands` entry for the script, in
+each spelling the agents use: with `~` and with your home folder written out. Never name the
+copy under `~/.claude/plugins/cache/`: its folder names the plugin's version, and the entry
+silently stops matching after an update. `install.sh --update` names every entry that still
+points there, and changes none. An allow rule for
 `mcp__ccd_session_mgmt__archive_session` lets chats archive themselves without a click; the
 plugin's hook still denies any archive whose worktree is not clean and on GitHub (or, in
 local-main mode, landed). The installer

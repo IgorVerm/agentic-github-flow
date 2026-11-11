@@ -27,7 +27,9 @@ First match wins:
                landing branch (unfetched: unknown), or someone else (not a bot) merged a pull
                request into it in the last 90 days: pull request.
   5. unknown   origin not on github.com, no gh, not signed in, a network or API error: pull
-               request.
+               request. Such a decision, and one for an unknown setting value, ends its check line
+               with SAFE_DEFAULT: safe for a merge, not for a push without asking, which
+               push_branch.py (beside this file) refuses on it.
   6. otherwise one writer, a User owner, no protection, no team signal: local main.
 
 The settings are read from HANDOFF.md as the default branch holds it, as last fetched
@@ -58,6 +60,7 @@ import sys
 
 PR, LOCAL = "pull request", "local main"
 AUTO_MERGE = "automatic merge"
+SAFE_DEFAULT = "the safe default"  # ends the check line of a pull request it could not tell
 SECTION = re.compile(r"^## Landing settings[ \t]*$(.*?)(?=^## |\Z)", re.M | re.S)
 # Ruleset rule types that make a direct push of a reviewed commit fail: it needs a pull request,
 # a merge queue, checks or a deployment first, or updates are blocked outright.
@@ -342,7 +345,7 @@ def decide(path: str = ".") -> tuple[str, str, list]:
     setting = (row(text, "landing") or "auto").lower()
     checks.append(f"setting `landing`: {setting}" + ("" if row(text, "landing") else " (no row)"))
     if setting not in (PR, LOCAL, "auto"):
-        checks.append(f"unknown value {setting!r}: the safe default")
+        checks.append(f"unknown value {setting!r}: {SAFE_DEFAULT}")
         return PR, branch, checks
     if setting == PR:
         return PR, branch, checks
@@ -356,7 +359,7 @@ def decide(path: str = ".") -> tuple[str, str, list]:
             checks.append("remote origin: none (other remotes), server not checked: the setting "
                           "holds")
             return LOCAL, branch, checks
-        checks.append("remote origin: none, but other remotes: unknown, the safe default")
+        checks.append(f"remote origin: none, but other remotes: unknown, {SAFE_DEFAULT}")
         return PR, branch, checks
     m = GITHUB_URL.match(url)
     if not m:
@@ -364,7 +367,7 @@ def decide(path: str = ".") -> tuple[str, str, list]:
             checks.append("remote origin: not on github.com, server not checked: the setting "
                           "holds, and a push the server rejects stops there")
             return LOCAL, branch, checks
-        checks.append("remote origin: not on github.com: unknown, the safe default")
+        checks.append(f"remote origin: not on github.com: unknown, {SAFE_DEFAULT}")
         return PR, branch, checks
     repo = f"{m.group(1)}/{m.group(2)}"
     checks.append(f"remote origin: github.com/{repo}")
@@ -387,7 +390,7 @@ def decide(path: str = ".") -> tuple[str, str, list]:
             checks.append(f"server not checked ({e}): the setting holds, and a push the server "
                           "rejects stops there")
             return LOCAL, branch, checks
-        checks.append(f"unknown: {e}: the safe default")
+        checks.append(f"unknown: {e}: {SAFE_DEFAULT}")
         return PR, branch, checks
     return LOCAL, branch, checks
 

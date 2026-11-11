@@ -118,12 +118,13 @@ where the branches meet.
 
 ## 6. Ask, or push under a standing grant
 
-**A standing grant** for the push of your own task branch (the repository's `HANDOFF.md`
-§Standing permissions, or an overlay the user installed, says so): go on with step 7 without
-asking. The grant covers only what
-[push_branch.py](../../scripts/push_branch.py) lets through (its header owns the conditions): your
-own task branch in pull-request mode, the pre-push hook installed, no path that leaves only on
-the user's word, the overlap result in the body. Whatever it refuses is asked as below.
+**A standing grant** for the push of your own task branch, written where
+[push_branch.py](../../scripts/push_branch.py) reads it (its header owns the conditions): the
+repository's `HANDOFF.md` §Standing permissions on the default branch, or an overlay file the
+user installed, outside the repository, naming `push_branch.py`. Then go on with step 7 without
+asking. The grant covers only what the script lets through: your task branch alone, pull-request
+mode read from the setting or from GitHub, the pre-push hook installed, no path that leaves only
+on the user's word, the overlap result in the body. Whatever it refuses is asked as below.
 
 **Otherwise,** one message to the user: the branch, how many commits, the checks and their
 results, the overlap check's result, the `Efficient design:` line, the pull request title, draft
@@ -132,12 +133,14 @@ one.
 
 ## 7. Push and open the pull request
 
-**Under the grant:** `python3 <plugin>/scripts/push_branch.py --grant "<where the grant is
-written>" --title "<title>" --body-file <file> --draft` in your worktree, as a single call. It
-checks, pushes your branch with the pre-push hook's protected-path check switched on, and opens
-the pull request. Exit 0: report its URL. Exit 1: it names each reason (a protected path, no
-hook, local-main mode, a refusal by the hook): nothing is opened; ask the user as in step 6 for
-that push. Never fall back to a bare `git push` without the user's yes.
+**Under the grant:** `python3 <plugin>/scripts/push_branch.py --grant <HANDOFF.md or the
+overlay file> --title "<title>" --body-file <file> --draft` in your worktree, as a single call.
+It checks, pushes your branch with the pre-push hook's protected-path check switched on, and
+opens the pull request. Exit 0: report its URL. Exit 1: it names each reason (a protected path,
+no hook, no grant where named, a refusal by the hook): nothing was pushed; ask the user as in
+step 6 for that push. Exit 3: the branch is pushed but the pull request was not opened: open it
+with `gh pr create` as below and report. Never fall back to a bare `git push` without the
+user's yes.
 
 **On the user's yes:**
 
@@ -163,7 +166,7 @@ Your own pull request, in pull-request mode, until it is merged or the user take
    merge automatically needs it on either route of step 1; on the small-change route without
    automatic merging, your own check of step 3 stands.
 3. **Findings and failures become new commits** on the branch (never `--amend`), pushed as in
-   step 7, under the grant without asking (`push_branch.py --grant "…"` alone: the pull request
+   step 7, under the grant without asking (`push_branch.py --grant <…>` alone: the pull request
    is open), and then a new review of the new head (item 2). A
    change in the landing branch is merged in (step 2); a review of an earlier head still counts
    across conflict-free merges of the landing branch alone (`merge_pr.py`'s header).

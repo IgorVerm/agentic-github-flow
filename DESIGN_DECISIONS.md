@@ -82,7 +82,8 @@ tests and documents may merge automatically. Paths compare without case.
 for; the excluded paths change what every later session may do, so they stay with the user.
 **Where the grant lives:** this repository grants nothing (`HANDOFF.md`: Standing permissions:
 None); the maintainer's grant is in a private overlay, so it never extends to other
-contributors. Narrowed on 2026-11-11 (above): only the repository's own switch counts. A bare `gh pr merge` stays an ask rule in the guards.
+contributors. Narrowed on 2026-11-11 (above): only the repository's own switch counts. A bare
+`gh pr merge` stays an ask rule in the guards.
 **Binds:** `rules/core.md` §Git, `plugins/core/scripts/merge_pr.py`, `tests/merge_pr.py`,
 `plugins/core/skills/ship-change/SKILL.md` steps 1, 4 and 7.
 **Detail:** issue #13.

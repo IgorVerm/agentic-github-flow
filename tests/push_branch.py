@@ -6,11 +6,15 @@ A bare origin on disk, a clone with the real templates/pre-push installed, and a
 holding the hook's scripts (as tests/pre_push_checks.py builds them); a stand-in `gh`
 (AGENTIC_GITHUB_FLOW_GH) answers `pr list` from a fixture and records `pr create`. A folder
 remote is not GitHub, so landing.py decides pull request unless HANDOFF.md says local main.
-The cases that push: a clean task branch, which then gets its pull request, and a later push to
-a branch whose pull request is open. Each refusal is one condition broken on its own: no grant
-named, the default branch, a detached HEAD, local-main mode, no hook or another hook, a
-protected path, no overlap result, a branch behind origin's; and the hook's own refusal (a
-secret) is the script's refusal. Planted values are built by concatenation. Offline.
+The cases that push: a clean task branch, which then gets its pull request, with the hook run
+under AGENTIC_GITHUB_FLOW_UNASKED_PUSH and no tag following the branch; a later push to a branch
+whose pull request is open; a grant in HANDOFF.md. Each refusal is one condition broken on its
+own: no grant, a grant file that is missing, inside the repository or silent on the script, a
+HANDOFF.md that grants nothing, the default branch, a detached HEAD, local-main mode,
+pull-request mode only as the safe default, no hook or another hook, a protected path, no
+overlap result, a branch behind origin's; the hook's own refusal (a secret) is the script's
+refusal; a pull request that cannot be opened after the push exits 3. Planted values are built
+by concatenation. Offline.
 """
 import json
 import os
@@ -27,6 +31,8 @@ from pre_push_checks import EMAIL, NAME, TOKEN, install_clone, install_hook  # n
 ROOT = os.path.abspath(os.path.join(HERE, '..'))
 TOOL = os.path.join(ROOT, 'plugins', 'core', 'scripts', 'push_branch.py')
 ROBOT = '\N{ROBOT FACE}'
+SETTINGS = ('# H\n\n## Landing settings\n\n| Setting | Value |\n|---|---|\n'
+            '| landing | `pull request` |\n')
 BODY = ROBOT + ' Claude Code (author): the change\n\nOverlap check: none\n\nCloses #7\n'
 
 STUB = r'''import json, os, sys
@@ -37,6 +43,8 @@ json.dump(s, open(os.environ['STUB_GH'], 'w'))
 if a[:2] == ['pr', 'list']:
     print(json.dumps(s.get('prs', []))); sys.exit(0)
 if a[:2] == ['pr', 'create']:
+    if s.get('create_fails'):
+        print('GraphQL: was submitted too quickly', file=sys.stderr); sys.exit(1)
     print('https://github.com/acme/tool/pull/8'); sys.exit(0)
 sys.exit(3)
 '''
@@ -67,7 +75,7 @@ class PushBranch(unittest.TestCase):
         self.repo = os.path.join(self.dir, 'repo')
         self.git(self.dir, 'init', '-q', '--bare', '-b', 'main', self.origin)
         self.git(self.dir, 'clone', '-q', self.origin, self.repo)
-        self.commit('README.md', 'start\n')
+        self.commit('HANDOFF.md', SETTINGS)
         self.git(self.repo, 'push', '-q', 'origin', 'main')  # no hook yet
         self.git(self.repo, 'remote', 'set-head', 'origin', 'main')
         install_hook(self.repo, self.env)
@@ -75,6 +83,10 @@ class PushBranch(unittest.TestCase):
         self.commit('plugins/core/skills/x/SKILL.md', 'a skill\n')
         self.body = os.path.join(self.dir, 'body.md')
         self.write_body(BODY)
+        self.overlay = os.path.join(self.dir, 'overlay', 'AGENTS.md')
+        os.makedirs(os.path.dirname(self.overlay))
+        with open(self.overlay, 'w') as f:
+            f.write('Push your own task branch through push_branch.py --grant <this file>.\n')
 
     def git(self, cwd, *args, check=True):
         r = subprocess.run(['git', *args], cwd=cwd, env=self.env, capture_output=True,
@@ -96,9 +108,10 @@ class PushBranch(unittest.TestCase):
         with open(self.body, 'w', encoding='utf-8') as f:
             f.write(text)
 
-    def run_tool(self, *args, prs=None, grant='agent-rules overlay, unasked push', pr=True):
+    def run_tool(self, *args, prs=None, grant='', pr=True, create_fails=False):
+        grant = self.overlay if grant == '' else grant
         with open(self.state, 'w') as f:
-            json.dump({'prs': prs or []}, f)
+            json.dump({'prs': prs or [], 'create_fails': create_fails}, f)
         cmd = [sys.executable, TOOL, '-C', self.repo, '-R', 'acme/tool', *args]
         if grant:
             cmd += ['--grant', grant]
@@ -133,7 +146,7 @@ class PushBranch(unittest.TestCase):
                                            '--head', 'agent/7-x', '--title', 'A change (#7)',
                                            '--body-file', self.body, '--draft']])
         self.assertIn('pull/8', r.stdout)
-        self.assertIn('agent-rules overlay', r.stdout)
+        self.assertIn(self.overlay, r.stdout)
         # no upstream written into the git configuration
         self.assertEqual(self.git(self.repo, 'config', '--get', 'branch.agent/7-x.remote',
                                   check=False), '')
@@ -150,6 +163,40 @@ class PushBranch(unittest.TestCase):
         self.assertRefused('no overlap check result', prs=[dict(open_pr[0], body='no line')],
                            pr=False)
 
+    def test_the_branch_alone_goes_out_whatever_the_push_settings(self):
+        self.git(self.repo, 'config', 'push.followTags', 'true')
+        self.git(self.repo, 'tag', '-a', '-m', 'release', 'v9')
+        r = self.run_tool()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.git(self.origin, 'tag', '--list'), '')
+
+    def test_the_hook_runs_with_the_protected_path_check_switched_on(self):
+        hook = os.path.join(self.repo, '.git', 'hooks', 'pre-push')
+        seen = os.path.join(self.dir, 'seen.txt')
+        with open(hook, 'w') as f:  # the marks, and a record of what the hook was given
+            f.write('#!/bin/sh\n# agentic-github-flow pre-push hook (stand-in)\n'
+                    'echo "${AGENTIC_GITHUB_FLOW_UNASKED_PUSH:-unset}" > "%s"\nexit 0\n'
+                    % seen.replace('\\', '/'))
+        os.chmod(hook, 0o755)
+        self.assertEqual(self.run_tool().returncode, 0)
+        with open(seen) as f:
+            self.assertEqual(f.read().strip(), '1')
+
+    def test_pushed_without_a_pull_request_exits_3(self):
+        r = self.run_tool(create_fails=True)
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        self.assertIn('was not opened', r.stdout)
+        self.assertNotEqual(self.on_origin(), '')
+
+    def test_a_grant_in_handoff(self):
+        self.git(self.repo, 'switch', '-q', 'main')
+        self.commit('HANDOFF.md', SETTINGS + '\n## Standing permissions\n\nUnasked push of own '
+                    'task branches through `push_branch.py`.\n')
+        self.git(self.repo, 'push', '-q', 'origin', 'main')
+        self.git(self.repo, 'switch', '-q', 'agent/7-x')
+        r = self.run_tool(grant='HANDOFF.md')
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
     def test_dry_run_pushes_nothing(self):
         r = self.run_tool('--dry-run')
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -158,6 +205,30 @@ class PushBranch(unittest.TestCase):
         self.assertEqual(self.created(), [])
 
     # --- each condition broken on its own refuses ---------------------------------------------
+
+    def test_the_grant_is_read_where_it_is_named(self):
+        self.assertRefused('cannot read the grant file', grant=self.overlay + '.missing')
+        silent = os.path.join(self.dir, 'other.md')
+        with open(silent, 'w') as f:
+            f.write('Ask before every push.\n')
+        self.assertRefused('does not name push_branch.py', grant=silent)
+        inside = os.path.join(self.repo, 'grant.md')
+        with open(inside, 'w') as f:
+            f.write('push_branch.py\n')
+        self.assertRefused('inside this repository', grant=inside)
+        self.assertRefused('§Standing permissions does not name', grant='HANDOFF.md')
+        # a grant written on the task branch alone does not count
+        self.commit('HANDOFF.md', SETTINGS + '\n## Standing permissions\n\npush_branch.py\n')
+        self.assertRefused('§Standing permissions does not name', grant='HANDOFF.md')
+        self.assertEqual(self.on_origin(), '')
+
+    def test_pull_request_mode_only_as_the_safe_default(self):
+        self.git(self.repo, 'switch', '-q', 'main')
+        self.commit('HANDOFF.md', '# H\n')
+        self.git(self.repo, 'push', '-q', 'origin', 'main')
+        self.git(self.repo, 'switch', '-q', 'agent/7-x')
+        self.assertRefused('only the safe default')
+        self.assertEqual(self.on_origin(), '')
 
     def test_usage(self):
         self.assertEqual(self.run_tool(grant=None).returncode, 2)

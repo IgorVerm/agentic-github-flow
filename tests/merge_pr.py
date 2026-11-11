@@ -6,13 +6,15 @@ stand-in `gh` (AGENTIC_GITHUB_FLOW_GH) answers `pr view` from a fixture and reco
 A folder remote is not GitHub, so landing.py decides pull request unless HANDOFF.md says local
 main. Each case is a way an agent could merge what it may not: automatic merging off in
 HANDOFF.md's Landing settings (no row, `off`, another value, or the row in another section,
-whatever --grant says), local-main mode, a draft without --ready, a merge state other than CLEAN, a failed, pending or missing check, no review, a review
-that does not approve or was edited after posting, an approval of an older commit followed by a commit of the author or by
-a merge with a conflict resolved by hand, no overlap result, a path that merges only on the
-user's word (built in, or named in HANDOFF.md), and a base other than the landing branch. And the
-cases that may merge: a review of the head, and of a commit followed only by a clean merge of
-the base; with --ready a draft is marked ready first and merged only once GitHub calls it CLEAN. The review comment that review_verdict.py writes is accepted, and hand-written
-variants that deviate from it are refused. Offline: no network, no real gh.
+whatever --grant says), local-main mode, a draft without --ready, a merge state other than
+CLEAN, a failed, pending or missing check, no review, a review that does not approve or was
+edited after posting, an approval of an older commit followed by a commit of the author or by a
+merge with a conflict resolved by hand, no overlap result, a path that merges only on the user's
+word (built in, or named in HANDOFF.md), and a base other than the landing branch. And the cases
+that may merge: a review of the head, and of a commit followed only by a clean merge of the
+base; with --ready a draft is marked ready first and merged only once GitHub calls it CLEAN. The
+review comment that review_verdict.py writes is accepted, and hand-written variants that deviate
+from it are refused. Offline: no network, no real gh.
 """
 import json
 import os

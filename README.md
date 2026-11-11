@@ -52,20 +52,24 @@ repository lands finished work, and states the answer with its reasons on the is
   private repository cannot have protection at all; that counts as "no protection", not as
   unknown.
 
-In pull-request mode you merge, unless you switch automatic merging on for that repository,
-like its landing mode: the row `automatic merge` with the value `on` in its `HANDOFF.md`
-§Landing settings (below); it is off by default, and an overlay cannot switch it on. Then an agent marks its own pull request ready
-and merges it through `merge_pr.py`, only with every required check green, an approving review
-of the head commit by another agent, the overlap result in the body, and no change to rules,
-guards, permission settings, hooks, the installer, CI or deployment configuration, the merge
-and push gates, or the switch and landing settings in `HANDOFF.md`.
+In pull-request mode you merge, unless you switch automatic merging on for that repository, like its
+landing mode: the row `automatic merge` with the value `on` in its `HANDOFF.md` §Landing settings
+(below); it is off by default, and an overlay cannot switch it on. Then an agent marks its own pull
+request ready and merges it through `merge_pr.py`, only with every required check green, an
+approving review of the head commit by another agent, the overlap result in the body, and no change
+to rules, guards, permission settings, hooks, the installer, CI or deployment configuration, the
+merge and push gates, or the switch and landing settings in `HANDOFF.md`.
 
-You also decide every push, unless you grant the push of an agent's own task branch in the
-repository's `HANDOFF.md` (§Standing permissions) or in your own overlay. Then the agent pushes
-through `push_branch.py` and opens its pull request without asking, only in pull-request mode,
-with the `pre-push` template installed (so the secret scan and the personal-data check run on
-every outgoing commit), the overlap result in the body, and no change to the paths above;
-whatever it refuses still asks.
+You also decide every push, unless you grant the push of an agent's own task branch: in the
+repository's `HANDOFF.md` §Standing permissions, or in your own overlay file outside the
+repository, by naming `push_branch.py` there. Then the agent pushes through `push_branch.py` and
+opens its pull request without asking; the script reads the grant where the agent names it, and
+pushes only the branch, only in pull-request mode read from the setting or from GitHub, with
+the `pre-push` template installed (so the secret scan and the personal-data check run on every
+outgoing commit), the overlap result in the body, and no change to the paths above; whatever it
+refuses still asks. The allow rule below holds in every repository, so the grant is what
+limits it: an overlay that does not name the script, an employer's for example, grants
+nothing.
 
 A repository can fix its mode, and name a landing branch other than its default branch, in its
 `HANDOFF.md`; `local main` there cannot overrule a server that requires pull requests. Pull

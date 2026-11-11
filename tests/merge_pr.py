@@ -6,11 +6,12 @@ stand-in `gh` (AGENTIC_GITHUB_FLOW_GH) answers `pr view` from a fixture and reco
 A folder remote is not GitHub, so landing.py decides pull request unless HANDOFF.md says local
 main. Each case is a way an agent could merge what it may not: no grant named, local-main mode,
 a draft, a merge state other than CLEAN, a failed, pending or missing check, no review, a review
-that does not approve, an approval of an older commit followed by a commit of the author or by
+that does not approve or was edited after posting, an approval of an older commit followed by a commit of the author or by
 a merge with a conflict resolved by hand, no overlap result, a path that merges only on the
 user's word (built in, or named in HANDOFF.md), and a base other than the landing branch. And the
 cases that may merge: a review of the head, and of a commit followed only by a clean merge of
-the base. Offline: no network, no real gh.
+the base. The review comment that review_verdict.py writes is accepted, and hand-written
+variants that deviate from it are refused. Offline: no network, no real gh.
 """
 import json
 import os
@@ -21,6 +22,7 @@ import unittest
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 TOOL = os.path.join(ROOT, 'plugins', 'core', 'scripts', 'merge_pr.py')
+VERDICT = os.path.join(ROOT, 'plugins', 'core', 'scripts', 'review_verdict.py')
 ROBOT = '\N{ROBOT FACE}'
 
 STUB = r'''import json, os, sys
@@ -103,7 +105,7 @@ class MergePr(unittest.TestCase):
         return pr
 
     def comment(self, text, role='review', login='me', when='2026-11-09T10:00:00Z'):
-        return {'createdAt': when, 'author': {'login': login},
+        return {'createdAt': when, 'author': {'login': login}, 'includesCreatedEdit': False,
                 'body': ROBOT + ' Claude Code (%s): %s' % (role, text)}
 
     def run_tool(self, pr, *args, grant='HANDOFF.md Standing permissions', api=None):
@@ -188,7 +190,7 @@ class MergePr(unittest.TestCase):
         as_review = self.pr(comments=[], reviews=[{'submittedAt': '2026-11-09T10:00:00Z',
                                                    'state': 'COMMENTED', 'author': {'login': 'me'},
                                                    'body': approve['body']}])
-        self.assertMerged(as_review)
+        self.assertRefused(as_review, 'never approves')  # gh cannot tell if it was edited
         # a stranger's approval, a self-review, a pending review and a negative text never count
         self.assertRefused(self.pr(comments=[self.comment('Approved %s' % self.head,
                                                           login='stranger')]), 'no signed review')
@@ -205,6 +207,71 @@ class MergePr(unittest.TestCase):
                                     {'login': 'me'}, 'state': 'CHANGES_REQUESTED', 'body': ''}])
         self.assertRefused(changes, 'does not approve')
         self.assertRefused(self.pr(reviewDecision='CHANGES_REQUESTED'), 'requests changes')
+
+    def verdict_script(self, *args):
+        """The comment review_verdict.py would post, from its --dry-run, with the same stub."""
+        with open(self.state, 'w') as f:
+            json.dump({'pr': self.pr(), 'api': {}}, f)
+        env = dict(os.environ, STUB_GH=self.state,
+                   AGENTIC_GITHUB_FLOW_GH=json.dumps([sys.executable, self.stub]))
+        r = subprocess.run([sys.executable, VERDICT, *args, '--dry-run', '-C', self.repo,
+                            '-R', 'acme/tool'], capture_output=True, text=True, env=env,
+                           encoding='utf-8')
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return {'createdAt': '2026-11-09T10:00:00Z', 'author': {'login': 'me'}, 'body': r.stdout,
+                'includesCreatedEdit': False}
+
+    def test_the_review_skills_comment_is_accepted(self):
+        approval = self.verdict_script('approve', '7', '--sha', self.head, '--agent',
+                                       'Claude Code', '--note', 'No findings.')
+        self.assertMerged(self.pr(comments=[approval]), '--dry-run')
+        path = os.path.join(self.tmp.name, 'findings.md')
+        with open(path, 'w') as f:
+            f.write('Approved %s\n1. a finding\n' % self.head)
+        findings = self.verdict_script('findings', '7', '--sha', self.head, '--agent', 'Codex',
+                                       '--body-file', path)
+        later = dict(findings, createdAt='2026-11-09T11:00:00Z')
+        self.assertRefused(self.pr(comments=[approval, later]), 'does not approve')
+
+    def test_hand_written_variants_are_refused(self):
+        sha = self.head
+        for body in ('Approved %s' % sha,                                     # unsigned
+                     ROBOT + ' Claude Code (review) Approved %s' % sha,        # no colon
+                     ROBOT + ' Claude Code (review): Approve %s' % sha,        # not "Approved"
+                     ROBOT + ' Claude Code (review): LGTM, approved %s' % sha,
+                     ROBOT + ' Claude Code (review): Approved, %s' % sha,
+                     ROBOT + ' Claude Code (review): Approved %s' % sha[:6],   # too short
+                     ROBOT + ' Claude Code (review): Approved %sx' % sha,      # not a SHA
+                     ROBOT + ' Claude Code (review): Approved head',
+                     ROBOT + ' Claude Code (author): Approved %s' % sha,       # not the reviewer
+                     ROBOT + ' Claude Code (review): Approved %s' % ('0' * 40)):  # unknown commit
+            with self.subTest(body=body):
+                comment = {'createdAt': '2026-11-09T10:00:00Z', 'author': {'login': 'me'},
+                           'body': body, 'includesCreatedEdit': False}
+                r = self.run_tool(self.pr(comments=[comment]))
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertRegex(r.stdout, 'no signed review|does not approve|not in this '
+                                           'repository')
+                self.assertEqual(self.merged(), [])
+
+    def test_an_edited_review_never_approves(self):
+        edited = dict(self.comment('Approved %s' % self.head), includesCreatedEdit=True)
+        self.assertRefused(self.pr(comments=[edited]), 'edited after it was posted')
+        older = self.comment('Approved %s' % self.head, when='2026-11-09T09:00:00Z')
+        self.assertRefused(self.pr(comments=[older, edited]), 'edited after it was posted')
+        unknown = dict(edited)
+        del unknown['includesCreatedEdit']  # a gh that does not report it: counts as edited
+        self.assertRefused(self.pr(comments=[unknown]), 'edited after it was posted')
+        newer = self.comment('Approved %s' % self.head, when='2026-11-09T11:00:00Z')
+        self.assertMerged(self.pr(comments=[edited, newer]), '--dry-run')
+
+    def test_a_ref_named_like_the_prefix_does_not_count(self):
+        reviewed = self.head
+        self.head = self.change('skills.md', 'unreviewed\n')
+        self.git('tag', reviewed[:10], self.head)
+        self.git('push', '-q', 'origin', 'refs/tags/' + reviewed[:10])
+        self.assertRefused(self.pr(comments=[self.comment('Approved %s' % reviewed[:10])]),
+                           'not unique')
 
     def test_approval_of_an_older_commit(self):
         reviewed = self.head
@@ -253,7 +320,8 @@ class MergePr(unittest.TestCase):
         for path in ('rules/core.md', '.github/workflows/ci.yml', 'plugins/guards/x.py',
                      '.claude/settings.json', 'AGENTS.md', 'tools/installer.py', 'vercel.json',
                      'Agents.md', 'Plugins/Guards/x.py', 'plugins/core/scripts/merge_pr.py',
-                     'plugins/x/hooks/hooks.json', '.github/dependabot.yml'):
+                     'plugins/x/hooks/hooks.json', '.github/dependabot.yml',
+                     'plugins/core/scripts/review_verdict.py'):
             with self.subTest(path=path):
                 self.head = self.change(path, 'x\n')
                 self.assertRefused(self.pr(), "merge only on the user's word")

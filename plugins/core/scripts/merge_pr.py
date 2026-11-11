@@ -23,8 +23,15 @@ when all hold:
   review    the newest signed review by the signed-in account (agents post under the user's
             account; a stranger's or a pending review never counts), with the role `review` or
             `reviewer` (`🤖 <agent> (review): Approved <sha>`), approves: it opens with
-            `Approved` and the SHA. That the reviewer did not write the change is its
-            attestation. <sha> is the head commit, or an earlier commit on the head's own line
+            `Approved` and the SHA. review_verdict.py (beside this file, posted by the
+            review-change skill) owns that format; this script reads it through its verdict().
+            That the reviewer did not write the change is its attestation. Only a pull request
+            comment approves, and not once it was edited after posting (`includesCreatedEdit`;
+            missing counts as edited): anyone signed in as the account can edit it, the
+            author's session too. A GitHub review's body never approves, since gh does not
+            report whether it was edited; it still blocks. A SHA prefix counts only where git
+            resolves it to one commit that starts with it (a ref named like the prefix does
+            not). <sha> is the head commit, or an earlier commit on the head's own line
             followed only by two-parent merges of the base branch whose tree is git's own merge
             result (no conflict resolved, nothing edited), so a merge of the default branch
             after the review needs only green checks again. A newer review of that account
@@ -59,6 +66,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from landing import (PR, GITHUB_URL, SettingError, Unknown, decide, gh_command,  # noqa: E402
                      gh_json, row, settings_text)
+from review_verdict import verdict  # noqa: E402
 
 # Paths that merge only on the user's word: the always-loaded rules and a repository's own
 # rules, this gate itself, guards, permission settings, hooks and plugin manifests (which can
@@ -66,7 +74,7 @@ from landing import (PR, GITHUB_URL, SettingError, Unknown, decide, gh_command, 
 EXCLUDED = (
     "rules/core.md", "AGENTS.md", "*/AGENTS.md", "AGENTS.override.md", "*/AGENTS.override.md",
     "CLAUDE.md", "*/CLAUDE.md",
-    "*/merge_pr.py", "*/landing.py",
+    "*/merge_pr.py", "*/landing.py", "*/review_verdict.py",
     "plugins/guards/*", "*/settings.json", "*/settings.local.json", ".claude/*", ".codex/*",
     "*.claude-plugin/*", "*.codex-plugin/*", ".agents/*",  # but see MANIFESTS
     "hooks/*", "plugins/*/hooks/*", "hooks.json", "*/hooks.json", "templates/pre-push",
@@ -83,9 +91,6 @@ MANIFESTS = ("*.claude-plugin/*.json", "*.codex-plugin/*.json", ".agents/plugins
 GUARDED_SECTIONS = ("Standing permissions", "Landing settings")
 GUARDED_LINE = re.compile(r"standing permission|landing setting", re.I)
 PASSED_RUNS = {"SUCCESS", "NEUTRAL", "SKIPPED"}
-REVIEW_ROLES = {"review", "reviewer"}
-SIGNED = re.compile(r"\A\s*\N{ROBOT FACE}\s*[^\n(]*\(([^)\n]*)\):\s*(?:\*\*)?(.*)", re.S)
-APPROVED = re.compile(r"\Aapproved(?:\*\*)?\s*:?\s*`?([0-9a-f]{7,40})`?(?=[\s.,;:)]|$)", re.I)
 OVERLAP = re.compile(r"^\s*(?:[-*]\s*)?(?:\*\*)?overlap", re.I | re.M)
 
 
@@ -225,37 +230,42 @@ def changes_requested(pr: dict) -> list:
 
 def review_reason(path: str, pr: dict, login: str, head: str, base_ref: str) -> tuple:
     """(reason or None, what was found), from the comments and submitted reviews of <login>."""
-    events = []  # (time, kind, state, body)
+    events = []  # (time, kind, state, body, edited)
     for c in pr.get("comments") or []:
         if ((c or {}).get("author") or {}).get("login", "").lower() == login.lower():
-            events.append((str(c.get("createdAt") or ""), "comment", "", c.get("body") or ""))
+            events.append((str(c.get("createdAt") or ""), "comment", "", c.get("body") or "",
+                           c.get("includesCreatedEdit") is not False))
     for r in pr.get("reviews") or []:
         state = str((r or {}).get("state") or "").upper()
         if state == "PENDING" or not (r or {}).get("submittedAt"):
             continue
         if ((r or {}).get("author") or {}).get("login", "").lower() == login.lower():
-            events.append((str(r.get("submittedAt")), "review", state, r.get("body") or ""))
+            events.append((str(r.get("submittedAt")), "review", state, r.get("body") or "",
+                           True))  # gh does not fetch includesCreatedEdit for reviews
     events.sort(key=lambda e: e[0])  # ISO 8601 strings sort by time
     verdicts = []  # (time, approved sha or None, text)
-    for when, kind, state, body in events:
-        m = SIGNED.match(body)
-        signed = m and m.group(1).strip().lower() in REVIEW_ROLES
+    for when, kind, state, body, edited in events:
+        signed = verdict(body)
         if kind == "review" and state == "CHANGES_REQUESTED":
             verdicts.append((when, None, "changes requested"))
+        elif signed and kind == "review":
+            verdicts.append((when, None, "a GitHub review, which never approves: post the "
+                             "approval as a comment (the review-change skill)"))
+        elif signed and edited:
+            verdicts.append((when, None, "edited after it was posted; post a new review"))
         elif signed:
-            text = m.group(2).strip()
-            a = APPROVED.match(text)
-            verdicts.append((when, a.group(1).lower() if a else None, text))
+            verdicts.append((when, *signed))
     if not verdicts:
         return ("no signed review by this account (`🤖 <agent> (review): Approved <sha>`)", "")
     _, token, text = verdicts[-1]
     if not token:
         return f"the newest review does not approve: {text[:80]!r}", ""
-    if head.startswith(token):
-        return None, f"approved at the head {head[:10]}"
-    resolved = git(path, "rev-parse", "-q", "--verify", token + "^{commit}").stdout.strip()
-    if not resolved:
+    resolved = head if token == head else \
+        git(path, "rev-parse", "-q", "--verify", token + "^{commit}").stdout.strip()
+    if not resolved or not resolved.startswith(token):
         return f"the approved commit {token} is not in this repository (or not unique)", ""
+    if resolved == head:
+        return None, f"approved at the head {head[:10]}"
     why = clean_base_merges(path, resolved, head, base_ref)
     if why:
         return f"approved {resolved[:10]}, but {why}: review the head again", ""

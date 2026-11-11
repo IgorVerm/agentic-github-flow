@@ -1,6 +1,6 @@
 # agentic-github-flow: current state
 
-Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard of #20, the pre-push checks of #40).
+Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard of #20, the pre-push checks of #40, the reviewer skill of #39).
 
 ## State
 
@@ -38,7 +38,9 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
   overlap and cleanup scripts and `templates/pre-push` follow that branch.
 - Automatic merging (#13, `DESIGN_DECISIONS.md`): under a standing grant, `merge_pr.py` merges
   an agent's own pull request when its checks, review, overlap line and paths allow it. This
-  repository grants nothing (Standing permissions below).
+  repository grants nothing (Standing permissions below). The review it needs comes from the
+  core skill `review-change` (#39), whose `review_verdict.py` writes the verdict comment and
+  owns its format; `merge_pr.py` parses it through the same module.
 - The pre-push hook (#40): besides force pushes, tag moves and unmerged deletions,
   `templates/pre-push` refuses every push whose outgoing commits carry a secret
   (`scan_secrets.py --commits`) or personal data (`pre_tool_personal_data.py --commits`), run
@@ -68,7 +70,7 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
 | a skill | its `SKILL.md`, `plugins/core/skills/repo-docs/skill-standard.md`, `tests/skills_format.py` |
 | the installer | `tools/installer.py` (its docstring owns the behaviour), `tests/installer.py` |
 | the guards | `plugins/guards/scripts/*.py` headers, `plugins/guards/policy/*.rules`, `tests/git_guard.py`, `tests/delete_guard.py` (cases in `tests/delete_guard_cases.py`; `tests/delete_guard_differential.py` checks it never asks less than before issue 4), `tests/personal_data_guard.py`, `tests/sandbox_network_guard.py` (with `--guards sandbox` in `tools/installer.py`), `tests/codex_policy.py` |
-| automatic merging | `plugins/core/scripts/merge_pr.py` header, `DESIGN_DECISIONS.md`, `tests/merge_pr.py` |
+| automatic merging | `plugins/core/scripts/merge_pr.py` and `review_verdict.py` headers, `plugins/core/skills/review-change/SKILL.md`, `DESIGN_DECISIONS.md`, `tests/merge_pr.py`, `tests/review_verdict.py` |
 | landing modes | `plugins/core/scripts/landing.py` and `promote_main.py` headers, `plugins/core/skills/ship-change/` (`SKILL.md`, `local-main.md`), `tests/landing.py`, `tests/promote_main.py` |
 | worktrees and cleanup | `plugins/core/scripts/*.py` headers, `plugins/core/skills/cleanup-merged/SKILL.md`, `tests/worktree_tools.py`, `tests/new_worktree.py`, `tests/overlap_check.py` |
 | the security scanners | `plugins/security/scripts/*.py` headers, `plugins/security/skills/review-security/sources.md`, `tests/scan_secrets.py`, `tests/audit_dependencies.py` |

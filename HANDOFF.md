@@ -1,6 +1,6 @@
 # agentic-github-flow: current state
 
-Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard of #20, the pre-push checks of #40, the reviewer skill of #39).
+Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard of #20, the pre-push checks of #40, the reviewer skill of #39, issue chats switched on by #51).
 
 ## State
 
@@ -86,6 +86,22 @@ requests, whatever the detection would say about its one writer.
 |---|---|
 | landing | `pull request` |
 
+## Issue chats settings
+
+The method: the `issue-handover` skill's method file (agentic-github-flow-issue-chats plugin).
+This section switches on its standing permission in this repository: picking and claiming the
+next ready issue, starting its chat, and archiving chats that pass the worktree check. Every
+push, merge and ready-marking stays on the user's word. Switched on by Igor, 2026-11-11: "zet de
+knop aan" (#51).
+
+| Setting | Value |
+|---|---|
+| model and effort | `claude-opus-5-5`, `high` |
+| ready label | `agent-ready` |
+| area labels | none |
+| spread over areas | `no` |
+| sidebar section | `agentic-github-flow` |
+
 ## Standing permissions
 
-None.
+None beyond §Issue chats settings.

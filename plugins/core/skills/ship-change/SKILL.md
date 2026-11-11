@@ -57,8 +57,8 @@ The review route, in both modes:
   touching authentication, permissions, secrets, dependencies or deployment also gets the
   `review-security` skill when it is installed.
 
-On either route, whoever checks the change states the `efficient-design` result with the
-verdict (the core rule *Work grows with what changed*).
+On either route, whoever checks the change checks the `Efficient design:` line of step 4
+against the diff (the core rule *Work grows with what changed*).
 
 One sentence on the issue is enough: the mode with its reason, the route and why. When you start
 work on an issue that has no assignee, assign it to the account you post under
@@ -88,7 +88,9 @@ unclear go to the user.
 
 Write the title and body to a file outside the repository. The body starts with
 `🤖 <agent> (<role>):` and holds what changed and why, how it was checked, what is not covered,
-a line `Overlap check: <result>` (step 5), and `Closes #<n>` for the issue it finishes (a closing keyword is right here: the merge is the
+a line `Overlap check: <result>` (step 5), a line `Efficient design: <result>` (the
+`efficient-design` skill; `no part runs repeatedly or over growing data` when that is so), and
+`Closes #<n>` for the issue it finishes (a closing keyword is right here: the merge is the
 verified publication). Draft or ready: draft while an independent review is still open.
 
 ## 5. The overlap check
@@ -116,8 +118,8 @@ where the branches meet.
 ## 6. Ask
 
 One message to the user: the branch, how many commits, the checks and their results, the
-overlap check's result, the pull request title, draft or ready. Wait for an explicit yes for
-this push. A yes for an earlier push does not cover this one.
+overlap check's result, the `Efficient design:` line, the pull request title, draft or ready.
+Wait for an explicit yes for this push. A yes for an earlier push does not cover this one.
 
 ## 7. Push and open the pull request
 

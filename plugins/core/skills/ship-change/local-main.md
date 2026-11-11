@@ -27,7 +27,7 @@ landings at once git lets one through.
 
 Then one signed comment on the issue, and in the same landing, when the repository keeps
 `archive_implementations.md`, its line `YYYY-MM-DD — <item> (#n) — landed <commit>`:
-`🤖 <agent> (<role>): Landed on local <landing> at <sha>: <what>; checks: <what ran, result>; overlap: <result>`.
+`🤖 <agent> (<role>): Landed on local <landing> at <sha>: <what>; checks: <what ran, result>; overlap: <result>; efficient design: <result>` (SKILL step 4).
 The issue stays open, assigned to you, until the push.
 
 ## 2. Independent review: the reviewer lands it

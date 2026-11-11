@@ -27,7 +27,8 @@ Checked on 2026-11-09 (v2, and the landing modes of #13).
     macOS only); Codex uses its own thread tools; elsewhere the chat hands over a brief to paste.
 - Efficient design (#37): the core skill `efficient-design` is a checklist at design and review
   (work per frame, request or job run grows with what changed, not with all data), and the core
-  rule *Work grows with what changed* has the reviewer or integrator state its result.
+  rule *Work grows with what changed* has the author write an `Efficient design:` line in the
+  pull request body or landing comment and the reviewer check it.
 - Landing modes (#13): finished work lands through a pull request or on local main, detected
   per repository at every landing by `plugins/core/scripts/landing.py` (its header owns the
   rule; a copy in the issue-chats plugin). Local main lands with `promote_main.py` and pushes

@@ -13,12 +13,13 @@ efficientere oplossing" (I often have to ask this question and there often is a 
 solution).
 **What:** the core skill `efficient-design`, a checklist loaded at design and at review for
 games, web apps, data pipelines and tools; the core rule *Work grows with what changed, not with
-all data*: the reviewer or integrator of a change states the checklist's result, and a cost
-growing with all data where it could grow with what changed goes back, unless its bound is
-stated.
+all data*: the author writes an `Efficient design:` line in the pull request body or landing
+comment, the reviewer checks it against the diff, and a cost growing with all data where what
+changed would do goes back, unless its bound is stated.
 **Why not a hook:** a hook sees a command or a file, not a design.
 **Binds:** `rules/core.md` §How to work, `plugins/core/skills/efficient-design/SKILL.md`,
-`plugins/core/skills/ship-change/SKILL.md` step 1.
+`plugins/core/skills/ship-change/SKILL.md` steps 1, 4 and 6, `local-main.md` (the landing
+comment).
 **Detail:** issue #37.
 
 ## Agents may merge their own pull request under a standing grant, 2026-11-09

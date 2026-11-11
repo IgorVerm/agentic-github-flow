@@ -43,9 +43,9 @@ policy is and which data may go into a prompt, and follow the answer.
   give a better statement of the task for a fresh session.
 - **Measure instead of guessing.** A claim about performance, counts or behaviour comes from a
   measurement when one is cheap; report the number and its source, and label estimates.
-- **Work grows with what changed, not with all data** (the `efficient-design` skill). A
-  change's reviewer or integrator states the checklist's result; a cost growing with all data
-  where it could grow with what changed goes back, unless its bound is stated.
+- **Work grows with what changed, not with all data** (the `efficient-design` skill). The
+  author writes the `Efficient design:` line, the reviewer checks it; a cost growing with all
+  data where what changed would do goes back, unless its bound is stated.
 - **Code and git are the current state; documents explain why.** Before you rely on a path,
   command or count a document names, check it exists and correct the document if not.
 - **Fix the cause** with the smallest change that is correct at the layer where it lives.

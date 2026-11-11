@@ -17,7 +17,7 @@
   },
   "efficient-design": {
     "should": [
-      "Review this change: the dashboard now recomputes the totals of every order on each page request."
+      "Add a system that tints every building on the map by its owner's colour and keeps it right when ownership changes."
     ],
     "should_not": [
       "Fix the typo in the README heading."

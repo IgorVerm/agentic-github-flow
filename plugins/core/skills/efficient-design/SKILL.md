@@ -1,6 +1,6 @@
 ---
 name: efficient-design
-description: Check that the work a change does per frame, tick, request, render, job run or keystroke grows with what changed, not with all the data - a short checklist for games, web apps, data pipelines and tools. Use when designing code that runs repeatedly or over growing data, and when reviewing or integrating a change before it lands.
+description: Check that the work a change does per frame, tick, request, render, job run or keystroke grows with what changed, not with all the data - a short checklist for games, web apps, data pipelines and tools. Use when designing or changing code that runs repeatedly (a system, handler, loop, query, scheduled job) or over growing data, when asked whether something is efficient or scales, and when reviewing a change before it lands.
 ---
 
 # Work grows with what changed, not with all data
@@ -15,10 +15,12 @@ Go through it for each part of the change that runs repeatedly or over data that
 
 1. **Per event, what does the work grow with?** Name the event (frame, tick, request, render, job
    run, keystroke, commit) and what the work grows with: what changed, the input that matters,
-   or all the data (all entities, rows, files, users). All the data where it could be what
-   changed is the finding this skill exists for.
-2. **Rebuilt every event?** Collections, maps, queries, copies, sorted lists, parsed
-   configuration and derived values that could be kept and updated when their inputs change.
+   or all the data (all entities, rows, files, users), or faster than the data (every pair, a
+   scan inside a scan). All the data where it could be what changed is the finding this skill
+   exists for.
+2. **Rebuilt every event?** Collections, maps, queries, copies, allocations, sorted lists,
+   parsed configuration and derived values that could be kept and updated when their inputs
+   change.
 3. **Change detection the platform offers.** ECS change filters and events, observers and
    signals, dirty flags, memoisation, database indexes and queries for what changed since a
    mark, incremental builds, caches keyed on content.
@@ -41,7 +43,8 @@ The costly loop is often not written as a loop:
 - a whole recompute set off by identity: a UI tree re-rendered because a new object or function
   is made on every render, a cache key that changes every time;
 - a full scan behind a convenience call: counting, sorting or serialising everything to read one
-  value; re-reading or re-parsing a file or configuration on every call.
+  value; re-reading or re-parsing a file or configuration on every call; loading a whole table
+  or file to use one page of it.
 
 ## Gotchas
 
@@ -52,12 +55,14 @@ The costly loop is often not written as a loop:
 
 ## At design
 
-Write the line of item 5 in the design note, the issue or the pull request before building.
+Write the line of item 5 in the design note or the issue before building; it becomes the
+`Efficient design:` line of the pull request body or the landing comment.
 
 ## At review
 
-The reviewer or integrator goes through the checklist on the diff and states the result in the
-review, one line per part that runs repeatedly, for example:
+The reviewer goes through the checklist on the diff and checks the author's `Efficient design:`
+line against it, one entry per part that runs repeatedly, and corrects or rejects it, for
+example:
 
 `Efficient design: building colours per frame O(changed buildings) via change filter; tooltip
 lookup O(1) map; full rebuild O(buildings) at load only.`

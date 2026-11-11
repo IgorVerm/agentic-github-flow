@@ -65,10 +65,16 @@ check of step 5 reads.
 ## 2. Bring the landing branch in
 
 `git fetch origin`. If `origin/<landing>` is not an ancestor of your branch
-(`git merge-base --is-ancestor origin/<landing> HEAD`), merge it: `git merge origin/<landing>`.
-In local-main mode do the same with the local `<landing>`, which holds landings not pushed yet.
-Without a remote, the local `<landing>` alone. Never rebase. Conflicts whose combined intent is
-unclear go to the user.
+(`git merge-base --is-ancestor origin/<landing> HEAD`), merge it with
+`python3 <plugin>/scripts/merge_landing.py origin/<landing>`
+([merge_landing.py](../../scripts/merge_landing.py)), never a bare `git merge`: the Claude Code
+sandbox keeps a session from writing its own worktree's `.claude/` and `.mcp.json`, so a merge
+that changes them fails there. The tool commits the ordinary merge and keeps those files on disk
+as the chat started with them (its header says how and when it refuses). The cost: a running
+chat keeps the `.claude/` it started with, so its gates test that `.claude/`, and new skills and
+agents arrive in the next chat. In local-main mode do the same with the local `<landing>`, which
+holds landings not pushed yet. Without a remote, the local `<landing>` alone. Never rebase.
+Conflicts whose combined intent is unclear go to the user.
 
 ## 3. Checks
 

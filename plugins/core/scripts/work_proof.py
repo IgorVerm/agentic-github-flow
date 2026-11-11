@@ -8,16 +8,22 @@
   merged_pull_request   a pull request of origin merged into a branch whose head is exactly a
                         given commit (a squash or rebase merge leaves no ancestry to read)
   worktrees             `git worktree list --porcelain`, primary first
+  frozen_unexplained    which hidden or untracked paths the frozen manifest of
+                        merge_landing.py does not explain (#50)
 
 The core plugin owns this file. An installed plugin stands alone, so the issue-chats plugin
 carries an identical copy in its scripts/ folder; tests/chat_archivable.py keeps the two
 identical. AGENTIC_GITHUB_FLOW_GH, a JSON list, replaces the `gh` command (tests use it). It
 reads only.
 """
+import hashlib
 import json
 import os
 import shutil
 import subprocess
+
+# merge_landing.py's record of the paths it froze, in the worktree's own git dir (#50)
+FROZEN_MANIFEST = 'agentic-github-flow-frozen.json'
 
 
 def git(cwd, *args):
@@ -179,3 +185,66 @@ def worktrees(primary):
         elif line.startswith('prunable'):
             current['prunable'] = True
     return out
+
+
+def protected(path):
+    """True for a path the Claude Code sandbox keeps its session's own worktree from writing:
+    anything under .claude/, and .mcp.json (#50)."""
+    return path == '.mcp.json' or path.startswith('.claude/')
+
+
+def disk_state(tree, path):
+    """What is on disk at the repository path `path` ('/'-separated): None when nothing, else a
+    digest of the file's bytes or of a symbolic link's target; 'other' for anything else."""
+    full = os.path.join(tree, *path.split('/'))
+    if os.path.islink(full):
+        return 'link:' + hashlib.sha256(os.readlink(full).encode('utf-8', 'surrogateescape')
+                                        ).hexdigest()
+    if os.path.isfile(full):
+        digest = hashlib.sha256()
+        with open(full, 'rb') as handle:
+            for block in iter(lambda: handle.read(1 << 16), b''):
+                digest.update(block)
+        return 'sha256:' + digest.hexdigest()
+    return 'other' if os.path.lexists(full) else None
+
+
+def frozen_manifest(tree):
+    """{path: disk_state when frozen} from merge_landing.py's manifest; {} without one; None
+    when it exists but cannot be read."""
+    try:
+        with open(git_path(tree, FROZEN_MANIFEST), encoding='utf-8') as handle:
+            data = json.load(handle)
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError):
+        return None
+    frozen = data.get('frozen') if isinstance(data, dict) else None
+    if not isinstance(frozen, dict) or not all(
+            isinstance(k, str) and (v is None or isinstance(v, str)) for k, v in frozen.items()):
+        return None
+    return frozen
+
+
+def frozen_unexplained(tree, paths):
+    """Those of `paths` (repository paths that git status reports untracked, or that carry the
+    skip-worktree bit; a trailing '/' names an untracked directory) that merge_landing.py's
+    manifest does not explain. A path is explained only when the manifest names it and what is
+    on disk is still what was there when it was frozen: the protected file the chat started
+    with, kept while the merge moved the index on, or nothing for a file the merge added. Those
+    files are in the history already, so removing the worktree loses nothing."""
+    paths = list(paths)
+    frozen = frozen_manifest(tree) if paths else {}
+    if not frozen:
+        return paths
+    left = []
+    for path in paths:
+        if path.endswith('/'):
+            names = [os.path.relpath(os.path.join(d, n), tree).replace(os.sep, '/')
+                     for d, _, files in os.walk(os.path.join(tree, *path.split('/')))
+                     for n in files]
+        else:
+            names = [path]
+        if not names or any(n not in frozen or disk_state(tree, n) != frozen[n] for n in names):
+            left.append(path)
+    return left

@@ -79,7 +79,8 @@ Newest first: `YYYY-MM-DD — <item> (#issue) — PR #n — merge <commit>`, or 
 
 Also for a new repository, from the agentic-github-flow repository's `templates/` folder (the
 installer keeps a copy in `~/.agentic-github-flow/templates/`): the secrets block for
-`.gitignore` (`gitignore-secrets`) and the `pre-push` hook. On GitHub, a ruleset on `main` that
+`.gitignore` (`gitignore-secrets`) and the `pre-push` hook, which runs the secret scan and the
+personal-data check from that clone on every push. On GitHub, a ruleset on `main` that
 requires pull requests and the CI checks and blocks force-pushes; changing repository settings
 is the owner's step, not an agent's.
 A repository with a public website runs the `check-web-deploy` skill before its first deploy.

@@ -67,7 +67,7 @@ GAPS = [
 ("git commit -m probe --amend", "none", "allow", "known-gap:Claude ask; pre-push hook if the commit was pushed; else git guard hook for Codex"),
 ("git commit -m probe -a", "none", "allow", "known-gap:Claude deny; git guard hook for Codex"),
 ("git reset HEAD~1 --hard", "none", "none", "known-gap:Claude deny; git guard hook for Codex"),
-("git -C /tmp push origin main", "none", "none", "known-gap:Claude ask; Codex push not prompted; pre-push hook refuses force and unmerged deletes only; the written rule"),
+("git -C /tmp push origin main", "none", "none", "known-gap:Claude ask; Codex push not prompted; pre-push hook refuses force, unmerged deletes, secrets and personal data, not the push itself; the written rule"),
 ("git -C /tmp push --force origin main", "none", "none", "known-gap:pre-push hook; Claude deny"),
 ("git -C /tmp commit --no-verify -m x", "none", "none", "known-gap:Claude deny; git guard hook for Codex"),
 ("git -C /tmp tag -d x", "none", "none", "known-gap:Claude deny (git -C twin); git guard hook for Codex"),

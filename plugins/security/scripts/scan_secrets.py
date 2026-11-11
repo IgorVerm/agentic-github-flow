@@ -2,6 +2,7 @@
 """Find committed, staged or historical secrets in a repository without printing them.
 
 Usage: python3 scan_secrets.py <repo> [--history] [--staged] [--exclude <glob>]...
+       python3 scan_secrets.py <repo> --commits <file|-> [--exclude <glob>]...
 
 Private repositories on GitHub's free plan have no secret scanning or push protection (GitHub
 docs, read 2026-10-25), and a public repository's protection only starts at the push, so this
@@ -17,7 +18,13 @@ What it scans:
 - `--staged`: the lines a commit would add (`git diff --cached`), for a pre-commit hook;
 - `--history`: every line ever added on any branch (`git log -p --all`, merges against their
   first parent), where a removed secret still lives until it is revoked. Diffs are read as text
-  whatever `.gitattributes` says, so `* -diff` or a textconv driver hides nothing.
+  whatever `.gitattributes` says, so `* -diff` or a textconv driver hides nothing;
+- `--commits <file|->`: what a push sends, for the `pre-push` hook (`templates/pre-push`), which
+  lists the outgoing commits and annotated tags, one object id per line: the lines each commit
+  adds (a merge: only what is new against every parent; a rename as a new file, so a rename to
+  `.env` is seen), the file names, the commit messages and the tag messages. The working tree is
+  not read then. Anything that is not a commit or a tag is an error, so nothing goes out unread.
+  A file name holding a token is reported as `(a file name)`, never printed.
 
 What it looks for:
 - token formats of common services: Supabase secret keys (`sb_secret_`) and JWTs whose role
@@ -258,55 +265,172 @@ def scan_tree(repo, excludes):
 
 
 def scan_diff(text, kind, excludes):
-    """Findings in the added lines of a unified diff; `commit` lines mark history commits."""
-    results, commit, path, line_no, after_minus = [], '', '', 0, False
+    """Findings in the added lines of a diff; `@@commit` lines mark the commit. A merge's
+    combined diff (`--cc`: one prefix column per parent) counts a line as added only when it is
+    new against every parent, so what a merge brings from an already pushed parent is not
+    judged again, while a conflict resolution or a file only the merge adds is. Headers are told
+    from content by position: they run from a `diff ` line to the first `@@` hunk header."""
+    results, commit, path, shown, line_no, header, width = [], '', '', '', 0, False, 1
     for raw in text.split('\n'):
         if raw.startswith('@@commit '):
-            commit = raw[len('@@commit '):].strip()[:12]
-        elif raw.startswith('--- ') and not after_minus:
-            after_minus = True  # the next '+++ ' line is the file header, not content starting with '++ '
-            continue
-        elif raw.startswith('+++ ') and after_minus:
-            after_minus = False
-            path = diff_path(raw[4:].strip())
-            if path != '/dev/null' and not excluded(path, excludes):
-                pat = secret_file_name(path)
-                if pat:
-                    results.append((kind, 'secret-file-name:' + pat, path, 0, commit))
+            commit, header, path = raw[len('@@commit '):].strip()[:12], False, ''
+        elif raw.startswith('diff '):
+            header, path = True, ''
         elif raw.startswith('@@'):
-            after_minus = False
-            m = re.match(r'@@ -\d+(?:,\d+)? \+(\d+)', raw)
+            header = False
+            width = max(1, len(raw) - len(raw.lstrip('@')) - 1)
+            m = re.search(r' \+(\d+)', raw)
             line_no = int(m.group(1)) - 1 if m else 0
-        elif raw.startswith('+'):  # the '+++ ' header case was taken above
+        elif header:
+            if raw.startswith('+++ '):
+                path = shown = diff_path(raw[4:].strip())
+                if path != '/dev/null' and not excluded(path, excludes):
+                    in_name = findings_in_line(path)
+                    if in_name:  # a token in the file name: never printed
+                        shown = '(a file name)'
+                        results += [(kind, name, shown, 0, commit) for name in in_name]
+                    pat = secret_file_name(path)
+                    if pat:
+                        results.append((kind, 'secret-file-name:' + pat, shown, 0, commit))
+        elif path and raw[:1] in ('+', '-', ' '):
+            prefix = raw[:width]
+            if '-' in prefix:
+                continue  # a removed line: not in the result
             line_no += 1
-            if path == '/dev/null' or excluded(path, excludes):
+            if prefix != '+' * width or path == '/dev/null' or excluded(path, excludes):
                 continue
-            for name in findings_in_line(raw[1:]):
-                results.append((kind, name, path, line_no, commit))
-        elif raw.startswith(' '):
-            line_no += 1
+            for name in findings_in_text(raw[width:]):
+                results.append((kind, name, shown, line_no, commit))
     return results
+
+
+def findings_in_text(line):
+    """findings_in_line, also with NUL bytes removed: UTF-16 text (what Windows PowerShell 5.1
+    writes with `>`) shows a NUL between its characters in a diff read as text."""
+    found = findings_in_line(line)
+    if '\0' in line:
+        found += [n for n in findings_in_line(line.replace('\0', '')) if n not in found]
+    return found
 
 
 # Every diff as text, whatever .gitattributes says (`* -diff` would hide a file's lines, a
 # textconv driver would show a converted text), merges against their first parent (so a secret
-# added while resolving a conflict is seen), and paths unquoted (so `clé.pem` matches).
+# added while resolving a conflict is seen), and paths unquoted (so `clé.pem` matches). The
+# settings keep the user's configuration from changing what git prints: a path relative to the
+# current folder or without its `b/` prefix, a root commit without its diff.
 DIFF_OPTIONS = ['--no-color', '-U0', '--no-ext-diff', '--text', '--no-textconv']
+DIFF_CONFIG = ['-c', 'core.quotePath=false', '-c', 'diff.noprefix=false', '-c',
+               'diff.mnemonicPrefix=false', '-c', 'diff.relative=false', '-c', 'log.showRoot=true']
+OBJECT_ID = re.compile(r'[0-9a-f]{40}(?:[0-9a-f]{24})?')
 
 
 def scan_staged(repo, excludes):
-    return scan_diff(git(repo, '-c', 'core.quotePath=false', 'diff', '--cached', *DIFF_OPTIONS),
-                     'staged', excludes)
+    return scan_diff(git(repo, *DIFF_CONFIG, 'diff', '--cached', *DIFF_OPTIONS), 'staged', excludes)
 
 
 def scan_history(repo, excludes):
-    text = git(repo, '-c', 'core.quotePath=false', 'log', '--all', '-p', *DIFF_OPTIONS,
+    text = git(repo, *DIFF_CONFIG, 'log', '--all', '-p', *DIFF_OPTIONS,
                '--diff-merges=first-parent', '--format=@@commit %H')
     return scan_diff(text, 'history', excludes)
 
 
+def git_input(repo, text, *args):
+    """git's output decoded without newline translation: a lone carriage return stays inside its
+    line (text mode would start a new line there, without the diff's `+`)."""
+    r = subprocess.run(['git', '-C', repo, *args], input=text.encode('utf-8'),
+                       capture_output=True)
+    if r.returncode != 0:
+        raise RuntimeError('git: %s' % r.stderr.decode('utf-8', 'replace').strip()[:200])
+    return r.stdout.decode('utf-8', 'replace')
+
+
+def outgoing(repo, ids):
+    """(commits, tags) among the object ids; RuntimeError for anything else (a push of a blob or
+    a tree, an id git does not know), so that nothing passes unread."""
+    if any(not OBJECT_ID.fullmatch(i) for i in ids):
+        raise RuntimeError('not an object id: %r' % next(i for i in ids if not OBJECT_ID.fullmatch(i))[:80])
+    commits, tags = [], []
+    out = git_input(repo, ''.join(i + '\n' for i in ids), 'cat-file',
+                    '--batch-check=%(objectname) %(objecttype)').splitlines()
+    for line in out:
+        oid, _, kind = line.partition(' ')
+        if kind == 'commit':
+            commits.append(oid)
+        elif kind == 'tag':
+            tags.append(oid)
+        else:
+            raise RuntimeError('%s is a %s, not a commit or tag' % (oid[:12], kind or 'unknown object'))
+    return commits, tags
+
+
+def tag_messages(repo, tag):
+    """[(tag id, its header, its message)] along a chain of annotated tags."""
+    found = []
+    for _ in range(16):
+        header, _, message = git_input(repo, '', 'cat-file', 'tag', tag).partition('\n\n')
+        found.append((tag, header, message))
+        fields = dict(line.split(' ', 1) for line in header.splitlines() if ' ' in line)
+        if fields.get('type') != 'tag' or not OBJECT_ID.fullmatch(fields.get('object', '')):
+            break
+        tag = fields['object']
+    return found
+
+
+def scan_commits(repo, ids, excludes):
+    """Findings in what a push sends (templates/pre-push lists the objects): the lines each
+    commit adds (a merge: what is new against every parent), each commit message and each
+    annotated tag's message. The working tree is not read: it is not what goes out."""
+    commits, tags = outgoing(repo, ids)
+    results = []
+    if commits:
+        stdin = ''.join(c + '\n' for c in commits)
+        results += scan_diff(git_input(repo, stdin, *DIFF_CONFIG, 'log', '--no-walk=unsorted',
+                                       '--stdin', '--cc', '--no-renames', *DIFF_OPTIONS,
+                                       '--format=@@commit %H'), 'commit', excludes)
+        # every file name, also of an empty file, whose diff has no `+++` header
+        names = git_input(repo, stdin, *DIFF_CONFIG, 'log', '--no-walk=unsorted', '--stdin',
+                          '--cc', '--name-only', '--no-renames', '-z', '--format=@@commit %H')
+        commit = ''
+        for field in names.split('\0'):
+            field = field[1:] if field.startswith('\n') else field
+            if field.startswith('@@commit '):
+                commit = field.split()[1][:12]
+            elif field and commit and not excluded(field, excludes):
+                in_name = findings_in_line(field)
+                shown = '(a file name)' if in_name else field
+                results += [('commit', name, shown, 0, commit) for name in in_name]
+                pat = secret_file_name(field)
+                if pat:
+                    results.append(('commit', 'secret-file-name:' + pat, shown, 0, commit))
+        messages = git_input(repo, stdin, '-c', 'i18n.logOutputEncoding=UTF-8', 'log',
+                             '--no-walk=unsorted', '--stdin', '--format=%x00%H%n%B')
+        for chunk in messages.split('\0')[1:]:
+            sha, _, body = chunk.partition('\n')
+            for n, line in enumerate(body.splitlines(), 1):
+                results += [('commit', name, '(commit message)', n, sha[:12])
+                            for name in findings_in_text(line)]
+    for tag in tags:
+        for sha, _, message in tag_messages(repo, tag):
+            for n, line in enumerate(message.splitlines(), 1):
+                results += [('commit', name, '(tag message)', n, sha[:12])
+                            for name in findings_in_text(line)]
+    return results
+
+
+def read_ids(source):
+    try:
+        if source == '-':
+            text = sys.stdin.read()
+        else:
+            with open(source, encoding='utf-8') as f:
+                text = f.read()
+    except OSError as exc:
+        raise RuntimeError('cannot read %s: %s' % (source, exc.strerror))
+    return [line.strip() for line in text.splitlines() if line.strip()]
+
+
 def main(argv):
-    repo, history, staged, excludes = None, False, False, []
+    repo, history, staged, commits, excludes = None, False, False, None, []
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -314,10 +438,14 @@ def main(argv):
             history = True
         elif a == '--staged':
             staged = True
-        elif a == '--exclude':
+        elif a in ('--exclude', '--commits'):
             if i + 1 >= len(argv):
                 print(__doc__, file=sys.stderr); return 2
-            excludes.append(argv[i + 1]); i += 1
+            if a == '--commits':
+                commits = argv[i + 1]
+            else:
+                excludes.append(argv[i + 1])
+            i += 1
         elif a in ('-h', '--help'):
             print(__doc__); return 0
         elif a.startswith('-') or repo is not None:
@@ -328,8 +456,20 @@ def main(argv):
     if repo is None or not os.path.isdir(repo):
         print(__doc__, file=sys.stderr); return 2
     repo = os.path.abspath(repo)
+    if commits is not None and (staged or history):
+        print('scan_secrets: --commits scans what a push sends; it takes no --staged or --history',
+              file=sys.stderr)
+        return 2
     try:
-        results = scan_tree(repo, excludes)
+        if commits is not None:
+            if subprocess.run(['git', '-C', repo, 'rev-parse', '--git-dir'],
+                              capture_output=True).returncode != 0:  # a bare repository will do
+                print('scan_secrets: %s is not a git repository; --commits needs one' % repo,
+                      file=sys.stderr)
+                return 2
+            results = scan_commits(repo, read_ids(commits), excludes)
+        else:
+            results = scan_tree(repo, excludes)
         if staged or history:
             if not is_git_repo(repo):
                 print('scan_secrets: %s is not a git repository; --staged/--history need one' % repo,
@@ -353,7 +493,8 @@ def main(argv):
     counts = {}
     for kind, *_ in seen:
         counts[kind] = counts.get(kind, 0) + 1
-    scope = ['tree'] + (['staged'] if staged else []) + (['history'] if history else [])
+    scope = ['commits'] if commits is not None else \
+        ['tree'] + (['staged'] if staged else []) + (['history'] if history else [])
     print('scan_secrets: %s; %d finding(s)%s' % (
         ', '.join(scope), len(seen),
         '' if not seen else ' (' + ', '.join('%s %d' % kv for kv in sorted(counts.items())) + ')'))

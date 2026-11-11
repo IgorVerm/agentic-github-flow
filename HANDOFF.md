@@ -1,6 +1,6 @@
 # agentic-github-flow: current state
 
-Checked on 2026-11-10 (v2, the landing modes of #13, the sandbox-network guard of #20).
+Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard of #20, the pre-push checks of #40).
 
 ## State
 
@@ -39,6 +39,14 @@ Checked on 2026-11-10 (v2, the landing modes of #13, the sandbox-network guard o
 - Automatic merging (#13, `DESIGN_DECISIONS.md`): under a standing grant, `merge_pr.py` merges
   an agent's own pull request when its checks, review, overlap line and paths allow it. This
   repository grants nothing (Standing permissions below).
+- The pre-push hook (#40): besides force pushes, tag moves and unmerged deletions,
+  `templates/pre-push` refuses every push whose outgoing commits carry a secret
+  (`scan_secrets.py --commits`) or personal data (`pre_tool_personal_data.py --commits`), run
+  from the installed clone `~/.agentic-github-flow`, failing closed. Its protected-path check
+  (`plugins/core/scripts/push_paths.py`, the paths of `merge_pr.py`) runs only when
+  `AGENTIC_GITHUB_FLOW_UNASKED_PUSH` is set: nothing sets it until the route of #26 pushes
+  without asking. This repository's tests build their planted tokens and addresses by
+  concatenation, or the hook refuses the push that carries them.
 - Not run yet: the live skill-choice probe for the new and changed descriptions, an end-to-end
   issue-chat chain in the desktop app or in Codex.
 
@@ -64,6 +72,7 @@ Checked on 2026-11-10 (v2, the landing modes of #13, the sandbox-network guard o
 | landing modes | `plugins/core/scripts/landing.py` and `promote_main.py` headers, `plugins/core/skills/ship-change/` (`SKILL.md`, `local-main.md`), `tests/landing.py`, `tests/promote_main.py` |
 | worktrees and cleanup | `plugins/core/scripts/*.py` headers, `plugins/core/skills/cleanup-merged/SKILL.md`, `tests/worktree_tools.py`, `tests/new_worktree.py`, `tests/overlap_check.py` |
 | the security scanners | `plugins/security/scripts/*.py` headers, `plugins/security/skills/review-security/sources.md`, `tests/scan_secrets.py`, `tests/audit_dependencies.py` |
+| the pre-push hook | `templates/pre-push` header, `plugins/core/scripts/push_paths.py`, the push check in `plugins/guards/scripts/pre_tool_personal_data.py`, `tests/pre_push_checks.py`, its older refusals in `tests/worktree_tools.py` (`PrePushTests`) |
 | issue chats | `plugins/issue-chats/skills/issue-handover/method.md`, `plugins/issue-chats/scripts/*.py` headers, `tests/next_issue.py`, `tests/start_issue_chat.py`, `tests/chat_archivable.py`, `tests/archive_guard.py` |
 
 ## Landing settings

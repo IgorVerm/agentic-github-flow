@@ -538,7 +538,7 @@ def check(primary, tree, ref, patterns, approved):
     kept = set(frozen_unexplained(path, untracked + skipped))
     exempt = [p for p in untracked + skipped if p not in kept]
     if exempt:
-        proofs.append('frozen by merge_landing.py, unchanged on disk since: '
+        proofs.append('frozen: by merge_landing.py, unchanged on disk since: '
                       + ', '.join(exempt[:5]) + (' …' if len(exempt) > 5 else ''))
     dirty = [r[3:] for r in records
              if not r.startswith('!! ') and not (r.startswith('?? ') and r[3:] not in kept)]
@@ -925,7 +925,8 @@ def main(argv=None):
             continue
         branch = None if args.approved else tree['branch']
         for line in proofs:
-            print(f'  {line}' if line.startswith('branch: ') else f'  ignored {line}')
+            print(f'  {line}' if line.startswith(('branch: ', 'frozen: '))
+                  else f'  ignored {line}')
         if args.dry_run:
             print(f'WOULD REMOVE {path}' + (f' and branch {branch}' if branch else ''))
             continue

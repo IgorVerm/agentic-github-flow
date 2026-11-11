@@ -207,7 +207,7 @@ class FrozenMerge(unittest.TestCase):
         before, flags = self.head(), self.git(self.wt, 'ls-files', '-v').stdout
         code, out = self.tool('origin/main')
         self.assertEqual(code, 1, out)
-        self.assertIn('integration worktree', out)
+        self.assertIn('ship-change skill says in step 2', out)
         self.assertEqual(self.head(), before)
         self.assertEqual(self.git(self.wt, 'ls-files', '-v').stdout, flags)
         self.assertEqual(self.git(self.wt, 'status', '--porcelain').stdout, '')
@@ -264,8 +264,70 @@ class FrozenMerge(unittest.TestCase):
         r = subprocess.run([sys.executable, REMOVE, self.wt], cwd=self.repo, env=self.env,
                            capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn('frozen by merge_landing.py', r.stdout)
+        self.assertIn('frozen: by merge_landing.py', r.stdout)
         self.assertFalse(os.path.exists(self.wt))
+
+    def test_a_mark_that_hides_local_changes_is_refused(self):
+        # review of #54, finding 1: a skip-worktree or assume-unchanged entry the tool did not
+        # set hides local changes from git status; the frozen merge must not run over it
+        for rel, mark in (('.claude/settings.json', '--skip-worktree'),
+                          ('README.md', '--skip-worktree'), ('README.md', '--assume-unchanged')):
+            with self.subTest(rel=rel, mark=mark):
+                self.setUp()
+                self.main_changes_claude()
+                self.git(self.wt, 'update-index', mark, '--', rel)
+                self.write(self.wt, rel, 'local change\n')
+                before, flags = self.head(), self.git(self.wt, 'ls-files', '-v').stdout
+                code, out = self.tool('origin/main')
+                self.assertEqual(code, 1, out)
+                self.assertIn(rel + ' is marked', out)
+                self.assertEqual(self.head(), before)
+                self.assertEqual(self.git(self.wt, 'ls-files', '-v').stdout, flags)
+                self.assertEqual(self.read(rel), 'local change\n')
+                self.tearDown()
+        self.setUp()
+
+    def test_a_conflict_outside_claude_can_be_aborted_through_the_tool(self):
+        # review of #54, finding 2: a plain `git merge --abort` fails on the frozen paths
+        self.main_changes_claude()
+        self.write(self.wt, 'README.md', 'task\n')
+        self.commit(self.wt, 'task readme', 'README.md')
+        self.protect()
+        before, files = self.head(), self.claude_files()
+        code, out = self.tool('origin/main')
+        self.assertEqual(code, 1, out)
+        self.assertIn('--abort', out)
+        self.assertTrue(os.path.exists(os.path.join(
+            self.git(self.wt, 'rev-parse', '--absolute-git-dir').stdout.strip(), 'MERGE_HEAD')))
+        code, out = self.tool('--abort')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.head(), before)
+        self.assertEqual(self.read('README.md'), 'task\n')
+        self.assertEqual(self.claude_files(), files)
+        code, out = self.tool('--abort')
+        self.assertEqual(code, 1, out)
+        self.assertIn('no merge in progress', out)
+
+    def test_a_claude_conflict_resolved_in_another_worktree_comes_in_as_a_fast_forward(self):
+        # review of #54, finding 3: the route ship-change step 2 gives for a .claude conflict
+        self.land_on_main('main settings', writes=[('.claude/settings.json', 'main\n'),
+                                                   ('README.md', 'main\n')])
+        self.write(self.wt, '.claude/settings.json', 'task\n')
+        self.commit(self.wt, 'task settings', '.claude/settings.json')
+        self.protect()
+        self.assertEqual(self.tool('origin/main')[0], 1)
+        other = os.path.join(self.dir, 'repo-worktrees', 'task-integrate')
+        self.git(self.repo, 'worktree', 'add', '-q', '-b', 'integrate/task', other, 'agent/task')
+        self.assertNotEqual(self.git(other, 'merge', 'origin/main', check=False).returncode, 0)
+        self.write(other, '.claude/settings.json', 'both\n')
+        self.git(other, 'add', '--', '.claude/settings.json')
+        self.git(other, 'commit', '-q', '--no-edit')
+        code, out = self.tool('integrate/task')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.head(), self.head('integrate/task'))
+        self.assertEqual(self.git(self.wt, 'show', 'HEAD:.claude/settings.json').stdout, 'both\n')
+        self.assertEqual(self.read('.claude/settings.json'), 'task\n')
+        self.assertEqual(self.read('README.md'), 'main\n')
 
     def test_an_untracked_file_that_is_not_frozen_still_keeps_the_worktree(self):
         self.main_changes_claude()

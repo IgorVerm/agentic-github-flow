@@ -47,9 +47,11 @@ The issue stays open, assigned to you, until the push.
    `origin/<landing>` are both in S: the overlap check (SKILL step 5) on S's branch, then
    `promote_main.py <S>`. Otherwise it builds away from the landing branch:
    `python3 <plugin>/scripts/new_worktree.py <n>-integrate --branch integrate/<n> --base <landing>`,
-   there `python3 <plugin>/scripts/merge_landing.py origin/<landing>` when the local `<landing>`
-   lacks it, then `python3 <plugin>/scripts/merge_landing.py --no-ff <S>` (SKILL step 2 says
-   why not a bare `git merge`). Conflicts whose combined intent is unclear go back to the
+   there `git merge origin/<landing>` when the local `<landing>` lacks it, then
+   `git merge --no-ff <S>`: plain merges, since this worktree is not the reviewing session's
+   working directory and the sandbox does not protect its `.claude/`, so the gate runs on M's
+   own `.claude/`. A reviewer that is a session working in this worktree uses
+   `merge_landing.py` for both merges (SKILL step 2). Conflicts whose combined intent is unclear go back to the
    author or the user. A merge commit commits the whole reviewed merge index: stage the resolved
    paths by name, read the complete staged diff, then commit without paths. The full gate runs on
    that result M, then the overlap check, then `promote_main.py <M>`. Its refusals are handled

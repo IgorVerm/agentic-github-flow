@@ -245,6 +245,7 @@ def frozen_unexplained(tree, paths):
                      for n in files]
         else:
             names = [path]
-        if not names or any(n not in frozen or disk_state(tree, n) != frozen[n] for n in names):
+        if not names or any(not protected(n) or n not in frozen
+                            or disk_state(tree, n) != frozen[n] for n in names):
             left.append(path)
     return left

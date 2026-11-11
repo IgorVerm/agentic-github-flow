@@ -76,6 +76,15 @@ agents arrive in the next chat. In local-main mode do the same with the local `<
 holds landings not pushed yet. Without a remote, the local `<landing>` alone. Never rebase.
 Conflicts whose combined intent is unclear go to the user.
 
+- A conflict outside `.claude/` stops the merge as usual: resolve, stage by name, commit; to back
+  out, `merge_landing.py --abort` (a plain `git merge --abort` fails on frozen paths).
+- A conflict inside `.claude/` or `.mcp.json` is refused: resolve it where the sandbox does not
+  protect them, in a worktree that is not this session's working directory. From the primary
+  checkout: `python3 <plugin>/scripts/new_worktree.py <n>-integrate --branch integrate/<n>
+  --base <your task branch> --no-fetch`; there a plain `git merge origin/<landing>`, resolve,
+  stage by name, commit, and run the checks there. Back in your worktree,
+  `merge_landing.py integrate/<n>` takes that merge in (a fast-forward).
+
 ## 3. Checks
 
 - Read the whole diff: `git diff origin/<landing>...HEAD`.

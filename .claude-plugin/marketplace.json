@@ -35,7 +35,7 @@
       "name": "agentic-github-flow-security",
       "source": "./plugins/security",
       "description": "Security review of a change or repository: secret scanning, dependency audit against OSV, and a checklist by area.",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "author": {
         "name": "MAI-Tech",
         "url": "https://mai-tech.be"
@@ -75,7 +75,7 @@
       "name": "agentic-github-flow-guards",
       "source": "./plugins/guards",
       "description": "Claude Code hooks that refuse destructive git commands and ask before destructive deletes and before personal data leaves the machine.",
-      "version": "0.5.0",
+      "version": "0.5.1",
       "author": {
         "name": "MAI-Tech",
         "url": "https://mai-tech.be"

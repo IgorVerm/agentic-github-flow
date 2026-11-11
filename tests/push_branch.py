@@ -8,11 +8,13 @@ holding the hook's scripts (as tests/pre_push_checks.py builds them); a stand-in
 remote is not GitHub, so landing.py decides pull request unless HANDOFF.md says local main.
 The cases that push: a clean task branch, which then gets its pull request, with the hook run
 under AGENTIC_GITHUB_FLOW_UNASKED_PUSH and no tag following the branch; a later push to a branch
-whose pull request is open; a grant in HANDOFF.md. Each refusal is one condition broken on its
-own: no grant, a grant file that is missing, only mentions the script (as the core rules do),
-lies in a checkout of this repository or in the installed clone, a HANDOFF.md that only
-mentions it or grants it on the task branch alone, the default branch, a detached HEAD, local-main mode,
-pull-request mode only as the safe default, no hook or another hook, a protected path, no
+whose pull request is open (a fork's of the same name is not it); a grant in HANDOFF.md; a
+title starting with a dash. Each refusal is one condition broken on its own: no grant, a grant
+file that is missing, only mentions the script (as the core rules do), lies in a checkout of
+this repository or in the installed clone, a HANDOFF.md that only mentions it or grants it on
+the task branch alone, the default branch (as GitHub reports it now, whatever origin/HEAD
+says; unreadable refuses), a detached HEAD, local-main mode, pull-request mode only as the
+safe default, no hook or another hook, a protected path, no
 overlap result, a branch behind origin's; the hook's own refusal (a secret) is the script's
 refusal; a pull request that cannot be opened after the push exits 3. Planted values are built
 by concatenation. Offline.
@@ -43,6 +45,10 @@ s.setdefault('log', []).append(a)
 json.dump(s, open(os.environ['STUB_GH'], 'w'))
 if a[:2] == ['pr', 'list']:
     print(json.dumps(s.get('prs', []))); sys.exit(0)
+if a[:2] == ['repo', 'view']:
+    if not s.get('default'):
+        print('gh: Could not resolve to a Repository', file=sys.stderr); sys.exit(1)
+    print(json.dumps({'defaultBranchRef': {'name': s['default']}})); sys.exit(0)
 if a[:2] == ['pr', 'create']:
     if s.get('create_fails'):
         print('GraphQL: was submitted too quickly', file=sys.stderr); sys.exit(1)
@@ -110,10 +116,10 @@ class PushBranch(unittest.TestCase):
         with open(self.body, 'w', encoding='utf-8') as f:
             f.write(text)
 
-    def run_tool(self, *args, prs=None, grant='', pr=True, create_fails=False):
+    def run_tool(self, *args, prs=None, grant='', pr=True, create_fails=False, default='main'):
         grant = self.overlay if grant == '' else grant
         with open(self.state, 'w') as f:
-            json.dump({'prs': prs or [], 'create_fails': create_fails}, f)
+            json.dump({'prs': prs or [], 'create_fails': create_fails, 'default': default}, f)
         cmd = [sys.executable, TOOL, '-C', self.repo, '-R', 'acme/tool', *args]
         if grant:
             cmd += ['--grant', grant]
@@ -157,7 +163,7 @@ class PushBranch(unittest.TestCase):
         self.assertEqual(self.run_tool().returncode, 0)
         self.commit('plugins/core/skills/x/SKILL.md', 'a review finding fixed\n')
         open_pr = [{'number': 8, 'url': 'https://github.com/acme/tool/pull/8', 'body': BODY,
-                    'baseRefName': 'main'}]
+                    'baseRefName': 'main', 'isCrossRepository': False}]
         r = self.run_tool(prs=open_pr, pr=False)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(self.on_origin(), self.git(self.repo, 'rev-parse', 'HEAD'))
@@ -269,6 +275,29 @@ class PushBranch(unittest.TestCase):
         self.assertRefused('no branch is checked out')
         self.assertEqual(self.git(self.origin, 'rev-parse', 'main'),
                          self.git(self.repo, 'rev-parse', 'origin/main'))
+
+    def test_the_default_branch_is_read_from_github(self):
+        # origin/HEAD here still says main; GitHub says develop, and develop is checked out
+        self.git(self.repo, 'switch', '-q', '-c', 'develop', 'origin/main')
+        self.commit('docs/d.md', 'd\n')
+        self.assertRefused('not a task branch', default='develop')
+        self.git(self.repo, 'switch', '-q', 'agent/7-x')
+        self.assertRefused("cannot read acme/tool's default branch", default='')
+        self.assertEqual(self.on_origin('develop'), '')
+        self.assertEqual(self.on_origin(), '')
+
+    def test_a_forks_pull_request_of_the_same_name_is_not_this_one(self):
+        fork = [{'number': 9, 'url': 'https://github.com/acme/tool/pull/9', 'body': BODY,
+                 'baseRefName': 'main', 'isCrossRepository': True}]
+        self.assertRefused('pass --title and --body-file', prs=fork, pr=False)
+        r = self.run_tool(prs=fork)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(len(self.created()), 1)
+
+    def test_a_title_may_start_with_a_dash(self):
+        r = self.run_tool('--title', '-x: a title', '--body-file', self.body, pr=False)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn('-x: a title', self.created()[0])
 
     def test_local_main_mode(self):
         self.git(self.repo, 'switch', '-q', 'main')

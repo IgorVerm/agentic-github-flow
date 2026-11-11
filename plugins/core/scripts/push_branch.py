@@ -25,10 +25,11 @@ hold:
             overlay without the line, an employer's for example, grants nothing. A personal
             overlay's grant still reaches an employer's repository, which the script cannot
             see: an overlay that grants it says where it holds;
-  ref       a branch is checked out, and it is not main, master, the remote's default branch or
-            the landing branch; origin's copy of it, if any, is in HEAD (a fast-forward: no
-            force, no deletion). It need not be a branch this agent made: a chat that took over
-            work in flight pushes that branch;
+  ref       a branch is checked out, and it is not main, master, the repository's default branch
+            as GitHub reports it now (`gh repo view`; unreadable refuses, since a local
+            origin/HEAD can be missing or stale) or the landing branch; origin's copy of it, if
+            any, is in HEAD (a fast-forward: no force, no deletion). It need not be a branch this
+            agent made: a chat that took over work in flight pushes that branch;
   mode      landing.py (beside this file) decides pull request for the repository from the
             setting or from what it read on GitHub, not as its safe default for what it could
             not tell (SAFE_DEFAULT); in local-main mode the push of the landing branch is the
@@ -141,17 +142,31 @@ def grant_reason(path: str, top: str, grant: str) -> str | None:
     return f"the grant file {grant} has no line `{GRANT_FORM}`"
 
 
-def open_pr(command: list, repo: str, branch: str) -> tuple:
-    """(the open pull request of <branch> as a dict, or None; an error text or None)."""
-    r = gh(command, "pr", "list", "-R", repo, "--head", branch, "--state", "open", "--json",
-           "number,url,body,baseRefName")
+def default_branch(command: list, repo: str) -> str | None:
+    """The repository's default branch as GitHub reports it now, or None when unreadable."""
+    r = gh(command, "repo", "view", repo, "--json", "defaultBranchRef")
+    try:
+        name = (json.loads(r.stdout).get("defaultBranchRef") or {}).get("name") \
+            if r.returncode == 0 else None
+    except (ValueError, AttributeError):
+        name = None
+    return name if isinstance(name, str) and name else None
+
+
+def open_pr(command: list, repo: str, branch: str, base: str) -> tuple:
+    """(the open pull request from <branch> of this repository into <base> as a dict, or None;
+    an error text or None). A fork's pull request of a branch with the same name is not it."""
+    r = gh(command, "pr", "list", "-R", repo, "--head", branch, "--base", base, "--state",
+           "open", "--json", "number,url,body,baseRefName,isCrossRepository")
     try:
         found = json.loads(r.stdout) if r.returncode == 0 else None
     except ValueError:
         found = None
     if not isinstance(found, list):
         return None, f"cannot list the pull requests of {branch}: {r.stderr.strip()[:200]}"
-    return (found[0] if found and isinstance(found[0], dict) else None), None
+    own = [p for p in found if isinstance(p, dict) and p.get("isCrossRepository") is False
+           and p.get("baseRefName") == base]
+    return (own[0] if own else None), None
 
 
 def main(argv: list) -> int:
@@ -164,7 +179,7 @@ def main(argv: list) -> int:
     while i < len(argv):
         a = argv[i]
         if a in ("--grant", "--title", "--body-file", "-C", "-R") and i + 1 < len(argv) \
-                and not argv[i + 1].startswith("-"):
+                and (a == "--title" or not argv[i + 1].startswith("-")):
             value = argv[i + 1]
             if a == "--grant":
                 grant = value
@@ -228,8 +243,9 @@ def main(argv: list) -> int:
     reasons = [why] if why else []
     branch = git(path, "symbolic-ref", "-q", "--short", "HEAD").stdout.strip()
     head = git(path, "rev-parse", "-q", "--verify", "HEAD^{commit}").stdout.strip()
-    default = git(path, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD").stdout
-    default = default.strip()[len("origin/"):] if default.strip() else ""
+    default = default_branch(command, repo)
+    if not default:
+        reasons.append(f"cannot read {repo}'s default branch from GitHub")
     if not branch or not head:
         reasons.append("no branch is checked out (a detached HEAD or no commit)")
     elif branch.casefold() in {b.casefold() for b in ("main", "master", default, landing) if b}:
@@ -261,7 +277,7 @@ def main(argv: list) -> int:
             if found:
                 reasons.append("paths that leave only on the user's word: " + ", ".join(
                     sorted({f"{p} ({c})" for p, c in found})[:8]))
-    pr, error = open_pr(command, repo, branch) if branch else (None, None)
+    pr, error = open_pr(command, repo, branch, landing) if branch else (None, None)
     if error:
         print(f"push_branch: {error}", file=sys.stderr)
         return 2

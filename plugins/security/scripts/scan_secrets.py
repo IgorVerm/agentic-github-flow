@@ -21,9 +21,10 @@ What it scans:
   whatever `.gitattributes` says, so `* -diff` or a textconv driver hides nothing;
 - `--commits <file|->`: what a push sends, for the `pre-push` hook (`templates/pre-push`), which
   lists the outgoing commits and annotated tags, one object id per line: the lines each commit
-  adds (a merge: only what is new against every parent), the commit messages and the tag
-  messages. The working tree is not read then. Anything that is not a commit or a tag is an
-  error, so nothing goes out unread.
+  adds (a merge: only what is new against every parent; a rename as a new file, so a rename to
+  `.env` is seen), the file names, the commit messages and the tag messages. The working tree is
+  not read then. Anything that is not a commit or a tag is an error, so nothing goes out unread.
+  A file name holding a token is reported as `(a file name)`, never printed.
 
 What it looks for:
 - token formats of common services: Supabase secret keys (`sb_secret_`) and JWTs whose role
@@ -269,7 +270,7 @@ def scan_diff(text, kind, excludes):
     new against every parent, so what a merge brings from an already pushed parent is not
     judged again, while a conflict resolution or a file only the merge adds is. Headers are told
     from content by position: they run from a `diff ` line to the first `@@` hunk header."""
-    results, commit, path, line_no, header, width = [], '', '', 0, False, 1
+    results, commit, path, shown, line_no, header, width = [], '', '', '', 0, False, 1
     for raw in text.split('\n'):
         if raw.startswith('@@commit '):
             commit, header, path = raw[len('@@commit '):].strip()[:12], False, ''
@@ -282,11 +283,15 @@ def scan_diff(text, kind, excludes):
             line_no = int(m.group(1)) - 1 if m else 0
         elif header:
             if raw.startswith('+++ '):
-                path = diff_path(raw[4:].strip())
+                path = shown = diff_path(raw[4:].strip())
                 if path != '/dev/null' and not excluded(path, excludes):
+                    in_name = findings_in_line(path)
+                    if in_name:  # a token in the file name: never printed
+                        shown = '(a file name)'
+                        results += [(kind, name, shown, 0, commit) for name in in_name]
                     pat = secret_file_name(path)
                     if pat:
-                        results.append((kind, 'secret-file-name:' + pat, path, 0, commit))
+                        results.append((kind, 'secret-file-name:' + pat, shown, 0, commit))
         elif path and raw[:1] in ('+', '-', ' '):
             prefix = raw[:width]
             if '-' in prefix:
@@ -294,9 +299,18 @@ def scan_diff(text, kind, excludes):
             line_no += 1
             if prefix != '+' * width or path == '/dev/null' or excluded(path, excludes):
                 continue
-            for name in findings_in_line(raw[width:]):
-                results.append((kind, name, path, line_no, commit))
+            for name in findings_in_text(raw[width:]):
+                results.append((kind, name, shown, line_no, commit))
     return results
+
+
+def findings_in_text(line):
+    """findings_in_line, also with NUL bytes removed: UTF-16 text (what Windows PowerShell 5.1
+    writes with `>`) shows a NUL between its characters in a diff read as text."""
+    found = findings_in_line(line)
+    if '\0' in line:
+        found += [n for n in findings_in_line(line.replace('\0', '')) if n not in found]
+    return found
 
 
 # Every diff as text, whatever .gitattributes says (`* -diff` would hide a file's lines, a
@@ -321,11 +335,13 @@ def scan_history(repo, excludes):
 
 
 def git_input(repo, text, *args):
-    r = subprocess.run(['git', '-C', repo, *args], input=text, capture_output=True, text=True,
-                       encoding='utf-8', errors='replace')
+    """git's output decoded without newline translation: a lone carriage return stays inside its
+    line (text mode would start a new line there, without the diff's `+`)."""
+    r = subprocess.run(['git', '-C', repo, *args], input=text.encode('utf-8'),
+                       capture_output=True)
     if r.returncode != 0:
-        raise RuntimeError('git: %s' % r.stderr.strip()[:200])
-    return r.stdout
+        raise RuntimeError('git: %s' % r.stderr.decode('utf-8', 'replace').strip()[:200])
+    return r.stdout.decode('utf-8', 'replace')
 
 
 def outgoing(repo, ids):
@@ -351,7 +367,7 @@ def tag_messages(repo, tag):
     """[(tag id, its header, its message)] along a chain of annotated tags."""
     found = []
     for _ in range(16):
-        header, _, message = git(repo, 'cat-file', 'tag', tag).partition('\n\n')
+        header, _, message = git_input(repo, '', 'cat-file', 'tag', tag).partition('\n\n')
         found.append((tag, header, message))
         fields = dict(line.split(' ', 1) for line in header.splitlines() if ' ' in line)
         if fields.get('type') != 'tag' or not OBJECT_ID.fullmatch(fields.get('object', '')):
@@ -369,20 +385,20 @@ def scan_commits(repo, ids, excludes):
     if commits:
         stdin = ''.join(c + '\n' for c in commits)
         results += scan_diff(git_input(repo, stdin, *DIFF_CONFIG, 'log', '--no-walk=unsorted',
-                                       '--stdin', '--cc', *DIFF_OPTIONS, '--format=@@commit %H'),
-                             'commit', excludes)
-        messages = git_input(repo, stdin, 'log', '--no-walk=unsorted', '--stdin',
-                             '--format=%x00%H%n%B')
+                                       '--stdin', '--cc', '--no-renames', *DIFF_OPTIONS,
+                                       '--format=@@commit %H'), 'commit', excludes)
+        messages = git_input(repo, stdin, '-c', 'i18n.logOutputEncoding=UTF-8', 'log',
+                             '--no-walk=unsorted', '--stdin', '--format=%x00%H%n%B')
         for chunk in messages.split('\0')[1:]:
             sha, _, body = chunk.partition('\n')
             for n, line in enumerate(body.splitlines(), 1):
                 results += [('commit', name, '(commit message)', n, sha[:12])
-                            for name in findings_in_line(line)]
+                            for name in findings_in_text(line)]
     for tag in tags:
         for sha, _, message in tag_messages(repo, tag):
             for n, line in enumerate(message.splitlines(), 1):
                 results += [('commit', name, '(tag message)', n, sha[:12])
-                            for name in findings_in_line(line)]
+                            for name in findings_in_text(line)]
     return results
 
 

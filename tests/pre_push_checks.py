@@ -102,7 +102,7 @@ class Push(unittest.TestCase):
         self.assertIn('pre-push: refusing', r.stderr)
         for name in names:
             self.assertIn(name, r.stderr)
-        for value in (TOKEN, EMAIL, OTHER, NAME):
+        for value in (TOKEN, EMAIL, OTHER, NAME, 'fixture' + '@' + 'work-place.be'):
             self.assertNotIn(value, r.stderr + r.stdout)
 
     def on_remote(self, ref):
@@ -192,6 +192,66 @@ class Push(unittest.TestCase):
         self.git(self.repo, 'commit', '-q', '--no-edit')
         self.refused(self.push(b), 'github-token', 'f.txt')
 
+    def test_text_after_a_lone_carriage_return_is_read(self):
+        b = self.branch()
+        self.commit('log.txt', 'progress\rexport GH=' + TOKEN + '\n', 'log')
+        self.refused(self.push(b), 'github-token', 'log.txt:1')
+        self.git(self.repo, 'switch', '-q', '-C', 'agent/cr', 'main')
+        self.commit('log.txt', 'step\rcontact ' + OTHER + '\n', 'log')
+        self.refused(self.push('agent/cr'), 'e-mail address', 'log.txt:1')
+
+    def test_rename_to_a_secret_file_name_is_refused(self):
+        self.commit('notes.txt', 'just notes\n', 'notes')
+        self.assertEqual(self.push('main').returncode, 0)
+        b = self.branch()
+        self.git(self.repo, 'mv', 'notes.txt', '.env')
+        self.git(self.repo, 'commit', '-q', '-m', 'rename')
+        self.refused(self.push(b), 'secret-file-name', '.env')
+
+    def test_utf16_text_is_read(self):
+        b = self.branch()
+        for name, text, rule in (('ps.txt', 'GH=' + TOKEN, 'github-token'),
+                                 ('mail.txt', 'mail ' + OTHER, 'e-mail address')):
+            self.git(self.repo, 'switch', '-q', '-C', b, 'main')
+            with open(os.path.join(self.repo, name), 'wb') as f:
+                f.write(('\ufeff' + text + '\r\n').encode('utf-16-le'))
+            self.git(self.repo, 'add', '--', name)
+            self.git(self.repo, 'commit', '-q', '-m', name)
+            self.refused(self.push(b), rule, name)
+
+    def test_blob_and_tree_pushes_are_refused(self):
+        blob = \
+            subprocess.run(['git', 'hash-object', '-w', '--stdin'], cwd=self.repo, env=self.env,
+                           input=TOKEN + '\n', capture_output=True, text=True).stdout.strip()
+        self.refused(self.push(blob + ':refs/blobs/x'), 'not a commit')
+        self.git(self.repo, 'tag', 'blobtag', blob)
+        self.refused(self.push('blobtag'), 'not a commit')
+        self.git(self.repo, 'tag', '-a', '-m', 'on a blob', 'blobtag2', blob)
+        self.refused(self.push('blobtag2'), 'not a commit')
+        tree = self.git(self.repo, 'rev-parse', 'HEAD^{tree}').stdout.strip()
+        self.refused(self.push(tree + ':refs/trees/x'), 'not a commit')
+
+    def test_log_encoding_setting_does_not_blind_the_message_checks(self):
+        self.git(self.repo, 'config', 'i18n.logOutputEncoding', 'UTF-16LE')
+        b = self.branch()
+        self.commit('a.txt', 'a\n', 'use ' + TOKEN + ' and ' + OTHER)
+        self.refused(self.push(b), 'github-token', 'commit message')
+
+    def test_push_url_other_than_the_fetch_url_trusts_no_tracking_refs(self):
+        # main as fetched from the private origin holds a token; pushes go to a public repository
+        other = os.path.join(self.dir, 'other')
+        self.git(self.dir, 'clone', '-q', self.origin, other)
+        self.commit('k.txt', TOKEN + '\n', 'k', repo=other)
+        self.git(other, 'push', '-q', 'origin', 'main')
+        self.git(self.repo, 'fetch', '-q', 'origin')
+        self.git(self.repo, 'merge', '-q', '--ff-only', 'origin/main')
+        public = os.path.join(self.dir, 'public.git')
+        self.git(self.dir, 'init', '-q', '--bare', public)
+        self.git(self.repo, 'config', 'remote.origin.pushurl', public)
+        b = self.branch()
+        self.commit('a.txt', 'a\n', 'a')
+        self.refused(self.push(b), 'github-token', 'k.txt:1')
+
     # --- personal data ------------------------------------------------------------------------
 
     def test_address_in_a_commit_message_is_refused(self):
@@ -208,6 +268,30 @@ class Push(unittest.TestCase):
         b = self.branch()
         self.commit('NOTICE', 'Copyright 2026 ' + NAME + '\n', 'notice')
         self.refused(self.push(b), "the user's name", 'NOTICE:1')
+
+    def test_address_or_token_in_a_file_name_is_refused_and_not_printed(self):
+        b = self.branch()
+        self.commit('contacts/' + OTHER + '.md', 'hello\n', 'contact')
+        self.refused(self.push(b), 'e-mail address', '(a file name)')
+        self.git(self.repo, 'switch', '-q', '-C', 'agent/t', 'main')
+        self.commit('k/' + TOKEN + '.txt', 'GH=' + TOKEN + '\n', 'k')
+        self.refused(self.push('agent/t'), 'github-token', '(a file name)')
+
+    def test_someone_elses_address_as_author_is_refused(self):
+        b = self.branch()
+        with open(os.path.join(self.repo, 'a.txt'), 'w') as f:
+            f.write('a\n')
+        self.git(self.repo, 'add', '--', 'a.txt')
+        self.git(self.repo, 'commit', '-q', '-m', 'a', '--author', 'Jan <' + OTHER + '>')
+        self.refused(self.push(b), 'e-mail address', 'author or committer')
+
+    def test_a_repository_identity_as_author_passes(self):
+        local = 'fixture' + '@' + 'work-place.be'
+        self.git(self.repo, 'config', 'user.email', local)
+        b = self.branch()
+        self.commit('a.txt', 'a\n', 'a')
+        r = self.push(b)
+        self.assertEqual(r.returncode, 0, r.stderr)
 
     def test_the_commits_own_identity_in_its_message_passes(self):
         b = self.branch()

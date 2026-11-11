@@ -15,9 +15,10 @@
 # into it: in its tip as last fetched, or the head of a pull request merged into it. A value
 # that is no branch name refuses every deletion.
 # The content checks (#40), for every push that sends anything: the hook lists the objects that
-# go out (the commits of each pushed ref not yet in the pushed-to remote's tracking refs as last
-# fetched, nor in the remote tips the push replaces, plus annotated tags) and runs, from the
-# installed clone ($HOME/.agentic-github-flow, where install.sh and install.ps1 put it):
+# go out (the commits of each pushed ref not in the remote tips the push replaces, nor in the
+# pushed-to remote's tracking refs as last fetched when the push goes to the URL they were
+# fetched from, plus annotated tags) and runs, from the installed clone
+# ($HOME/.agentic-github-flow, where install.sh and install.ps1 put it):
 # - the secret scan: plugins/security/scripts/scan_secrets.py --commits;
 # - the personal-data check: plugins/guards/scripts/pre_tool_personal_data.py --commits;
 # - only when AGENTIC_GITHUB_FLOW_UNASKED_PUSH is set (not empty, not 0), the protected-path
@@ -26,12 +27,19 @@
 #   workflows, hooks, permission settings, the installer and rules/core.md still ask.
 # Each script's header owns what it looks for. A finding refuses the push and names the rule,
 # the file and the commit, never the value. The checks fail closed: a missing clone or Python, a
-# script that cannot run, an object that is not a commit or tag refuses the push. Offline.
+# script that cannot run, a pushed blob or tree refuses the push. Offline.
+# Limits: the tracking refs stand for what the remote has, so fetch before pushing; after
+# `git remote set-url` to a new repository, `git fetch --prune` it first, or the old history
+# counts as already there. A branch whose base the pushed-to remote lacks (a fork behind its
+# upstream, a first push of old history) is judged whole and may be refused for data that is
+# public elsewhere. Git LFS uploads file contents in its own hook: only the pointers are read.
+# Patterns are a known list (see each script): unknown token formats, encoded or archived
+# content and obfuscated addresses pass.
 # Install per repository (worktrees share it): cp pre-push "$(git rev-parse --git-path hooks)/pre-push"
 # and chmod +x it; an existing pre-push hook is chained by hand, never overwritten. On Windows,
 # Git for Windows runs it with its own sh.
 remote="$1"
-url="$2"
+push_url="$2"
 tips=""
 known=""
 default=$(git symbolic-ref -q "refs/remotes/$remote/HEAD" 2>/dev/null) ||
@@ -111,14 +119,33 @@ done
 if [ -z "$python" ] && command -v py >/dev/null 2>&1; then python="py -3"; fi
 [ -n "$python" ] || refuse "the checks cannot run: no Python 3.8+ found" "" "Ask the user."
 
-# what goes out: commits the remote does not have as far as this clone knows, annotated tags
-# shellcheck disable=SC2086
-objects=$(git rev-list $tips --not $known --remotes="$remote" --) ||
-  refuse "the checks cannot run: git cannot list the outgoing commits" "" "Ask the user."
+# only commits and tags pointing at commits: a blob or tree carries content no check reads
+tags=""
 for tip in $tips; do
-  [ "$(git cat-file -t "$tip" 2>/dev/null)" = tag ] && objects="$objects
+  [ "$(git cat-file -t "$tip^{}" 2>/dev/null)" = commit ] ||
+    refuse "$tip is not a commit (or a tag of one): its content would go out unchecked" "" \
+      "Ask the user."
+  [ "$(git cat-file -t "$tip" 2>/dev/null)" = tag ] && tags="$tags
 $tip"
 done
+# what goes out: commits the remote does not have as far as this clone knows. Its tracking refs
+# count only when the push goes where they were fetched from (same host and path, whatever the
+# scheme or user): a pushurl elsewhere, or a remote given as a URL, trusts none of them.
+norm() {
+  printf '%s' "$1" | sed -e 's#^[A-Za-z][A-Za-z0-9+.-]*://##' -e 's#^[^@/]*@##' \
+    -e 's#^\([^/:]*\):\([^0-9/]\)#\1/\2#' -e 's#/*$##' -e 's#\.git$##' | tr 'A-Z' 'a-z'
+}
+fetch_url=$(git remote get-url "$remote" 2>/dev/null) || fetch_url=""
+case "$remote" in -*) fetch_url="" ;; esac
+tracked=""
+if [ -n "$fetch_url" ] && [ "$(norm "$fetch_url")" = "$(norm "$push_url")" ]; then
+  tracked="--remotes=$remote"
+fi
+# shellcheck disable=SC2086
+objects=$(git rev-list $tips --not $known $tracked --) ||
+  refuse "the checks cannot run: git cannot list the outgoing commits" "" "Ask the user."
+objects="$objects$tags"
+objects=$(printf '%s\n' "$objects" | sed '/^$/d')
 [ -n "$objects" ] || exit 0
 
 out=$(printf '%s\n' "$objects" |
@@ -131,7 +158,7 @@ case $? in
   *) refuse "the secret scan could not run:" "$out" "Ask the user." ;;
 esac
 out=$(printf '%s\n' "$objects" |
-      $python -I "$flow/plugins/guards/scripts/pre_tool_personal_data.py" --commits "$url" 2>&1)
+      $python -I "$flow/plugins/guards/scripts/pre_tool_personal_data.py" --commits "$push_url" 2>&1)
 case $? in
   0) ;;
   1) refuse "the outgoing commits carry personal data (what, file:line, commit):" "$out" \

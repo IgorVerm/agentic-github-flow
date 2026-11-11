@@ -80,13 +80,16 @@ Usage as a hook: reads the PreToolUse JSON on stdin, prints the decision ("ask";
 
 The push check, `--commits <remote URL>` (object ids on stdin, run in the repository): the
 `pre-push` hook (`templates/pre-push`) lists what a push sends and this judges it by the same
-identifiers and addresses: each line the commits add (a merge: what is new against every parent),
-each commit message and each annotated tag's message. The configured identity of each commit
-(author, committer) or tag (tagger) is removed from its own message first, since the push sends it
-in the header anyway; the gh login passes when the remote is on GitHub; `exempt-dirs` applies to
-the repository's folder. It prints `personal-data<TAB>what<TAB>file:line<TAB>object` per finding,
-never the value, and exits 0 (nothing found), 1 (found) or 2 (usage or git error). Unlike the
-hook mode it fails closed. Test: `python3 tests/pre_push_checks.py`.
+identifiers and addresses: each line the commits add (a merge: what is new against every parent;
+UTF-16 text with its NUL bytes removed), each file name (reported as `(a file name)`, never
+printed), each commit message and each annotated tag's message, and the addresses of authors,
+committers and taggers other than the user's configured ones (global or the repository's
+user.email). The identity of each commit or tag is removed from its own message first, since the
+push sends it in the header anyway; the gh login passes when the remote is on GitHub;
+`exempt-dirs` applies to the repository's folder. It prints
+`personal-data<TAB>what<TAB>where<TAB>object` per finding, never the value, and exits 0 (nothing
+found), 1 (found) or 2 (usage or git error). Unlike the hook mode it fails closed. Test:
+`python3 tests/pre_push_checks.py`.
 """
 import importlib.util, json, os, re, shlex, subprocess, sys
 from urllib.parse import unquote, urlsplit
@@ -704,23 +707,26 @@ def codex_reason(what, carried, shell):
 
 PUSH_DIFF = ['-c', 'core.quotePath=false', '-c', 'diff.noprefix=false', '-c',
              'diff.mnemonicPrefix=false', '-c', 'diff.relative=false', '-c', 'log.showRoot=true',
-             'log', '--no-walk=unsorted', '--stdin', '--cc', '--no-color', '-U0', '--no-ext-diff',
-             '--text', '--no-textconv', '--format=@@commit %H']
+             'log', '--no-walk=unsorted', '--stdin', '--cc', '--no-renames', '--no-color', '-U0',
+             '--no-ext-diff', '--text', '--no-textconv', '--format=@@commit %H']
 OBJECT_ID = re.compile(r'[0-9a-f]{40}(?:[0-9a-f]{24})?')
 OTHERS_LABEL = "an e-mail address (someone's personal data)"
+HEADER_LABEL = "someone's e-mail address as author or committer (or tagger)"
 
 
 def _git(repo, args, stdin=''):
-    r = subprocess.run(['git', '-C', repo] + args, input=stdin, capture_output=True, text=True,
-                       encoding='utf-8', errors='replace')
+    """git's output decoded without newline translation, so a lone carriage return stays inside
+    its line."""
+    r = subprocess.run(['git', '-C', repo] + args, input=stdin.encode('utf-8'), capture_output=True)
     if r.returncode != 0:
-        raise RuntimeError('git: %s' % r.stderr.strip()[:200])
-    return r.stdout
+        raise RuntimeError('git: %s' % r.stderr.decode('utf-8', 'replace').strip()[:200])
+    return r.stdout.decode('utf-8', 'replace')
 
 
 def added_lines(diff):
     """(commit, path, line number, text) for each line a `git log --cc` diff adds; a merge's line
-    only when it is new against every parent (one prefix column per parent)."""
+    only when it is new against every parent (one prefix column per parent). Each file's name
+    comes first, as (commit, path, 0, None)."""
     commit, path, line_no, header, width = '', '', 0, False, 1
     for raw in diff.split('\n'):
         if raw.startswith('@@commit '):
@@ -738,6 +744,8 @@ def added_lines(diff):
                 if name.startswith('"') and name.endswith('"'):
                     name = name[1:-1]  # a C-quoted name: shown as git quotes it
                 path = name[2:] if name.startswith('b/') else name
+                if path != '/dev/null':
+                    yield commit, path, 0, None
         elif path and path != '/dev/null' and raw[:1] in ('+', '-', ' '):
             prefix = raw[:width]
             if '-' in prefix:
@@ -771,7 +779,7 @@ def remote_host(url):
 
 def push_labels(line, mine, github, own):
     """What personal data one line of a push carries, as labels; never the value."""
-    text = home_routine(line)
+    text = home_routine(line.replace('\0', '') if '\0' in line else line)  # UTF-16 text
     decoded = unquote(text) if '%' in text else text
     labels = [label for label, pattern, is_login in mine
               if not (is_login and github) and pattern.search(decoded)]
@@ -797,6 +805,8 @@ def push_findings(repo, ids, url):
     commits, tags = outgoing_objects(repo, ids)
     mine = identifiers()
     own = [pattern for label, pattern, _ in mine if 'e-mail address' in label]
+    configured = {a.strip().lower() for a in _run(['git', '-C', repo, 'config', '--get-all',
+                                                   'user.email']).splitlines() if a.strip()}
     github = is_github(remote_host(url))
     found = []
 
@@ -805,15 +815,38 @@ def push_findings(repo, ids, url):
             if (label, where, oid) not in found:
                 found.append((label, where, oid))
 
+    def judge_header(addresses, oid):
+        """Someone else's address as author, committer or tagger; the user's configured ones
+        (global or this repository's) are the identity the rule leaves out."""
+        for a in addresses:
+            if a and personal_address(a) and a.strip().lower() not in configured and \
+                    not any(p.fullmatch(a.strip()) for p in own):
+                finding = (HEADER_LABEL, '(header)', oid)
+                if finding not in found:
+                    found.append(finding)
+
     if commits:
         stdin = ''.join(c + '\n' for c in commits)
+        shown = {}
         for commit, path, n, line in added_lines(_git(repo, PUSH_DIFF, stdin)):
-            judge_line(line, '%s:%d' % (path, n), commit)
-        messages = _git(repo, ['log', '--no-walk=unsorted', '--stdin',
-                               '--format=%x00%H%x01%an%x01%ae%x01%cn%x01%ce%n%B'], stdin)
+            if line is None:  # the file name: an address in it is reported, never printed
+                key = (commit, path)
+                shown[key] = path
+                # `<address>.md` reads as a file name to emails(): judge each part without its
+                # extension too
+                parts = ' '.join([path] + [os.path.splitext(p)[0] for p in path.split('/')])
+                if push_labels(parts, mine, github, own):
+                    shown[key] = '(a file name)'
+                    judge_line(parts, shown[key], commit)
+                continue
+            judge_line(line, '%s:%d' % (shown.get((commit, path), path), n), commit)
+        messages = _git(repo, ['-c', 'i18n.logOutputEncoding=UTF-8', 'log', '--no-walk=unsorted',
+                               '--stdin', '--format=%x00%H%x01%an%x01%ae%x01%cn%x01%ce%n%B'],
+                        stdin)
         for chunk in messages.split('\0')[1:]:
             head, _, body = chunk.partition('\n')
             sha, *identity = head.split('\x01')
+            judge_header(identity[1::2], sha[:12])
             for n, line in enumerate(without(body, identity).splitlines(), 1):
                 judge_line(line, '(commit message):%d' % n, sha[:12])
     for tag in tags:
@@ -821,6 +854,8 @@ def push_findings(repo, ids, url):
             header, _, message = _git(repo, ['cat-file', 'tag', tag]).partition('\n\n')
             fields = dict(l.split(' ', 1) for l in header.splitlines() if ' ' in l)
             tagger = re.match(r'(.*?)\s*<([^>]*)>', fields.get('tagger', ''))
+            if tagger:
+                judge_header([tagger.group(2)], tag[:12])
             for n, line in enumerate(without(message, tagger.groups() if tagger else ())
                                      .splitlines(), 1):
                 judge_line(line, '(tag message):%d' % n, tag[:12])

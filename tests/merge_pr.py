@@ -4,13 +4,13 @@
 A bare origin on disk holds the base branch and the pull request's head at refs/pull/7/head; a
 stand-in `gh` (AGENTIC_GITHUB_FLOW_GH) answers `pr view` from a fixture and records `pr merge`.
 A folder remote is not GitHub, so landing.py decides pull request unless HANDOFF.md says local
-main. Each case is a way an agent could merge what it may not: no grant named, local-main mode,
-a draft, a merge state other than CLEAN, a failed, pending or missing check, no review, a review
+main. Each case is a way an agent could merge what it may not: automatic merging not switched
+on in HANDOFF.md (whatever --grant says), local-main mode, a draft without --ready, a merge state other than CLEAN, a failed, pending or missing check, no review, a review
 that does not approve or was edited after posting, an approval of an older commit followed by a commit of the author or by
 a merge with a conflict resolved by hand, no overlap result, a path that merges only on the
 user's word (built in, or named in HANDOFF.md), and a base other than the landing branch. And the
 cases that may merge: a review of the head, and of a commit followed only by a clean merge of
-the base. The review comment that review_verdict.py writes is accepted, and hand-written
+the base; with --ready a draft is marked ready first and merged only once GitHub calls it CLEAN. The review comment that review_verdict.py writes is accepted, and hand-written
 variants that deviate from it are refused. Offline: no network, no real gh.
 """
 import json
@@ -24,6 +24,12 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 TOOL = os.path.join(ROOT, 'plugins', 'core', 'scripts', 'merge_pr.py')
 VERDICT = os.path.join(ROOT, 'plugins', 'core', 'scripts', 'review_verdict.py')
 ROBOT = '\N{ROBOT FACE}'
+SWITCH = '## Standing permissions\n\n| Permission | Value |\n|---|---|\n| automatic merge | `on` |\n'
+
+
+def handoff(*sections):
+    """HANDOFF.md with automatic merging switched on, and the sections given."""
+    return '# Handoff\n\n' + '\n'.join(sections + (SWITCH,))
 
 STUB = r'''import json, os, sys
 s = json.load(open(os.environ['STUB_GH']))
@@ -33,6 +39,10 @@ json.dump(s, open(os.environ['STUB_GH'], 'w'))
 if a[:2] == ['pr', 'view']:
     print(json.dumps(s['pr'])); sys.exit(0)
 if a[:2] == ['pr', 'merge']:
+    sys.exit(0)
+if a[:2] == ['pr', 'ready']:
+    s['pr'].update(isDraft=False, mergeStateStatus=s.get('after_ready', 'CLEAN'))
+    json.dump(s, open(os.environ['STUB_GH'], 'w'))
     sys.exit(0)
 if a[0] == 'api':
     status, body = s['api'].get(a[1], [404, {'message': 'Not Found'}])
@@ -61,7 +71,7 @@ class MergePr(unittest.TestCase):
         self.git('config', 'user.email', 'test@example.com')
         self.git('config', 'user.name', 'Test')
         self.write('app.txt', 'one\n')
-        self.write('HANDOFF.md', '# Handoff\n')
+        self.write('HANDOFF.md', handoff())
         self.git('add', '--', 'app.txt', 'HANDOFF.md')
         self.git('commit', '-q', '-m', 'base')
         self.git('remote', 'add', 'origin', self.bare)
@@ -108,14 +118,14 @@ class MergePr(unittest.TestCase):
         return {'createdAt': when, 'author': {'login': login}, 'includesCreatedEdit': False,
                 'body': ROBOT + ' Claude Code (%s): %s' % (role, text)}
 
-    def run_tool(self, pr, *args, grant='HANDOFF.md Standing permissions', api=None):
+    def run_tool(self, pr, *args, grant=None, api=None, after_ready=None):
         rules = [{'type': 'required_status_checks', 'parameters': {'required_status_checks': [
             {'context': 'test (%s)' % o} for o in ('ubuntu', 'macos', 'windows')]}}]
         answers = {'user': [200, {'login': 'me'}],
                    'repos/acme/tool/rules/branches/main': [200, rules]}
         answers.update(api or {})
         with open(self.state, 'w') as f:
-            json.dump({'pr': pr, 'api': answers}, f)
+            json.dump({'pr': pr, 'api': answers, 'after_ready': after_ready or 'CLEAN'}, f)
         env = dict(os.environ, STUB_GH=self.state,
                    AGENTIC_GITHUB_FLOW_GH=json.dumps([sys.executable, self.stub]))
         cmd = [sys.executable, TOOL, '7', '-C', self.repo, '-R', 'acme/tool', *args]
@@ -149,11 +159,38 @@ class MergePr(unittest.TestCase):
         r = self.assertMerged(self.pr(), '--dry-run')
         self.assertIn('would merge', r.stdout)
         self.assertEqual(self.merged(), [])
-        self.assertEqual(self.run_tool(self.pr(), grant=None).returncode, 2)
-        self.assertEqual(self.run_tool(self.pr(), '--grant', '--dry-run', grant=None).returncode,
-                         2)
+        self.assertEqual(self.run_tool(self.pr(), '--grant', '--dry-run').returncode, 2)
         self.assertEqual(self.merged(), [])
         self.assertEqual(self.run_tool(self.pr(), '--method', 'rebase').returncode, 2)
+
+    def test_the_switch_in_handoff_decides_not_a_grant(self):
+        for text in ('# Handoff\n',
+                     '# Handoff\n\n## Standing permissions\n\nNone.\n',
+                     SWITCH.replace('`on`', '`off`'),
+                     '# Handoff\n\n## Landing settings\n\n| Setting | Value |\n|---|---|\n'
+                     '| automatic merge | on |\n'):
+            with self.subTest(text=text):  # the task branch keeps the switch; main decides
+                self.git('switch', '-q', 'main')
+                self.write('HANDOFF.md', text)
+                self.git('commit', '-q', '-am', 'no switch')
+                self.git('push', '-q', 'origin', 'main')
+                self.git('switch', '-q', 'agent/7-x')
+                self.assertRefused(self.pr(), 'not switched on', grant='agent-rules overlay')
+
+    def test_ready_marks_a_draft_only_when_everything_else_holds(self):
+        draft = self.pr(isDraft=True, mergeStateStatus='DRAFT')
+        r = self.assertMerged(draft, '--ready')
+        self.assertIn(['pr', 'ready', '7', '-R', 'acme/tool'], self.log)
+        self.assertEqual(len(self.merged()), 1)
+        r = self.assertMerged(draft, '--ready', '--dry-run')
+        self.assertIn('would mark ready and merge', r.stdout)
+        self.assertNotIn(['pr', 'ready', '7', '-R', 'acme/tool'], self.log)
+        # anything else failing: never marked ready
+        self.assertRefused(dict(draft, comments=[]), 'no signed review', '--ready')
+        self.assertNotIn(['pr', 'ready', '7', '-R', 'acme/tool'], self.log)
+        # GitHub blocks it once ready: reported, not merged
+        self.assertRefused(draft, 'merge state BLOCKED', '--ready', after_ready='BLOCKED')
+        self.assertIn(['pr', 'ready', '7', '-R', 'acme/tool'], self.log)
 
     def test_state(self):
         self.assertRefused(self.pr(isDraft=True), 'a draft')
@@ -342,14 +379,14 @@ class MergePr(unittest.TestCase):
         self.assertRefused(pr, 'db/001.sql')
 
     def test_handoff_grant_and_settings_are_guarded(self):
-        self.write('HANDOFF.md', '# Handoff\n\nMore state.\n')
-        self.head = self.change('HANDOFF.md', '# Handoff\n\nMore state.\n')
+        self.head = self.change('HANDOFF.md', handoff('More state.\n'))
         self.assertMerged(self.pr(comments=[self.comment('Approved %s' % self.head)]), '--dry-run')
-        for title in ('Standing permissions', 'Landing settings'):
-            with self.subTest(title=title):
-                self.head = self.change('HANDOFF.md', '# Handoff\n\n## %s\n\nGranted.\n' % title)
+        for text in ('## Landing settings\n\nGranted.\n',
+                     SWITCH + '| unasked push | on |\n', '# Handoff\n'):
+            with self.subTest(text=text):
+                self.head = self.change('HANDOFF.md', '# Handoff\n\n' + text)
                 self.assertRefused(self.pr(comments=[self.comment('Approved %s' % self.head)]),
-                                   title)
+                                   'merges only on the user')
 
     def test_a_teammates_changes_requested(self):
         review = {'submittedAt': '2026-11-09T12:00:00Z', 'state': 'CHANGES_REQUESTED',
@@ -367,14 +404,14 @@ class MergePr(unittest.TestCase):
                      '### Standing permissions\n\nAutomatic merging.\n',
                      'Our landing settings changed: local main.\n'):
             with self.subTest(text=text):
-                self.head = self.change('HANDOFF.md', '# Handoff\n\n' + text)
+                self.head = self.change('HANDOFF.md', handoff(text))
                 self.assertRefused(self.pr(comments=[self.comment('Approved %s' % self.head)]),
                                    'line naming them')
 
     def test_required_checks_row_and_app_checks(self):
         self.git('switch', '-q', 'main')
-        self.write('HANDOFF.md', "# H\n\n## Landing settings\n\n| Setting | Value |\n|---|---|\n"
-                   "| required checks | test (ubuntu, 3.12); lint |\n")
+        self.write('HANDOFF.md', handoff("## Landing settings\n\n| Setting | Value |\n|---|---|\n"
+                                         "| required checks | test (ubuntu, 3.12); lint |\n"))
         self.git('commit', '-q', '-am', 'settings')
         self.git('push', '-q', 'origin', 'main')
         self.git('fetch', '-q', 'origin')
@@ -415,8 +452,8 @@ class MergePr(unittest.TestCase):
 
     def test_local_main_mode(self):
         self.git('switch', '-q', 'main')
-        self.write('HANDOFF.md', "# H\n\n## Landing settings\n\n| Setting | Value |\n|---|---|\n"
-                   "| landing | `local main` |\n")
+        self.write('HANDOFF.md', handoff("## Landing settings\n\n| Setting | Value |\n|---|---|\n"
+                                         "| landing | `local main` |\n"))
         self.git('commit', '-q', '-am', 'settings')
         self.git('push', '-q', 'origin', 'main')
         self.git('fetch', '-q', 'origin')

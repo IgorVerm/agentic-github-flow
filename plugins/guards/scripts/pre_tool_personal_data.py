@@ -625,7 +625,8 @@ def git_to_known_remote(text, cwd):
 
 
 def personal_address(address):
-    """False for placeholder, no-reply and git-host addresses and file names (`x@2x.png`)."""
+    """False for placeholder, no-reply and git-host addresses, and for file names that look
+    like one (an image name with `@2x`)."""
     local, _, domain = address.partition('@')
     return not (NOT_PERSONAL.search(local) or NOT_PERSONAL.search(domain) or
                 domain.rsplit('.', 1)[-1].lower() in FILE_TLDS)

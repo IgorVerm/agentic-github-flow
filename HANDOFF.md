@@ -36,6 +36,11 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
   the landing branch on the user's word (`plugins/core/skills/ship-change/local-main.md`). The
   setting `## Landing settings` can fix the mode and name a landing branch; the worktree,
   overlap and cleanup scripts and `templates/pre-push` follow that branch.
+- Frozen .claude (#50, `DESIGN_DECISIONS.md`): the landing branch is merged in with
+  `plugins/core/scripts/merge_landing.py`, which commits the ordinary merge inside the Claude
+  Code sandbox and keeps the worktree's `.claude/` and `.mcp.json` on disk as the chat started
+  with them; the cleanup and archive checks accept those paths while they match its manifest.
+  Not measured yet in a real issue chat whose landing branch changed `.claude/`.
 - Automatic merging (#13, `DESIGN_DECISIONS.md`): under a standing grant, `merge_pr.py` merges
   an agent's own pull request when its checks, review, overlap line and paths allow it. This
   repository grants nothing (Standing permissions below). The review it needs comes from the
@@ -73,6 +78,7 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
 | automatic merging | `plugins/core/scripts/merge_pr.py` and `review_verdict.py` headers, `plugins/core/skills/review-change/SKILL.md`, `DESIGN_DECISIONS.md`, `tests/merge_pr.py`, `tests/review_verdict.py` |
 | landing modes | `plugins/core/scripts/landing.py` and `promote_main.py` headers, `plugins/core/skills/ship-change/` (`SKILL.md`, `local-main.md`), `tests/landing.py`, `tests/promote_main.py` |
 | worktrees and cleanup | `plugins/core/scripts/*.py` headers, `plugins/core/skills/cleanup-merged/SKILL.md`, `tests/worktree_tools.py`, `tests/new_worktree.py`, `tests/overlap_check.py` |
+| merging the landing branch in the sandbox | `plugins/core/scripts/merge_landing.py` header, `frozen_unexplained` in `plugins/core/scripts/work_proof.py`, `plugins/core/skills/ship-change/SKILL.md` step 2, `DESIGN_DECISIONS.md`, `tests/merge_landing.py` |
 | the security scanners | `plugins/security/scripts/*.py` headers, `plugins/security/skills/review-security/sources.md`, `tests/scan_secrets.py`, `tests/audit_dependencies.py` |
 | the pre-push hook | `templates/pre-push` header, `plugins/core/scripts/push_paths.py`, the push check in `plugins/guards/scripts/pre_tool_personal_data.py`, `tests/pre_push_checks.py`, its older refusals in `tests/worktree_tools.py` (`PrePushTests`) |
 | issue chats | `plugins/issue-chats/skills/issue-handover/method.md`, `plugins/issue-chats/scripts/*.py` headers, `tests/next_issue.py`, `tests/start_issue_chat.py`, `tests/chat_archivable.py`, `tests/archive_guard.py` |

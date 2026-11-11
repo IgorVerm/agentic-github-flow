@@ -3,6 +3,28 @@
 Rulings of the maintainers named in `HANDOFF.md`, newest first, with their words. Detail lives on
 the linked issue.
 
+## Merging the landing branch inside the sandbox: frozen .claude (option D), 2026-11-11
+
+**Decision (the maintainer):** "Ja, D vastleggen" (yes, record D).
+**What:** a chat merges the landing branch into its task branch with
+`plugins/core/scripts/merge_landing.py`. When the merge changes `.claude/` or `.mcp.json`, which
+the Claude Code sandbox keeps a session from writing in its own working directory, those paths
+get the skip-worktree bit and a per-worktree sparse-checkout exclusion, their on-disk state goes
+into a manifest in the worktree's git dir, and the merge runs with the sparse settings passed by
+`-c`: the merge commit is the ordinary one, the files on disk stay as the chat started with
+them. A conflict inside those paths is refused. The cleanup and archive checks accept the frozen
+paths only while the disk matches the manifest. The cost: a running chat's gates test the
+`.claude/` it started with; new skills and agents arrive in the next chat.
+**Rejected:** B, a merge tool outside the sandbox (git still reads repository configuration the
+chat can write, and a check before the merge is racy); H, no longer tracking `.claude/`.
+**Not in this decision, on the maintainer's word:** a guard rule refusing a bare merge or pull
+that touches `.claude/`, and removing `git pull *` from `sandbox.excludedCommands`
+(agent-rules#67, the maintainer's own rules repository).
+**Binds:** `plugins/core/scripts/merge_landing.py`, `work_proof.py` (`frozen_unexplained`),
+`remove_merged_worktree.py`, `plugins/issue-chats/scripts/chat_archivable.py`,
+`plugins/core/skills/ship-change/SKILL.md` step 2, `local-main.md`.
+**Detail:** issue #50; the report agent-rules#65.
+
 ## Efficient design: a skill and a review rule, for any kind of software, 2026-11-11
 
 **Decision (the maintainer):** "Skill + regel" (a skill and a rule), adding "maar algemener dan

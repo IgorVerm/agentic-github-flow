@@ -36,6 +36,10 @@ What it does, per client (Claude Code, Codex):
   plugins/guards/scripts/pre_tool_sandbox_network.py from this clone (its header owns what it
   does). It is not in the guards plugin's hooks.json, so only this flag turns it on; --update
   replaces and --uninstall removes only the recorded entry.
+- Versioned paths (Claude Code, read-only): each install and --update names every permission
+  rule and sandbox exclusion in ~/.claude/settings.json that points into the plugin cache, whose
+  folder names the version, and gives the same entry with this clone's path, which stays the
+  same across versions. It changes none of them.
 - Overlays (--overlay): a folder with an AGENTS.md, or a git URL cloned into overlays/ here
   (a second URL with the same name gets a suffix); their text follows the core rules in both
   blocks.
@@ -452,6 +456,67 @@ def add_sandbox_hook(state):
                     '"sandbox.excludedCommands" lists your network commands in %s' % path)
 
 
+# A settings entry naming Claude Code's per-version copy of one of these plugins, in any spelling
+# of the folder before it: group 1 the plugin's folder name, group 2 the version.
+CACHED = re.compile(r'''[^\s"'()]*plugins[/\\]cache[/\\]%s[/\\](%s-[a-z-]+)[/\\]([^/\\\s"'()]+)'''
+                    % (MARKET, MARKET))
+
+
+def plugin_version(key):
+    try:
+        with open(os.path.join(CLONE, 'plugins', key, '.claude-plugin', 'plugin.json'),
+                  encoding='utf-8') as f:
+            return json.load(f).get('version')
+    except (OSError, ValueError):
+        return None
+
+
+def report_versioned_paths():
+    """Read-only: name each permission rule and sandbox exclusion in ~/.claude/settings.json that
+    points into the plugin cache, whose folder names the version, so that an update silently
+    stops it matching. The clone's path stays the same across versions; the skills load from it
+    (measured with Claude Code 2.1.322). Nothing is changed: the user's permissions are theirs."""
+    path = os.path.join(claude_dir(), 'settings.json')
+    try:
+        data = load_json(path) or {}
+    except Refused:
+        return
+    places = []
+    permissions = data.get('permissions')
+    for kind in ('allow', 'ask', 'deny'):
+        if isinstance(permissions, dict) and isinstance(permissions.get(kind), list):
+            places.append(('permissions.' + kind, permissions[kind]))
+    sandbox = data.get('sandbox')
+    if isinstance(sandbox, dict) and isinstance(sandbox.get('excludedCommands'), list):
+        places.append(('sandbox.excludedCommands', sandbox['excludedCommands']))
+    keys = {name: key for key, name in PLUGINS.items()}
+    found = False
+    for where, entries in places:
+        for entry in entries:
+            if not isinstance(entry, str):
+                continue
+            for match in CACHED.finditer(entry):
+                name, version = match.group(1), match.group(2)
+                if name not in keys:
+                    continue
+                installed = plugin_version(keys[name])
+                clone_form = entry.replace(match.group(0),
+                                           os.path.join(CLONE, 'plugins', keys[name]))
+                if version != installed:
+                    say('warn', 'claude: %s in %s names %s %s, but %s is installed, so it no '
+                                'longer matches: %s' % (where, path, name, version, installed,
+                                                        entry))
+                else:
+                    say('note', 'claude: %s in %s names the folder of %s %s, which stops '
+                                'matching at its next version: %s' % (where, path, name,
+                                                                      version, entry))
+                print('      The same in the clone, which keeps its path across versions: %s'
+                      % clone_form)
+                found = True
+    if found:
+        print('      The installer changes no permission: replace the entry yourself.')
+
+
 def remove_sandbox_hook(state):
     record = state.get('claude_sandbox_hook')
     path = os.path.join(claude_dir(), 'settings.json')
@@ -756,6 +821,8 @@ def install(args, state, updating=False):
         if 'codex' in plan:
             codex_guards(state)
         save_state(state)
+    if 'claude' in plan:
+        report_versioned_paths()
     say('done' if not failures else 'FAIL', 'installed from %s%s' % (
         CLONE, '' if not failures else '; failed: ' + '; '.join(failures)))
     if 'claude' in plan or 'codex' in plan:

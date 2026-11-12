@@ -3,6 +3,22 @@
 Rulings of the maintainers named in `HANDOFF.md`, newest first, with their words. Detail lives on
 the linked issue.
 
+## Worktree clones on by default on macOS, 2026-11-11
+
+**Decision (the maintainer):** "B, standaard aan op macOS, overal waar klonen lukt: APFS,
+hetzelfde volume, geen sparse checkout. Uitzetten kan met --no-clones of
+AGENTIC_GITHUB_FLOW_CLONES=0. Op andere systemen verandert niets." (B: on by default on macOS
+wherever cloning works: APFS, the same volume, no sparse checkout. It can be switched off with
+--no-clones or AGENTIC_GITHUB_FLOW_CLONES=0. On other systems nothing changes.) The issue had
+proposed opt-in; integrator worktrees of ~14 GB each filled the disk twice the same day.
+**What:** `new_worktree.py` makes the tracked files APFS clones of the primary checkout's on
+macOS unless switched off; where cloning cannot work there it says why and makes a plain
+worktree. Elsewhere the default is today's plain worktree, without a note; `--clones` or
+`AGENTIC_GITHUB_FLOW_CLONES=1` there gives one note and the same plain worktree.
+**Binds:** `plugins/core/scripts/new_worktree.py`, `clone_dedupe_worktree.py`,
+`tests/new_worktree.py`.
+**Detail:** issue #19.
+
 ## Automatic merging only where the user switches it on; unasked push of the own task branch, 2026-11-11
 
 **Decision (the maintainer):** on merging, "automatisch mergen mag enkel voor repos waar ik dit

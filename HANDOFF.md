@@ -65,6 +65,12 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
   `AGENTIC_GITHUB_FLOW_UNASKED_PUSH` is set: `push_branch.py` sets it for its own push. This
   repository's tests build their planted tokens and addresses by concatenation, or the hook refuses
   the push that carries them.
+- Worktree clones (#19, `DESIGN_DECISIONS.md`): on macOS `new_worktree.py` makes the tracked
+  files APFS clones of the primary checkout's by default, checked by git to equal a plain
+  `git worktree add`; `--no-clones` or `AGENTIC_GITHUB_FLOW_CLONES=0` turns it off. Elsewhere
+  nothing changes. `clone_dedupe_worktree.py` turns an existing worktree's files into clones.
+  Measured 2026-11-11 with 512 MiB of tracked files: `df` 507.8 MiB
+  for a plain worktree, 0.0 MiB with clones.
 - Not run yet: the live skill-choice probe for the new and changed descriptions, an end-to-end
   issue-chat chain in the desktop app or in Codex.
 

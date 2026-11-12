@@ -25,8 +25,12 @@ primary file holds (clone_dedupe_worktree.py owns which files may serve). Git ch
 rest: files that differ from the primary or are missing there, symlinks, submodules, and paths
 with a checkout conversion (`filter`, `text`, `eol`, `crlf`, `ident`, `working-tree-encoding`,
 so LFS too); such a file of 100 KB or more whose bytes equal the primary's then becomes a clone
-after a sha256 check. Git re-hashes every clone (`update-index --refresh`) and checks out again
-any that does not match. The result is what `git worktree add` gives: the same files, modes and
+after a sha256 check. A clone keeps none of the primary file's flags (hidden, locked) or
+extended attributes (quarantine, tags) beyond `com.apple.provenance`, which a file git writes
+gets too; a compressed or system-flagged source is left to git. Git re-hashes every clone
+(`update-index --refresh`) and checks out again any that does not match. Should the clone
+checkout fail at all (paths that differ only in case on a case-insensitive volume, for one),
+git checks out every file, as without clones. The result is what `git worktree add` gives: the same files, modes and
 index, `git status` clean, the post-checkout hook run with the same arguments. Where cloning
 cannot work it says why in one line and makes a plain worktree: off macOS (only when asked
 for) exactly as without clones; on macOS on another volume or a file system without clones;
@@ -119,7 +123,8 @@ def clone_plan(primary: str, base: str, probe_dir: str):
         dedupe.clonefile(os.path.join(primary, next(iter(by_blob.values()))), probe)
     except OSError as e:
         return {}, f'cannot clone into {probe_dir} ({e.strerror})', False
-    os.unlink(probe)
+    finally:
+        dedupe.discard(probe)
     return by_blob, None, False
 
 
@@ -155,11 +160,15 @@ def checkout_from_clones(primary: str, dest: str, by_blob: dict[str, str]) -> tu
             if not stat.S_ISREG(st.st_mode):
                 continue
             os.makedirs(os.path.dirname(dst), exist_ok=True)
-            dedupe.clonefile(src, dst)
+            dedupe.clone_plain(src, dst)
         except OSError:
             continue  # git checks it out below
-        os.chmod(dst, (0o777 if mode == '100755' else 0o666) & ~umask)
-        os.utime(dst)  # written now, as a fresh checkout's file is
+        try:
+            os.chmod(dst, (0o777 if mode == '100755' else 0o666) & ~umask)
+            os.utime(dst)  # written now, as a fresh checkout's file is
+        except OSError:
+            dedupe.discard(dst)
+            continue
         cloned.add(path)
         nbytes += st.st_size
 
@@ -202,13 +211,14 @@ def post_checkout(dest: str) -> int:
     head = gitb(dest, 'rev-parse', 'HEAD').decode().strip()
     env = {k: v for k, v in os.environ.items() if k not in ('GIT_DIR', 'GIT_WORK_TREE')}
     args = [hook, null, head, '1']
-    try:
+    io = {'cwd': dest, 'env': env, 'stdin': subprocess.DEVNULL, 'stdout': sys.stderr}
+    try:  # git runs hooks with stdin from /dev/null and stdout sent to stderr
         try:
-            rc = subprocess.run(args, cwd=dest, env=env).returncode
+            rc = subprocess.run(args, **io).returncode
         except OSError as e:
             if e.errno != errno.ENOEXEC:
                 raise
-            rc = subprocess.run(['/bin/sh', *args], cwd=dest, env=env).returncode
+            rc = subprocess.run(['/bin/sh', *args], **io).returncode
     except OSError as e:
         print(f'new_worktree: cannot run the post-checkout hook {hook}: {e}', file=sys.stderr)
         rc = 1
@@ -230,9 +240,18 @@ def add_with_clones(primary, dest, branch, base, by_blob) -> int:
         n, nbytes, normal = checkout_from_clones(primary, dest, by_blob)
     except (subprocess.CalledProcessError, RuntimeError, OSError) as e:
         err = (getattr(e, 'stderr', None) or b'').decode(errors='replace').strip()
-        print(f'new_worktree: the checkout did not complete: {err or e}; the worktree stands '
-              f'unfinished, see `git -C {dest} status`', file=sys.stderr)
-        return 1
+        print(f'new_worktree: no clones ({err or e}); git checks out every file')
+        # What `git worktree add` itself does after --no-checkout: the index from HEAD and
+        # every file written by git, over any clone made so far.
+        done = git('read-tree', 'HEAD', cwd=dest)
+        if done.returncode == 0:
+            done = git('checkout-index', '-a', '-f', '-u', cwd=dest)
+        if done.returncode != 0:
+            print('new_worktree: the checkout did not complete: ' + done.stderr.strip()
+                  + f'; the worktree stands unfinished, see `git -C {dest} status`',
+                  file=sys.stderr)
+            return 1
+        return post_checkout(dest)
     print(f'new_worktree: cloned {n} files ({nbytes / 2**30:.2f} GiB) from {primary}; '
           f'git checked out {normal}')
     return post_checkout(dest)

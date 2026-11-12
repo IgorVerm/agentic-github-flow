@@ -48,8 +48,41 @@ def physical_offset(path):
         os.close(fd)
 
 
+def _libc():
+    import ctypes
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.listxattr.restype = ctypes.c_ssize_t
+    libc.listxattr.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_size_t, ctypes.c_int)
+    libc.setxattr.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_size_t,
+                              ctypes.c_uint32, ctypes.c_int)
+    return ctypes, libc
+
+
+def xattrs(path):
+    """The names of path's extended attributes (macOS), com.apple.provenance aside: the
+    system gives it to a file git writes too."""
+    if not MACOS:
+        return ()
+    ctypes, libc = _libc()
+    p = os.fsencode(str(path))
+    size = libc.listxattr(p, None, 0, 1)  # 1 = XATTR_NOFOLLOW
+    if size <= 0:
+        return ()
+    buf = ctypes.create_string_buffer(size)
+    size = libc.listxattr(p, buf, size, 1)
+    return tuple(sorted(n for n in buf.raw[:size].split(b'\0')
+                        if n and n != b'com.apple.provenance'))
+
+
+def setxattr(path, name, value):
+    ctypes, libc = _libc()
+    if libc.setxattr(os.fsencode(str(path)), name, value, len(value), 0, 0):
+        raise OSError(ctypes.get_errno(), 'setxattr')
+
+
 def snapshot(top):
-    """rel path -> (st_mode, bytes or link target) for everything except the .git file."""
+    """rel path -> (st_mode, bytes or link target, flags, xattr names) for everything except
+    the .git file."""
     out = {}
     for d, dirs, files in os.walk(top):
         for name in dirs + files:
@@ -58,12 +91,13 @@ def snapshot(top):
             if rel == '.git':
                 continue
             st = os.lstat(p)
+            meta = (getattr(st, 'st_flags', 0), xattrs(p))
             if stat.S_ISLNK(st.st_mode):
-                out[rel] = (st.st_mode, os.readlink(p))
+                out[rel] = (st.st_mode, os.readlink(p)) + meta
             elif stat.S_ISREG(st.st_mode):
-                out[rel] = (st.st_mode, Path(p).read_bytes())
+                out[rel] = (st.st_mode, Path(p).read_bytes()) + meta
             else:
-                out[rel] = (st.st_mode, None)
+                out[rel] = (st.st_mode, None) + meta
     return out
 
 
@@ -101,6 +135,9 @@ class NewWorktree(unittest.TestCase):
             'note.up': b'smudged on checkout\n',  # the primary keeps the clean bytes
             'lines.crlf': b'one\ntwo\n',          # the primary keeps LF
             'assets/text.log': b'a line of text\n' * 20_000,  # converted, same bytes
+            'flags/locked.bin': os.urandom(200_000),  # Finder's "Locked" (uchg) on macOS
+            'flags/hidden.txt': b'hidden\n',           # the hidden flag
+            'flags/tagged.sh': b'#!/bin/sh\n',         # quarantine and a user attribute
         }
         for rel, data in files.items():
             (p / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -113,10 +150,25 @@ class NewWorktree(unittest.TestCase):
                  '160000,%s,sub' % self.git(p, 'rev-parse', 'HEAD').strip())
         self.git(p, 'commit', '-q', '-m', 'Fixture submodule entry')
         (p / 'sub').mkdir()  # an uninitialised submodule is an empty directory
+        if MACOS:  # metadata a clone must not take over from the primary's files
+            for rel in ('flags/locked.bin', '.gitattributes'):  # .gitattributes: the probe
+                os.chflags(str(p / rel), stat.UF_IMMUTABLE)
+            os.chflags(str(p / 'flags/hidden.txt'), stat.UF_HIDDEN)
+            setxattr(p / 'flags/tagged.sh', b'user.note', b'a tag')
+            setxattr(p / 'flags/tagged.sh', b'com.apple.quarantine', b'0081;00000000;Test;')
         self.assertEqual(self.git(p, 'status', '--porcelain'), '')
         self.assertNotEqual((p / 'note.up').read_bytes(), b'SMUDGED ON CHECKOUT\n')
 
+    def unlock(self):
+        """Clear the flags of every file below the test folder, so it can change or go."""
+        if MACOS:
+            for d, _dirs, files in os.walk(str(self.root)):
+                for name in files:
+                    if getattr(os.lstat(os.path.join(d, name)), 'st_flags', 0):
+                        os.chflags(os.path.join(d, name), 0, follow_symlinks=False)
+
     def tearDown(self):
+        self.unlock()
         self.tmp.cleanup()
 
     def git(self, cwd, *args):
@@ -172,6 +224,25 @@ class NewWorktree(unittest.TestCase):
         wt, ref, _ = self.make(base='other')
         self.assert_like_reference(wt, ref)
         self.assertEqual((wt / 'README.md').read_text(), '# changed on other\n')
+
+    def test_paths_differing_only_in_case_end_as_git_leaves_them(self):
+        probe = self.root / 'Case-Probe'
+        probe.mkdir()
+        if not (self.root / 'case-probe').exists():
+            self.skipTest('a case-sensitive file system')
+        blob = subprocess.run(['git', 'hash-object', '-w', '--stdin'], cwd=str(self.primary),
+                              env=self.env, input='lower\n', text=True,
+                              capture_output=True).stdout.strip()
+        self.git(self.primary, 'update-index', '--add', '--cacheinfo',
+                 '100644,%s,readme.md' % blob)
+        self.git(self.primary, 'commit', '-q', '-m', 'README.md and readme.md')
+        wt, ref, out = self.make()
+        if self.CLONES != '0':
+            self.assertIn('git checks out every file', out)
+        self.assertEqual(snapshot(wt), snapshot(ref))
+        self.assertEqual(self.git(wt, 'ls-files', '-s'), self.git(ref, 'ls-files', '-s'))
+        self.assertEqual(self.git(wt, 'status', '--porcelain'),
+                         self.git(ref, 'status', '--porcelain'))
 
     # -- clones by default on macOS only, and off when switched off --
 
@@ -270,7 +341,8 @@ class NewWorktreeWithClones(NewWorktree):
         wt, ref, out = self.make()
         self.assertIn('cloned', out)
         for rel in ('assets/big.bin', 'assets/small.bin', 'README.md', 'bin/run.sh',
-                    'bin/a-copy.txt', 'dir with space/ünicöde.txt'):
+                    'bin/a-copy.txt', 'dir with space/ünicöde.txt', '.gitattributes',
+                    'flags/locked.bin', 'flags/hidden.txt', 'flags/tagged.sh'):
             self.assert_shared(wt, rel)
         self.assert_shared(ref, 'assets/big.bin', shared=False)  # the measuring stick works
         for rel in ('note.up', 'lines.crlf'):  # a checkout conversion: git writes them
@@ -316,6 +388,7 @@ class NewWorktreeWithClones(NewWorktree):
         self.assert_like_reference(wt, ref)
 
     def test_falls_back_under_sparse_checkout(self):
+        self.unlock()  # the sparse checkout removes flags/locked.bin from the primary
         self.git(self.primary, 'sparse-checkout', 'set', 'assets')
         wt, ref, out = self.make()
         self.assertIn('no clones (sparse checkout is on)', out)
@@ -333,12 +406,13 @@ class NewWorktreeWithClones(NewWorktree):
         dry = subprocess.run([sys.executable, str(DEDUPE), str(self.primary), str(wt)],
                              env=self.env, text=True, capture_output=True)
         self.assertEqual(dry.returncode, 0, dry.stderr)
-        self.assertIn('would clone 2 files', dry.stdout)  # big.bin and text.log
+        self.assertIn('would clone 3 files', dry.stdout)  # big.bin, text.log, locked.bin
         self.assert_shared(wt, 'assets/big.bin', shared=False)
         r = subprocess.run([sys.executable, str(DEDUPE), '--apply', str(self.primary), str(wt)],
                            env=self.env, text=True, capture_output=True)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn('plain: cloned 2 files', r.stdout)
+        self.assertIn('plain: cloned 3 files', r.stdout)
+        self.assert_shared(wt, 'flags/locked.bin')  # unlocked, as git wrote it: snapshot
         self.assert_shared(wt, 'assets/big.bin')
         self.assert_shared(wt, 'assets/text.log')
         self.assert_shared(wt, 'assets/dirty.bin', shared=False)  # modified: never touched

@@ -317,13 +317,15 @@ Then, on the machine you use for that work:
 - **Try it first in a small test repository**, not in a team's repository.
 - **Install with the company overlay and without a personal one:**
   `~/.agentic-github-flow/install.sh --overlay <company-overlay>`. An overlay loads in every
-  session on the machine, and each install replaces the overlays named before. A personal
-  overlay's grants, such as the push grant, are meant for your own repositories; without a grant
-  every push asks you.
+  session on the machine, and a later install keeps the overlays of earlier ones: where a
+  personal overlay is installed, run `install.sh --uninstall` first. A personal overlay's
+  grants, such as the push grant, are meant for your own repositories; without a grant every
+  push asks you.
 - **Name your work identity** (your name, your work e-mail address) in the guard's
   `personal-data` file ([Personal-data guard settings](#personal-data-guard-settings)) when it is
-  not your global git identity: the guard reads only `git config --global` and the gh login of
-  github.com, so a work address set per repository is otherwise not known as yours.
+  not your global git identity: besides that file the guard knows only `git config --global`,
+  the gh login of github.com and the local account name, so a work address set per repository
+  is otherwise not known as yours.
 - **Merging stays with people.** Automatic merging is off unless a repository switches it on
   ([Landing settings](#landing-settings)); at work the required reviewers usually decide, and the
   detection lands an organisation's repository through pull requests

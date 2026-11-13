@@ -41,8 +41,11 @@ repository lands finished work, and states the answer with its reasons on the is
   merge it. Chosen when GitHub requires pull requests on the branch (a ruleset or branch
   protection that forbids a direct push), when the repository is a team's (an organisation
   owns it, more than one collaborator can write, it has a `CODEOWNERS` file, or someone else
-  merged a pull request into it in the last 90 days), and whenever it cannot tell (no `gh`, no
-  network, a host other than GitHub).
+  merged a pull request into it in the last 90 days), and whenever GitHub's answer cannot
+  settle it (an error from GitHub, a host other than GitHub). Where GitHub cannot be asked at
+  all (no `gh`, gh not signed in, no network, or gh inside the Claude Code sandbox, which cannot
+  read its configuration) it decides nothing: the agent asks again outside the sandbox, or a
+  `landing` setting decides.
 - **Local main** (trunk-based development, which allows a very small team to commit to the
   trunk): the agent still works on a branch in a worktree, then fast-forwards your local `main`
   to the checked commit (`promote_main.py`, which refuses when anything would be lost); a larger

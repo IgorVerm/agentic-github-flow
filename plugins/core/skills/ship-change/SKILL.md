@@ -25,11 +25,15 @@ Run `python3 <plugin>/scripts/landing.py --explain` in your worktree ([landing.p
 whose header owns the rule). Its last line is the mode, the line before it the landing branch
 (`<landing>` below; the remote's default branch unless the repository names another):
 
-- **pull request:** teams, a server that requires pull requests, and whenever it cannot tell.
-  Steps 2 to 7 below.
+- **pull request:** teams, a server that requires pull requests, and whenever GitHub's answer
+  cannot settle it. Steps 2 to 7 below.
 - **local main:** one person with write access, no protection, no team signal (trunk-based
   development for a very small team). Steps 2, 3 and 5 below, then
   [local-main.md](local-main.md) in place of 4, 6 and 7.
+- **unknown** (exit 3): GitHub could not be asked from here, which the `check:` line before it
+  explains; inside the Claude Code sandbox gh cannot read its configuration. Run the same
+  command outside the sandbox (in Claude Code: the sandbox disabled, which goes through the
+  permission check) and follow that answer. Never pick a mode yourself.
 
 Run it again at every landing, with `--explain` to see the signals it read, and never carry a
 mode over from an earlier task. A repository fixes its mode in `HANDOFF.md`, merged like any

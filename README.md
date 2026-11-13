@@ -308,8 +308,32 @@ Before you use this on an employer's or a client's code, check that organisation
 which tools and plans are allowed, which data may go into a prompt or leave the machine, and
 who owns work made with an agent. The rules point agents to that policy; this repository never
 holds it. Put the pointer in the organisation's overlay, starting from
-`templates/company-overlay/AGENTS.md`. Without an overlay, an agent asks you where the policy is
-before it works on the organisation's code or data.
+`templates/company-overlay/AGENTS.md` ([Company and personal overlays](#company-and-personal-overlays)).
+Without an overlay, an agent asks you where the policy is before it works on the organisation's
+code or data.
+
+Then, on the machine you use for that work:
+
+- **Try it first in a small test repository**, not in a team's repository.
+- **Install with the company overlay and without a personal one:**
+  `~/.agentic-github-flow/install.sh --overlay <company-overlay>`. An overlay loads in every
+  session on the machine, and each install replaces the overlays named before. A personal
+  overlay's grants, such as the push grant, are meant for your own repositories; without a grant
+  every push asks you.
+- **Name your work identity** (your name, your work e-mail address) in the guard's
+  `personal-data` file ([Personal-data guard settings](#personal-data-guard-settings)) when it is
+  not your global git identity: the guard reads only `git config --global` and the gh login of
+  github.com, so a work address set per repository is otherwise not known as yours.
+- **Merging stays with people.** Automatic merging is off unless a repository switches it on
+  ([Landing settings](#landing-settings)); at work the required reviewers usually decide, and the
+  detection lands an organisation's repository through pull requests
+  ([Landing](#landing-pull-request-or-local-main)).
+- **Where it works:** an origin on github.com, organisation repositories included. On GitHub
+  Enterprise Server, GitLab or Azure DevOps, `push_branch.py` and `merge_pr.py` refuse (they
+  need an origin on github.com) and the landing detection falls back to pull-request mode.
+- **Managed settings** from IT can block a plugin marketplace or set permissions that win over
+  yours. A blocked plugin step shows as `FAIL` in the installer's output and it exits with 1;
+  ask IT before you work around it.
 
 ## Company and personal overlays
 

@@ -104,10 +104,13 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
 
 This repository is the team edition others install, and its changes are reviewed as pull
 requests, whatever the detection would say about its one writer.
+Automatic merging is on (Igor, 2026-11-13: "Ja, beide aan", to run the issue-to-merge chain
+live here); the paths that merge only on the user's word still do.
 
 | Setting | Value |
 |---|---|
 | landing | `pull request` |
+| automatic merge | `on` |
 
 ## Issue chats settings
 

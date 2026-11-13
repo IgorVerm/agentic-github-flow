@@ -257,7 +257,8 @@ class Landing(unittest.TestCase):
         self.assertIn('gh could not run here', cause)
         bin_dir = os.path.join(self.tmp.name, 'bin')  # git, and no gh
         os.makedirs(bin_dir)
-        os.symlink(shutil.which('git'), os.path.join(bin_dir, 'git'))
+        git_exe = shutil.which('git')  # git.exe on Windows: the link keeps that name
+        os.symlink(git_exe, os.path.join(bin_dir, os.path.basename(git_exe)))
         env = {k: v for k, v in os.environ.items() if k != 'AGENTIC_GITHUB_FLOW_GH'}
         r = subprocess.run([sys.executable, TOOL, '-C', self.repo], capture_output=True,
                            text=True, env=dict(env, PATH=bin_dir))

@@ -226,6 +226,33 @@ class ChatArchivable(unittest.TestCase):
         self.git(repo, 'merge', '-q', '--ff-only', 'agent/task2')
         self.assertKeep(wt2, 'not on GitHub')
 
+    def test_a_local_landing_with_the_mode_unknown_keeps(self):
+        # GitHub cannot be asked (gh cannot read its configuration in the sandbox): the mode is
+        # unknown, so a landing on local main does not count and the keep line says why
+        origin = os.path.join(self.root, 'un-origin.git')
+        repo = os.path.join(self.root, 'un')
+        self.git(self.root, 'init', '-q', '--bare', '-b', 'main', origin)
+        self.git(self.root, 'init', '-q', '-b', 'main', repo)
+        self.git(repo, 'remote', 'add', 'origin', origin)
+        with open(os.path.join(repo, 'HANDOFF.md'), 'w') as f:
+            f.write('# H\n')
+        self.git(repo, 'add', 'HANDOFF.md')
+        self.git(repo, 'commit', '-q', '-m', 'init')
+        self.git(repo, 'push', '-q', 'origin', 'main')
+        self.git(repo, 'fetch', '-q', 'origin')
+        self.git(repo, 'remote', 'set-head', 'origin', 'main')
+        self.git(repo, 'remote', 'set-url', 'origin', 'https://github.com/acme/tool.git')
+        wt = os.path.join(self.root, 'un-worktrees', 'task')
+        self.git(repo, 'worktree', 'add', '-q', '-b', 'agent/task', wt, 'main')
+        self.git(wt, 'commit', '-q', '--allow-empty', '-m', 'work')
+        self.git(repo, 'merge', '-q', '--ff-only', 'agent/task')
+        denied = json.dumps([sys.executable, '-c', 'import sys; sys.stderr.write('
+                             '"failed to create root command: failed to read configuration: '
+                             'open ~/.config/gh/hosts.yml: operation not permitted"); '
+                             'sys.exit(1)'])
+        self.assertKeep(wt, 'landing mode unknown: gh could not run here', '--no-fetch',
+                        env={'AGENTIC_GITHUB_FLOW_GH': denied})
+
     def test_a_successor_s_pushed_branch_holds_a_handed_over_chat(self):
         # #14: a chat hands its unfinished issue to a fresh chat whose branch starts from its
         # head; once that branch is on GitHub, the predecessor holds nothing GitHub does not

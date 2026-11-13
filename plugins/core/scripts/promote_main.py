@@ -12,7 +12,8 @@ The landing branch and the mode come from landing.py: the row `landing branch` o
 the first check that fails, changing nothing:
 
   0. landing.py decides local main for this repository; in pull-request mode it refuses, because
-     the work lands through a pull request.
+     the work lands through a pull request, and when landing.py cannot decide (GitHub cannot be
+     asked from here, as inside the sandbox) it refuses with landing.py's reason.
   1. HEAD is the branch main, no git operation is in progress, the index matches HEAD, and no
      index entry hides local edits (assume-unchanged, skip-worktree, sparse checkout).
   2. main is an ancestor of the candidate (a fast-forward), and the remote's main, fetched now,
@@ -42,7 +43,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from landing import LOCAL, SettingError, decide  # noqa: E402  (owner of the settings)
+from landing import LOCAL, UNKNOWN, SettingError, decide  # noqa: E402  (owner of the settings)
 
 
 def git(*args: str, check: bool = True) -> str:
@@ -142,6 +143,9 @@ def main(argv: list[str]) -> int:
     except SettingError as e:
         refuse(str(e))
     print(f"promote: primary checkout {primary}")
+    if mode == UNKNOWN:
+        refuse(f"landing mode unknown: {checks[-1]}; then run promote_main.py outside the "
+               "sandbox too")
     if mode != LOCAL:
         refuse("this repository lands through pull requests (landing.py: "
                + "; ".join(checks[-2:]) + "): use ship-change's pull-request steps")

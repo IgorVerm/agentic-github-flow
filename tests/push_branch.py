@@ -30,6 +30,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from pre_push_checks import EMAIL, NAME, TOKEN, install_clone, install_hook  # noqa: E402
+import unknown_mode  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(HERE, '..'))
 TOOL = os.path.join(ROOT, 'plugins', 'core', 'scripts', 'push_branch.py')
@@ -116,16 +117,20 @@ class PushBranch(unittest.TestCase):
         with open(self.body, 'w', encoding='utf-8') as f:
             f.write(text)
 
-    def run_tool(self, *args, prs=None, grant='', pr=True, create_fails=False, default='main'):
+    def run_tool(self, *args, prs=None, grant='', pr=True, create_fails=False, default='main',
+                 unknown=False):
         grant = self.overlay if grant == '' else grant
         with open(self.state, 'w') as f:
             json.dump({'prs': prs or [], 'create_fails': create_fails, 'default': default}, f)
         cmd = [sys.executable, TOOL, '-C', self.repo, '-R', 'acme/tool', *args]
+        if unknown:  # landing.py cannot ask GitHub (the sandbox): no mode
+            cmd[1:1] = [unknown_mode.wrapper(self.dir)]
         if grant:
             cmd += ['--grant', grant]
         if pr:
             cmd += ['--title', 'A change (#7)', '--body-file', self.body, '--draft']
-        r = subprocess.run(cmd, capture_output=True, text=True, env=self.env)
+        r = subprocess.run(cmd, capture_output=True, text=True,
+                           env=dict(self.env, UNKNOWN_MODE_CAUSE=unknown_mode.CAUSE))
         with open(self.state) as f:
             self.log = json.load(f).get('log', [])
         return r
@@ -260,6 +265,11 @@ class PushBranch(unittest.TestCase):
         self.git(self.repo, 'push', '-q', 'origin', 'main')
         self.git(self.repo, 'switch', '-q', 'agent/7-x')
         self.assertRefused('only the safe default')
+        self.assertEqual(self.on_origin(), '')
+
+    def test_the_mode_unknown_refuses(self):
+        r = self.assertRefused('landing mode unknown: ' + unknown_mode.CAUSE, unknown=True)
+        self.assertNotIn('only the safe default', r.stdout)
         self.assertEqual(self.on_origin(), '')
 
     def test_usage(self):

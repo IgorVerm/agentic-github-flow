@@ -104,7 +104,8 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
    an earlier attempt exists. The worktree check of your own worktree (the `worktreePath` of
    `get_session "self"`, or, for a chat with none, the worktree it worked in) is expected to say
    `keep:` while your branch waits for the push: that stops only the archive, never the start
-   (in local-main mode it says `ok` once the work landed).
+   (in local-main mode it says `ok` once the work landed; a keep line ending in `landing mode
+   unknown` means GitHub could not be asked from the sandbox: run the check outside it).
 5. **Start the next chat and claim its issue.** Each numbered call stands alone, in the
    foreground of this turn; any failure goes to the fallback below.
    1. **Its worktree:** always a new one, made with the settings' worktree tool from the

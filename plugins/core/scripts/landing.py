@@ -4,18 +4,18 @@
 Usage: python3 landing.py [-C <checkout>] [--explain | --branch]
 
 The ship-change skill runs it at every landing and follows its last line; promote_main.py and the
-issue chats ask it too. It prints `landing branch: <name>` and last `landing: pull request` or
-`landing: local main`; --explain first prints one `check:` line per signal it read and the line
-`automatic merge: on` or `automatic merge: off`. With --branch it prints only the landing branch.
-First match wins:
+issue chats ask it too. It prints `landing branch: <name>` and last `landing: pull request`,
+`landing: local main` or `landing: unknown`; --explain first prints one `check:` line per signal
+it read and the line `automatic merge: on` or `automatic merge: off`. With --branch it prints
+only the landing branch, which needs no GitHub. First match wins:
 
   1. setting   HANDOFF.md, section `## Landing settings`, row `landing`: `pull request` gives
                pull request; `local main` gives local main unless the server is seen to
-               require pull requests (3); when the server cannot be read (5) the setting holds,
-               since a push the server rejects only stops there. `auto` or no row: go on. An
-               unknown value gives pull request.
+               require pull requests (3); when the server cannot be read (5, 6) the setting
+               holds, since a push the server rejects only stops there. `auto` or no row: go on.
+               An unknown value gives pull request.
   2. no remote no remote at all: local main, there is no server to open a pull request on. Remotes
-               without one named `origin` count as unknown (5).
+               without one named `origin` count as unknown (6).
   3. server    the landing branch on GitHub has an active ruleset rule that forbids a direct
                push (PUSH_RULES, or a type not in HARMLESS_RULES), or legacy branch protection
                with required reviews, required status checks, push restrictions or a lock (an
@@ -26,11 +26,21 @@ First match wins:
                a collaborator other than the user can write, a CODEOWNERS file is on the
                landing branch (unfetched: unknown), or someone else (not a bot) merged a pull
                request into it in the last 90 days: pull request.
-  5. unknown   origin not on github.com, no gh, not signed in, a network or API error: pull
-               request. Such a decision, and one for an unknown setting value, ends its check line
-               with SAFE_DEFAULT: safe for a merge, not for a push without asking, which
-               push_branch.py (beside this file) refuses on it.
-  6. otherwise one writer, a User owner, no protection, no team signal: local main.
+  5. not asked GitHub could not be asked from here: no gh, gh cannot run or read its own
+               configuration (inside the Claude Code sandbox ~/.config/gh is unreadable), gh is
+               not signed in, or GitHub cannot be reached (no network, a sandbox's proxy, no
+               answer in TIMEOUT_S). No decision: the mode is `unknown`, its check line (printed
+               without --explain too, before `landing branch:`) names the cause and what to do,
+               and the exit status is 3. A script that needs the mode refuses on it with that line
+               (push_branch.py, merge_pr.py, promote_main.py, unpushed_landings() here); the
+               landing branch and the settings need no GitHub and keep working.
+  6. unknown   origin not on github.com (gh is not asked, so 5 cannot be told), or GitHub
+               answered with an error (an HTTP status, no JSON, an unrecognised failure), or a
+               signal could not be read (CODEOWNERS unfetched): pull request. Such a decision, and
+               one for an unknown setting value, ends its check line with SAFE_DEFAULT: safe for a
+               merge, not for a push without asking, which push_branch.py (beside this file)
+               refuses on it.
+  7. otherwise one writer, a User owner, no protection, no team signal: local main.
 
 The settings are read from HANDOFF.md as the default branch holds it, as last fetched
 (`refs/remotes/origin/HEAD`, else origin/main or origin/master, else local main or master); a
@@ -45,8 +55,8 @@ the overlap check start from the local landing branch while it holds unpushed la
 local-main mode (unpushed_landings()).
 It does not fetch. AGENTIC_GITHUB_FLOW_GH, a JSON list, replaces the `gh` command (tests use it).
 A copy of this file lives in the issue-chats plugin (an installed plugin stands alone);
-tests/landing.py keeps the two identical. Exit 0 with a decision, 2 for a usage error, a
-checkout outside git, or an invalid `landing branch`.
+tests/landing.py keeps the two identical. Exit 0 with a decision, 3 for `unknown` (5), 2 for
+a usage error, a checkout outside git, or an invalid `landing branch`.
 """
 from __future__ import annotations
 
@@ -58,7 +68,7 @@ import shutil
 import subprocess
 import sys
 
-PR, LOCAL = "pull request", "local main"
+PR, LOCAL, UNKNOWN = "pull request", "local main", "unknown"
 AUTO_MERGE = "automatic merge"
 SAFE_DEFAULT = "the safe default"  # ends the check line of a pull request it could not tell
 SECTION = re.compile(r"^## Landing settings[ \t]*$(.*?)(?=^## |\Z)", re.M | re.S)
@@ -79,6 +89,15 @@ GITHUB_URL = re.compile(r"^(?:https://(?:[^@/]+@)?github\.com/|git@github\.com:|
 CODEOWNERS = ("CODEOWNERS", ".github/CODEOWNERS", "docs/CODEOWNERS")
 RECENT_DAYS = 90
 TIMEOUT_S = 20
+SETTING_ADVICE = "set the `landing` row in HANDOFF.md \N{SECTION SIGN}Landing settings"
+OUTSIDE = "run landing.py outside the sandbox, or " + SETTING_ADVICE
+# gh's own failures before it asks GitHub, recognised in its error output (no HTTP status):
+CONFIG_FAILURE = re.compile(r"failed to (?:read|load) config|failed to create root command", re.I)
+SIGNED_OUT = re.compile(r"gh auth login", re.I)
+# a request that got no HTTP answer: Go's `Get "https://...": <reason>`, gh's own wording
+UNREACHABLE = re.compile(r'^(?:Get|Post|Patch|Put|Delete|Head) "https?://[^"]*": |'
+                         r"error connecting to |proxyconnect|dial tcp|no such host|"
+                         r"i/o timeout|connection refused|network is unreachable", re.I | re.M)
 
 
 class SettingError(Exception):
@@ -86,7 +105,16 @@ class SettingError(Exception):
 
 
 class Unknown(Exception):
-    """GitHub could not be read: the decision falls to pull request (rule 5)."""
+    """GitHub answered with an error: the decision falls to pull request (rule 6)."""
+
+
+class NotAsked(Unknown):
+    """GitHub could not be asked from here: no decision (rule 5). The message names the cause
+    and what to do."""
+
+
+class ModeUnknown(SettingError):
+    """A script needs the mode, and landing.py could not decide it (rule 5)."""
 
 
 def git(path: str, *args: str) -> subprocess.CompletedProcess:
@@ -174,7 +202,8 @@ def unpushed_landings(path: str, ref: str) -> str:
     """The local branch in place of the remote-tracking <ref> (refs/remotes/origin/<branch>) when
     it holds landings not pushed yet (strictly ahead of <ref>) and the repository lands on local
     main; else <ref>. A new worktree and the overlap check then start from what has landed. The
-    GitHub calls of decide() run only when the local branch is ahead."""
+    GitHub calls of decide() run only when the local branch is ahead; ModeUnknown when they
+    cannot decide (rule 5), since either base could be wrong."""
     prefix = "refs/remotes/origin/"
     if not ref.startswith(prefix):
         return ref
@@ -183,9 +212,14 @@ def unpushed_landings(path: str, ref: str) -> str:
             or git(path, "merge-base", "--is-ancestor", ref, local).returncode != 0:
         return ref
     try:
-        mode, _, _ = decide(path)
+        mode, _, checks = decide(path)
     except SettingError:
         return ref
+    if mode == UNKNOWN:
+        raise ModeUnknown(f"local {local[len('refs/heads/'):]} holds commits origin lacks, and "
+                          f"the landing mode decides whether they are the base: landing mode "
+                          f"unknown: {checks[-1]}; then run this outside the sandbox too, or "
+                          f"name the base")
     return local if mode == LOCAL else ref
 
 
@@ -201,14 +235,33 @@ def gh_command() -> list[str] | None:
     return [found] if found else None
 
 
+def not_asked(stderr: str) -> NotAsked | None:
+    """NotAsked when gh's error output says it never got an answer from GitHub, else None."""
+    if CONFIG_FAILURE.search(stderr):
+        return NotAsked("gh could not run here (its configuration is unreadable, as inside a "
+                        f"sandbox): {OUTSIDE}")
+    if SIGNED_OUT.search(stderr):
+        return NotAsked(f"gh is not signed in: run `gh auth login`, or {SETTING_ADVICE}")
+    m = UNREACHABLE.search(stderr)
+    if m:
+        line = stderr[m.start():].splitlines()[0].strip()[:160]
+        return NotAsked(f"GitHub could not be reached from here (no network, or a sandbox's "
+                        f"proxy: {line}): {OUTSIDE}")
+    return None
+
+
 def gh_json(gh: list[str], *args: str):
     """(status, JSON) of a gh call; status 200 on success, else the HTTP status gh reports (0
-    when it reports none). Raises Unknown when gh cannot run or answers no JSON at all."""
+    when it reports none). Raises NotAsked when gh cannot run or GitHub cannot be reached
+    (rule 5), Unknown when gh fails otherwise without an HTTP status or answers no JSON."""
     try:
         r = subprocess.run(gh + list(args), stdin=subprocess.DEVNULL, capture_output=True,
                            text=True, encoding="utf-8", errors="replace", timeout=TIMEOUT_S)
-    except (OSError, subprocess.TimeoutExpired) as e:
-        raise Unknown(f"gh {' '.join(args[:2])}: {e}")
+    except OSError as e:
+        raise NotAsked(f"gh could not run here ({e}): {OUTSIDE}")
+    except subprocess.TimeoutExpired:
+        raise NotAsked(f"GitHub could not be reached from here (no answer in {TIMEOUT_S} s): "
+                       f"{OUTSIDE}")
     try:
         body = json.loads(r.stdout) if r.stdout.strip() else None
     except ValueError:
@@ -219,7 +272,8 @@ def gh_json(gh: list[str], *args: str):
         return 200, body
     m = re.search(r"\(HTTP (\d{3})\)", r.stderr)
     if not m and body is None:
-        raise Unknown(f"gh {' '.join(args[:2])}: {r.stderr.strip()[:200] or 'failed'}")
+        raise not_asked(r.stderr) or \
+            Unknown(f"gh {' '.join(args[:2])}: {r.stderr.strip()[:200] or 'failed'}")
     return (int(m.group(1)) if m else 0), body
 
 
@@ -338,7 +392,9 @@ def team_signal(gh, path: str, repo: str, branch: str, ref: str | None, checks: 
 
 
 def decide(path: str = ".") -> tuple[str, str, list]:
-    """(mode, landing branch, check lines). Raises SettingError for a usage problem."""
+    """(mode, landing branch, check lines). Raises SettingError for a usage problem. The mode is
+    UNKNOWN when GitHub could not be asked (rule 5); the last check line then names the cause
+    and what to do, and a caller that needs the mode refuses with it."""
     text = settings_text(path)
     branch = landing_branch(path)
     checks: list = []
@@ -374,7 +430,7 @@ def decide(path: str = ".") -> tuple[str, str, list]:
     gh = gh_command()
     try:
         if gh is None:
-            raise Unknown("gh is not installed")
+            raise NotAsked(f"gh is not installed: install it and sign in, or {SETTING_ADVICE}")
         if server_requires(gh, repo, branch, checks):
             if setting == LOCAL:
                 checks.append("the server requires pull requests, which overrules the setting")
@@ -390,6 +446,9 @@ def decide(path: str = ".") -> tuple[str, str, list]:
             checks.append(f"server not checked ({e}): the setting holds, and a push the server "
                           "rejects stops there")
             return LOCAL, branch, checks
+        if isinstance(e, NotAsked):
+            checks.append(str(e))
+            return UNKNOWN, branch, checks
         checks.append(f"unknown: {e}: {SAFE_DEFAULT}")
         return PR, branch, checks
     return LOCAL, branch, checks
@@ -420,13 +479,13 @@ def main(argv: list) -> int:
     except SettingError as e:
         print(f"landing: error: {e}", file=sys.stderr)
         return 2
-    for line in checks if explain else ():
+    for line in checks if explain else checks[-1:] if mode == UNKNOWN else ():
         print(f"check: {line}")
     if explain:
         print(f"automatic merge: {'on' if automatic_merge(path) else 'off'}")
     print(f"landing branch: {branch}")
     print(f"landing: {mode}")
-    return 0
+    return 3 if mode == UNKNOWN else 0
 
 
 if __name__ == "__main__":

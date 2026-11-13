@@ -15,7 +15,8 @@ callers and only printed. The script fetches, then checks, reading git and `gh` 
 only when all hold:
 
   switch    automatic merging is on (landing.py's automatic_merge());
-  mode      landing.py (beside this file) decides pull request for the repository, and the pull
+  mode      landing.py (beside this file) decides pull request for the repository (a mode it
+            could not decide, GitHub unaskable from here, refuses with its reason), and the pull
             request's base is the landing branch;
   state     open, not a draft, merge state CLEAN (GitHub's own rules and checks satisfied), and
             no review decision CHANGES_REQUESTED. With --ready a draft passes (merge state DRAFT
@@ -74,7 +75,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from landing import (AUTO_MERGE, PR, GITHUB_URL, SettingError, Unknown,  # noqa: E402
+from landing import (AUTO_MERGE, PR, GITHUB_URL, UNKNOWN, SettingError, Unknown,  # noqa: E402
                      automatic_merge, decide, gh_command, gh_json, row, settings_text)
 from review_verdict import verdict  # noqa: E402
 
@@ -385,7 +386,7 @@ def main(argv: list) -> int:
               f"{(fetched.stderr + fetched_all.stderr).strip()[:200]}", file=sys.stderr)
         return 2
     try:
-        mode, landing, _ = decide(path)
+        mode, landing, mode_checks = decide(path)
         text = settings_text(path)
     except SettingError as e:
         print(f"merge_pr: {e}", file=sys.stderr)
@@ -404,7 +405,9 @@ def main(argv: list) -> int:
     if not automatic_merge(path):
         reasons.append("automatic merging is off in this repository: the user switches it on "
                        f"with the row `{AUTO_MERGE}` | `on` in HANDOFF.md §Landing settings")
-    if mode != PR:
+    if mode == UNKNOWN:
+        reasons.append(f"landing mode unknown: {mode_checks[-1]}")
+    elif mode != PR:
         reasons.append(f"the repository lands on {mode}, not through pull requests")
     if pr.get("state") != "OPEN":
         reasons.append(f"state {pr.get('state')}")

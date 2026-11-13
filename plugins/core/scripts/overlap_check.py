@@ -104,7 +104,10 @@ def default_base(cwd):
         candidates = ["refs/heads/main", "refs/heads/master"]
     for ref in candidates:
         if ref and verified(cwd, ref):
-            return unpushed_landings(cwd, ref)
+            try:
+                return unpushed_landings(cwd, ref)
+            except SettingError as e:  # the landing mode unknown (landing.py, rule 5)
+                raise Usage(f"error: {e}")
     raise Usage("error: no default branch found (origin/HEAD, origin/main, origin/master, "
                 "or local main or master); fetch, or name it with --base")
 

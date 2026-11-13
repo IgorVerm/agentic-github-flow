@@ -23,6 +23,8 @@ import sys
 import tempfile
 import unittest
 
+import unknown_mode
+
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 TOOL = os.path.join(ROOT, 'plugins', 'core', 'scripts', 'merge_pr.py')
 VERDICT = os.path.join(ROOT, 'plugins', 'core', 'scripts', 'review_verdict.py')
@@ -122,7 +124,7 @@ class MergePr(unittest.TestCase):
         return {'createdAt': when, 'author': {'login': login}, 'includesCreatedEdit': False,
                 'body': ROBOT + ' Claude Code (%s): %s' % (role, text)}
 
-    def run_tool(self, pr, *args, grant=None, api=None, after_ready=None):
+    def run_tool(self, pr, *args, grant=None, api=None, after_ready=None, unknown=False):
         rules = [{'type': 'required_status_checks', 'parameters': {'required_status_checks': [
             {'context': 'test (%s)' % o} for o in ('ubuntu', 'macos', 'windows')]}}]
         answers = {'user': [200, {'login': 'me'}],
@@ -130,9 +132,11 @@ class MergePr(unittest.TestCase):
         answers.update(api or {})
         with open(self.state, 'w') as f:
             json.dump({'pr': pr, 'api': answers, 'after_ready': after_ready or 'CLEAN'}, f)
-        env = dict(os.environ, STUB_GH=self.state,
+        env = dict(os.environ, STUB_GH=self.state, UNKNOWN_MODE_CAUSE=unknown_mode.CAUSE,
                    AGENTIC_GITHUB_FLOW_GH=json.dumps([sys.executable, self.stub]))
         cmd = [sys.executable, TOOL, '7', '-C', self.repo, '-R', 'acme/tool', *args]
+        if unknown:  # landing.py cannot ask GitHub (the sandbox): no mode
+            cmd[1:1] = [unknown_mode.wrapper(self.tmp.name)]
         if grant:
             cmd += ['--grant', grant]
         r = subprocess.run(cmd, capture_output=True, text=True, env=env)
@@ -463,6 +467,10 @@ class MergePr(unittest.TestCase):
         self.git('fetch', '-q', 'origin')
         self.git('switch', '-q', 'agent/7-x')
         self.assertRefused(self.pr(), 'not through pull requests')
+
+    def test_the_mode_unknown_refuses(self):
+        self.assertRefused(self.pr(), 'landing mode unknown: ' + unknown_mode.CAUSE,
+                           unknown=True)
 
 
 if __name__ == '__main__':

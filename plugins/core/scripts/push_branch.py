@@ -33,7 +33,8 @@ hold:
   mode      landing.py (beside this file) decides pull request for the repository from the
             setting or from what it read on GitHub, not as its safe default for what it could
             not tell (SAFE_DEFAULT); in local-main mode the push of the landing branch is the
-            integration and stays the user's word;
+            integration and stays the user's word; a mode landing.py could not decide, because
+            GitHub could not be asked from here (the sandbox), refuses with its reason;
   hook      the agentic-github-flow pre-push hook (templates/pre-push) is installed where git runs
             it (core.hooksPath, else the repository's hooks folder), so the secret scan and the
             personal-data check run on every outgoing commit and fail closed;
@@ -66,7 +67,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from landing import (PR, GITHUB_URL, SAFE_DEFAULT, SettingError, decide,  # noqa: E402
+from landing import (PR, GITHUB_URL, SAFE_DEFAULT, UNKNOWN, SettingError, decide,  # noqa: E402
                      gh_command, settings_text)
 from merge_pr import section  # noqa: E402
 from merge_pr import OVERLAP  # noqa: E402
@@ -250,7 +251,9 @@ def main(argv: list) -> int:
         reasons.append("no branch is checked out (a detached HEAD or no commit)")
     elif branch.casefold() in {b.casefold() for b in ("main", "master", default, landing) if b}:
         reasons.append(f"{branch} is the default or landing branch, not a task branch")
-    if mode != PR:
+    if mode == UNKNOWN:
+        reasons.append(f"landing mode unknown: {checks[-1]}")
+    elif mode != PR:
         reasons.append(f"the repository lands on {mode}, not through pull requests: the push of "
                        "the landing branch is the user's word")
     elif checks and checks[-1].endswith(SAFE_DEFAULT):

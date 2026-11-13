@@ -18,7 +18,9 @@ mode, on the local landing branch:
             origin/master), the landing branch HANDOFF.md names, or the branch's own
             `origin/<branch>` (pushed by ship-change)
   ok        in local-main mode (landing.py beside this file, asked only then): clean as above,
-            and its HEAD is in the local landing branch, where the landing put it
+            and its HEAD is in the local landing branch, where the landing put it; when
+            landing.py cannot decide the mode (GitHub unaskable from here, the sandbox), the keep
+            line ends with its reason
   ok        a chat that handed its issue over (#14): clean as above, and its HEAD in another
             branch of origin (a successor's pushed branch, which started from this chat's head)
             that GitHub still has with HEAD in it (`git ls-remote`: the fetch does not prune, so
@@ -100,26 +102,29 @@ def hidden_paths(wt: str) -> list[str] | None:
     return hidden + work_proof.frozen_unexplained(wt, skipped)
 
 
-def landed_locally(wt: str, head: str) -> str | None:
-    """The ok line when HEAD is in the local landing branch and the repository lands on local
-    main (landing.py beside this file decides); else None. Asked only when GitHub does not hold
-    HEAD, so the GitHub calls run only for a chat whose work landed locally."""
+def landed_locally(wt: str, head: str) -> tuple[str | None, str]:
+    """(ok line, note): the ok line when HEAD is in the local landing branch and the repository
+    lands on local main (landing.py beside this file decides), else None; the note, for the keep
+    line, when landing.py could not decide the mode, else "". Asked only when GitHub does not
+    hold HEAD, so the GitHub calls run only for a chat whose work landed locally."""
     landing.TIMEOUT_S = GH_TIMEOUT_S
     try:
         branch = landing.landing_branch(wt)
     except landing.SettingError:
-        return None
+        return None, ""
     ref = f"refs/heads/{branch}"
     if not out(wt, "rev-parse", "-q", "--verify", ref + "^{commit}") or \
             git(wt, "merge-base", "--is-ancestor", head, ref).returncode != 0:
-        return None
+        return None, ""
     try:
         mode, _, checks = landing.decide(wt)
     except landing.SettingError:
-        return None
+        return None, ""
+    if mode == landing.UNKNOWN:
+        return None, f"; HEAD is on local {branch}, but landing mode unknown: {checks[-1]}"
     if mode != landing.LOCAL:
-        return None
-    return f"ok (clean, HEAD {head[:8]} landed on local {branch}; local-main mode)"
+        return None, ""
+    return f"ok (clean, HEAD {head[:8]} landed on local {branch}; local-main mode)", ""
 
 
 def strays(wt: str, merged_head: str | None = None) -> str | None:
@@ -250,10 +255,10 @@ def held(wt: str, fetch: bool, landed: bool) -> tuple[int, str]:
     if not head:
         return 1, "keep: HEAD does not resolve"
     if "origin" not in (out(wt, "remote") or "").split():
-        local = landed_locally(wt, head)
+        local, why = landed_locally(wt, head)
         if local:
             return 0, local
-        return 1, "keep: no remote origin, so nothing of this worktree is on GitHub"
+        return 1, "keep: no remote origin, so nothing of this worktree is on GitHub" + why
     note = ""
     if fetch:
         try:
@@ -284,7 +289,7 @@ def held(wt: str, fetch: bool, landed: bool) -> tuple[int, str]:
         if git(wt, "merge-base", "--is-ancestor", head, ref).returncode == 0:
             short = ref[len("refs/remotes/"):]
             return 0, f"ok (clean, HEAD {head[:8]} in {short}{note})"
-    local = landed_locally(wt, head)
+    local, why = landed_locally(wt, head)
     if local:
         return 0, local
     if landed:
@@ -295,19 +300,20 @@ def held(wt: str, fetch: bool, landed: bool) -> tuple[int, str]:
         if number:
             return 0, f"ok (clean, HEAD {head[:8]} is the head of pull request #{number} merged{note})"
         names = " or ".join(r[len("refs/remotes/"):] for r in seen) or "no landing branch of origin"
-        return 1, (f"keep: not landed: HEAD {head[:8]} is not in {names}, and {problem}{note}")
+        return 1, (f"keep: not landed: HEAD {head[:8]} is not in {names}, and {problem}{note}"
+                   f"{why}")
     ok, stray = held_by_successor(wt, head, seen)
     if ok:
         return 0, ok + note + ")"
     if not seen:
         return 1, ("keep: no remote-tracking branch to compare with (origin/HEAD, origin/main, "
-                   f"origin/master{', origin/' + branch if branch else ''}){note}")
+                   f"origin/master{', origin/' + branch if branch else ''}){note}{why}")
     own = f"refs/remotes/origin/{branch}" if branch else None
     base = own if own in seen else seen[0]
     count = out(wt, "rev-list", "--count", f"{base}..{head}") or "?"
     names = " or ".join(r[len("refs/remotes/"):] for r in seen)
     return 1, (f"keep: {count} commit(s) of {branch or 'the detached HEAD'} are not on GitHub "
-               f"(not in {names}){'; ' + stray if stray else ''}{note}")
+               f"(not in {names}){'; ' + stray if stray else ''}{note}{why}")
 
 
 def main(argv: list[str]) -> int:

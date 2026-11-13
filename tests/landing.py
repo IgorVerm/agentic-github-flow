@@ -10,16 +10,21 @@ forbids a direct push and one that does not (`non_fast_forward`), a rule type it
 legacy protection readable and unreadable, the free plan's 403 on both endpoints (which means
 "no protection possible", not "unknown"), an Organization owner, no push permission, two
 writers, CODEOWNERS, pull requests merged by someone else, by a bot, long ago and by the user,
-no gh, a network failure and an API error. Also: the landing branch setting, and that the
-issue-chats plugin's copy of the script is identical. No network, no real gh.
+and API errors. GitHub that cannot be asked from here gives no decision (`landing: unknown`, exit
+3): no gh, a gh that cannot read its configuration (as inside the Claude Code sandbox), a gh that
+is not signed in, a network failure or a sandbox's proxy; the `landing` setting still wins there.
+Also: the landing branch setting, the scripts that need the mode refusing on unknown, and that
+the issue-chats plugin's copy of the script is identical. No network, no real gh.
 """
 import datetime
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 TOOL = os.path.join(ROOT, 'plugins', 'core', 'scripts', 'landing.py')
@@ -42,6 +47,26 @@ if status != 200:
 '''
 
 REPO = 'repos/acme/tool'
+ADVICE = ('run landing.py outside the sandbox, or set the `landing` row in HANDOFF.md '
+          '\N{SECTION SIGN}Landing settings')
+SANDBOXED = ('gh could not run here (its configuration is unreadable, as inside a sandbox): '
+             + ADVICE)
+
+
+def failing_gh(stderr, code=1):
+    """A gh that prints <stderr> and exits <code> without an answer."""
+    return [sys.executable, '-c', 'import sys; sys.stderr.write(%r); sys.exit(%d)' % (stderr, code)]
+
+
+# gh inside the Claude Code sandbox, where ~/.config/gh/hosts.yml is unreadable
+CONFIG_DENIED = failing_gh(
+    'warning: failed to load config: open ~/.config/gh/hosts.yml: operation not '
+    'permitted\nfailed to create root command: failed to read configuration: open '
+    '~/.config/gh/hosts.yml: operation not permitted\n')
+# gh behind the sandbox's network proxy, which refuses api.github.com
+PROXY_DENIED = failing_gh('Get "https://api.github.com/repos/acme/tool/rules/branches/main": '
+                          'Forbidden\n')
+SIGNED_OUT = failing_gh('To get started with GitHub CLI, please run:  gh auth login\n', 4)
 PLAN = [403, {'message': 'Upgrade to GitHub Pro or make this repository public to enable this '
                          'feature.', 'status': '403'}]
 NOT_PROTECTED = [404, {'message': 'Branch not protected', 'status': '404'}]
@@ -128,6 +153,17 @@ class Landing(unittest.TestCase):
         self.out = r.stdout
         return last[len('landing: '):]
 
+    def unknown(self, answers=None, **kw):
+        """Run with GitHub unaskable: exit 3, last line `landing: unknown`; the cause line."""
+        r = self.run_tool(answers, **kw)
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        lines = r.stdout.strip().splitlines()
+        self.assertEqual(lines[-1], 'landing: unknown', r.stdout)
+        checks = [line for line in lines if line.startswith('check: ')]
+        self.assertTrue(checks, r.stdout)
+        self.out = r.stdout
+        return checks[-1][len('check: '):]
+
     # --- 6: one writer, nothing else -------------------------------------------------------
     def test_solo_repository_lands_on_local_main(self):
         self.assertEqual(self.mode(solo()), 'local main')
@@ -196,12 +232,49 @@ class Landing(unittest.TestCase):
         self.git('remote', 'set-url', 'origin', 'git@github.com:acme/tool.git')
         self.assertEqual(self.mode(solo()), 'local main')
 
-    def test_no_gh_is_pull_request(self):
-        self.assertEqual(self.mode(solo(), gh=[os.path.join(self.tmp.name, 'no-gh')]),
-                         'pull request')
+    # --- 5: GitHub cannot be asked from here: no decision -------------------------------------
+    def test_gh_that_cannot_read_its_configuration_is_unknown(self):
+        self.assertEqual(self.unknown(solo(), gh=CONFIG_DENIED), SANDBOXED)
+        r = self.run_tool(solo(), gh=CONFIG_DENIED, args=('-C', self.repo))
+        self.assertEqual((r.returncode, r.stdout.splitlines()), (3, [
+            'check: ' + SANDBOXED, 'landing branch: main', 'landing: unknown']))
 
-    def test_network_failure_is_pull_request(self):
-        self.assertEqual(self.mode(solo(), fail=True), 'pull request')
+    def test_the_setting_wins_where_github_cannot_be_asked(self):
+        for value, expected in (('local main', 'local main'), ('pull request', 'pull request')):
+            with self.subTest(setting=value):
+                self.commit({'HANDOFF.md': settings([('landing', value)])})
+                self.publish('main')
+                self.assertEqual(self.mode(solo(), gh=CONFIG_DENIED), expected)
+                if value == 'local main':
+                    self.assertIn('server not checked', self.out)
+
+    def test_the_branch_needs_no_github(self):
+        r = self.run_tool(solo(), gh=CONFIG_DENIED, args=('-C', self.repo, '--branch'))
+        self.assertEqual((r.returncode, r.stdout), (0, 'main\n'))
+
+    def test_no_gh_is_unknown(self):
+        cause = self.unknown(solo(), gh=[os.path.join(self.tmp.name, 'no-gh')])
+        self.assertIn('gh could not run here', cause)
+        bin_dir = os.path.join(self.tmp.name, 'bin')  # git, and no gh
+        os.makedirs(bin_dir)
+        git_exe = shutil.which('git')  # git.exe on Windows: the link keeps that name
+        os.symlink(git_exe, os.path.join(bin_dir, os.path.basename(git_exe)))
+        env = {k: v for k, v in os.environ.items() if k != 'AGENTIC_GITHUB_FLOW_GH'}
+        r = subprocess.run([sys.executable, TOOL, '-C', self.repo], capture_output=True,
+                           text=True, env=dict(env, PATH=bin_dir))
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        self.assertIn('gh is not installed', r.stdout)
+
+    def test_network_failure_and_a_proxy_are_unknown(self):
+        self.assertIn('GitHub could not be reached', self.unknown(solo(), fail=True))
+        self.assertIn('Forbidden', self.unknown(solo(), gh=PROXY_DENIED))
+
+    def test_not_signed_in_is_unknown(self):
+        self.assertIn('gh auth login', self.unknown(solo(), gh=SIGNED_OUT))
+
+    def test_a_failure_that_names_no_cause_stays_the_safe_default(self):
+        self.assertEqual(self.mode(solo(), gh=failing_gh('something odd\n')), 'pull request')
+        self.assertIn('the safe default', self.out)
 
     def test_other_403_is_pull_request(self):
         denied = [403, {'message': 'Resource not accessible by integration'}]
@@ -470,6 +543,24 @@ class Consumers(unittest.TestCase):
         self.git('fetch', '-q', 'origin')
         for name in ('new_worktree', 'overlap_check'):
             self.assertEqual(self.module(name).default_base(self.repo), 'refs/heads/editor')
+
+    def test_unpushed_landings_with_the_mode_unknown_refuse(self):
+        # GitHub cannot be asked (the sandbox): the base is origin's branch while nothing is
+        # unpushed, which needs no mode; with unpushed landings the scripts refuse, not guess
+        self.git('remote', 'set-url', 'origin', 'https://github.com/acme/tool.git')
+        with mock.patch.dict(os.environ, {'AGENTIC_GITHUB_FLOW_GH': json.dumps(CONFIG_DENIED)}):
+            for name in ('new_worktree', 'overlap_check'):
+                self.assertEqual(self.module(name).default_base(self.repo),
+                                 'refs/remotes/origin/editor')
+            self.git('switch', '-q', 'editor')
+            self.git('commit', '-q', '--allow-empty', '-m', 'landed, not pushed')
+            self.git('switch', '-q', 'main')
+            with self.assertRaises(self.module('new_worktree').SettingError) as e:
+                self.module('new_worktree').default_base(self.repo)
+            with self.assertRaises(self.module('overlap_check').Usage) as u:
+                self.module('overlap_check').default_base(self.repo)
+        for error in (e.exception, u.exception):
+            self.assertIn('landing mode unknown: ' + SANDBOXED, str(error))
 
     def test_the_landing_branch_is_never_deleted(self):
         script = os.path.join(os.path.dirname(TOOL), 'delete_merged_branch.py')

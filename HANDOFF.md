@@ -32,10 +32,13 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
   pull request body or landing comment and the reviewer check it.
 - Landing modes (#13): finished work lands through a pull request or on local main, detected
   per repository at every landing by `plugins/core/scripts/landing.py` (its header owns the
-  rule; a copy in the issue-chats plugin). Local main lands with `promote_main.py` and pushes
-  the landing branch on the user's word (`plugins/core/skills/ship-change/local-main.md`). The
-  setting `## Landing settings` can fix the mode and name a landing branch; the worktree,
-  overlap and cleanup scripts and `templates/pre-push` follow that branch.
+  rule; a copy in the issue-chats plugin). Where GitHub cannot be asked (gh unreadable inside
+  the Claude Code sandbox, #62) it answers `unknown` (exit 3), the scripts that need the mode
+  refuse, and the skills rerun it outside the sandbox. Local main lands with `promote_main.py`
+  and pushes the landing branch on the user's word
+  (`plugins/core/skills/ship-change/local-main.md`). The setting `## Landing settings` can fix
+  the mode and name a landing branch; the worktree, overlap and cleanup scripts and
+  `templates/pre-push` follow that branch.
 - Frozen .claude (#50, `DESIGN_DECISIONS.md`): the landing branch is merged in with
   `plugins/core/scripts/merge_landing.py`, which commits the ordinary merge inside the Claude
   Code sandbox and keeps the worktree's `.claude/` and `.mcp.json` on disk as the chat started

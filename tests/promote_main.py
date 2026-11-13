@@ -9,6 +9,7 @@ commit the candidate lacks, a primary checkout on another branch, a git operatio
 staged changes, a local file of another session that the change would overwrite, and the
 landing branch setting. Offline: no network, no gh.
 """
+import json
 import os
 import subprocess
 import sys
@@ -71,9 +72,9 @@ class Promote(unittest.TestCase):
         git(self.wt, 'commit', '-q', '-m', 'task')
         return git(self.wt, 'rev-parse', 'HEAD')
 
-    def promote(self, *args, cwd=None):
+    def promote(self, *args, cwd=None, env=None):
         return subprocess.run([sys.executable, TOOL, *args], cwd=cwd or self.wt,
-                              capture_output=True, text=True)
+                              capture_output=True, text=True, env=dict(os.environ, **(env or {})))
 
     def assertRefused(self, r, text):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
@@ -96,6 +97,25 @@ class Promote(unittest.TestCase):
         before = git(self.primary, 'rev-parse', 'main')
         sha = self.task({'app.txt': 'two\n'})
         self.assertRefused(self.promote(sha), 'lands through pull requests')
+        self.assertEqual(git(self.primary, 'rev-parse', 'main'), before)
+
+    def test_refuses_when_the_mode_is_unknown(self):
+        # origin on GitHub, no setting, and a gh that cannot read its configuration (the Claude
+        # Code sandbox): landing.py cannot decide, so the landing waits; the setting still wins
+        denied = {'AGENTIC_GITHUB_FLOW_GH': json.dumps([
+            sys.executable, '-c', 'import sys; sys.stderr.write("failed to create root command: '
+            'failed to read configuration: open ~/.config/gh/hosts.yml: operation not '
+            'permitted"); sys.exit(1)'])}
+        write(os.path.join(self.primary, 'HANDOFF.md'), '# Handoff\n')
+        git(self.primary, 'commit', '-q', '-am', 'no setting')
+        git(self.primary, 'push', '-q', 'origin', 'main')
+        git(self.primary, 'fetch', '-q', 'origin')
+        git(self.primary, 'remote', 'set-url', 'origin', 'https://github.com/acme/tool.git')
+        before = git(self.primary, 'rev-parse', 'main')
+        sha = self.task({'app.txt': 'two\n'})
+        r = self.promote(sha, env=denied)
+        self.assertRefused(r, 'landing mode unknown: gh could not run here')
+        self.assertIn('outside the sandbox', r.stderr)
         self.assertEqual(git(self.primary, 'rev-parse', 'main'), before)
 
     def test_refuses_when_main_moved(self):

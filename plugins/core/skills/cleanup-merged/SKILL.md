@@ -42,6 +42,9 @@ the setting); the scripts read it themselves.
    request and the merge commit, or in local-main mode
    `Landed in <landing sha>; verified on remote <landing> at <remote tip>.` with what landed and
    the checks. Resolved in part: comment what remains and leave it open.
+   A closed issue keeps no question label: remove it with
+   `gh issue edit <n> --remove-label <label>` (`needs-user`, unless the issue-chats settings
+   name another).
    Record in that signed comment each branch the sweep printed as DELETED that had a remote
    copy or belongs to that issue, with its head SHA: the SHA is the way back until git prunes
    the commit. Branches that existed only locally and belong to no such issue are not

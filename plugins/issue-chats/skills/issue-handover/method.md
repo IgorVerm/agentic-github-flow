@@ -276,7 +276,11 @@ notification began. So:
 - **Questions for the user go on the owning issue** with the question label (`needs-user`
   unless §1's settings name another; never GitHub's built-in `question`). They do not block
   the hand-over unless the next step needs the answer. A question that is really new scope gets
-  the requirements label instead.
+  the requirements label instead. When the user answers, the chat records the answer in a
+  signed comment on that issue and in the same step removes the question label
+  (`gh issue edit <n> --remove-label <label>`), unless another question there is still open,
+  which that comment then names. Closing an issue removes its question label too
+  (`cleanup-merged` step 4).
 - **The machine stays awake:** at the start of long work the chat calls `request_keep_awake`
   with `until: "session_idle"`. It prevents idle sleep only; a closed laptop lid still sleeps.
 - **The fallback is the user's click:** when the start from the CLI fails, the chat makes sure

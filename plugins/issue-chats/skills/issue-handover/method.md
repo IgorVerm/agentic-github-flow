@@ -226,7 +226,10 @@ A chat that handed its unfinished issue to a successor working on its own branch
 this chat's head) passes once that branch is pushed: the check then finds HEAD in another branch
 of origin that GitHub still has, and, as for every `ok`, proves with the reflogs that no commit
 only this worktree held is lost. A successor's branch only on this machine does not count, in
-either mode.
+either mode. A chat that handed over in place, its successor working on in the same worktree
+(`issue-handover`, *A hand-over before the branch is ready*), is archived at the hand-over: the
+guard passes it on the note `start_issue_chat.py --handover` wrote, since its worktree, made by a
+tool, stays when it is archived (#80).
 
 ### The next chat starts in the background
 

@@ -63,8 +63,10 @@ pull request stays.
    `list_sessions` is that chat, or a session it started, at any depth; the `parentSessionId` of
    `get_session` gives the same link from the child's side): the app archives the chain with
    it, a running chat included. Keep it until its descendants have detached (step 0). Keep, too, a chat
-   whose worktree another unarchived chat is working in (a branch in flight it took over):
-   archiving would remove that chat's working folder.
+   whose worktree the app made (`worktreePath` in `get_session`) while another unarchived chat
+   works in it: archiving would remove that chat's working folder. A worktree a tool made (no
+   `worktreePath`) stays when its chat is archived (#80); a chat that handed its issue over in
+   place is archived by the hand-over itself (`issue-handover`).
 4. **Archive** with `archive_session` and `reason`: `finished issue chat #<issue>; worktree
    clean, on GitHub` (or `landed on local main`, or `held by <successor branch>`), for a side
    chat `finished side chat; landed` (or `pull request #<n> merged`). The plugin's guard hook

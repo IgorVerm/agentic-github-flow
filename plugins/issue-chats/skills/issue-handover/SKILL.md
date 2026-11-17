@@ -112,10 +112,11 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
    unknown` means GitHub could not be asked from the sandbox: run the check outside it).
 5. **Start the next chat and claim its issue.** Each numbered call stands alone, in the
    foreground of this turn; any failure goes to the fallback below.
-   1. **Its worktree:** always a new one, made with the settings' worktree tool from the
-      primary checkout, named `<issue>-<short name>`. Never this chat's own worktree: the app
-      then refuses the message of step 5.5 ("this session's branch is checked out somewhere
-      else").
+   1. **Its worktree:** for the next issue a new one, made with the settings' worktree tool
+      from the primary checkout, named `<issue>-<short name>`; never this chat's own worktree,
+      which still holds this chat's branch. A hand-over of this chat's own unfinished issue is
+      the exception (*A hand-over before the branch is ready* below): there it is this chat's
+      own worktree.
    2. **Model and effort:** the settings' model and effort; unset, this chat's own: the `model`
       of `get_session "self"`, and the effort in `$CLAUDE_EFFORT` (the tool takes it when
       `--effort` is left out).
@@ -124,8 +125,10 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
       with `--prefix "<title prefix>"` when the settings set one; the title is
       `<title prefix>#<issue> · <topic>` (method.md §2). It refuses before starting anything
       when the platform has no known form of `script`, the CLI is logged out, the worktree is a
-      primary checkout, dirty or already some session's, the title is not of the form, another
-      running chat carries the title, or the issue is closed or already assigned. Exit 0 prints
+      primary checkout, dirty or already some session's (with `--handover`: some session's other
+      than the chat whose claim is handed over), the title is not of the form, another running
+      chat carries the title, or the issue is closed or already assigned (with `--handover`:
+      unless its newest claim names this chat, or an idle chat in that worktree). Exit 0 prints
       `ok local_<sessionId>`: the new chat is open in the app, its ready reply on `<model>`.
       Exit 1 (`fail:`): nothing runs and nothing was opened, also when the new chat gave no
       real ready reply or answered on another model (the tool stops it). Exit 2 (`unsure:`): it
@@ -156,7 +159,9 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
    two. Exit 1 of step 5.3 left none. After exit 2 or an undelivered message:
    `local_<sessionId>` in `list_sessions` gets `archive_session` (it has done nothing; its
    worktree is the new, clean one, which the archive keeps); otherwise
-   `claude agents --json --cwd "<new worktree>"` must print `[]`. Never `claude rm`: it deletes
+   `claude agents --json --cwd "<new worktree>"` must print `[]`, or, in a hand-over before the
+   branch is ready, list no session but this chat (or the idle chat handed over for). There the
+   old chat is not archived: it keeps its issue until a successor is open. Never `claude rm`: it deletes
    a session's worktree. Remove a claim step 5.4 made (`gh issue edit <n> --remove-assignee
    @me` and a comment why). If the half-made chat cannot be ruled out or archived, leave no
    card: report it and stop. Then a card, `start_session` with `initiation: "own_initiative"`,
@@ -220,8 +225,15 @@ commit, what is checked, the next step), then step 5 for the same issue with `--
 this chat's own worktree as the worktree (no new one: the successor works on the branch in
 flight, with its build output; the tool refuses unless the issue's newest claim comment names
 this chat's `local_<sessionId>` or worktree, and lets this chat stay in the worktree), and a new
-claim comment naming the new chat and that worktree. Then this chat ends its turn and works no
-more. Another chat, such as an orchestrator, hands over the same way for a chat that sits idle
-in its worktree: `--handover` accepts a claim that names that idle chat by its session id
-(#80). Never an archive: this chat's commits are not on GitHub. A later `archive-finished-chats` archives it once they are, or once a successor's
+claim comment naming the new chat and that worktree. Exit 0 also notes the hand-over
+(`handover_note.py`); then, once the brief came back "delivered", this chat archives itself
+(`get_session "self"`, then `archive_session "self"`, reason `handed #<issue> over in place to
+local_<id>`), so nothing can wake it to work beside its successor: an archived chat takes no
+message. The archive leaves the worktree in place, since the app did not make it (no
+`worktreePath`; measured, #80), and the guard hook lets it pass on the note although the commits
+are not on GitHub. Another chat, such as an orchestrator, hands over the same way for a chat
+that sits idle in its worktree: `--handover` accepts a newest claim that names exactly that one
+idle chat by its session id; after "delivered" it archives that chat (`get_session`, then
+`archive_session`). A chat that claimed its issue only by its app id (`local_<id>` other than its
+CLI session id) cannot be handed over for this way; the tool refuses. A later `archive-finished-chats` archives it once they are, or once a successor's
 branch that holds them is pushed (the worktree check then names that branch).

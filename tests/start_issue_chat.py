@@ -130,6 +130,14 @@ sh('git', 'worktree', 'add', '-q', '-b', 'agent/next', wt, cwd=primary)
 
 failures = []
 CASES = SKIPPED = 0
+NOTES = os.path.join(tmp, 'handovers')
+
+
+def notes():
+    """The hand-over notes the run left: {old session id: note}."""
+    if not os.path.isdir(NOTES):
+        return {}
+    return {n[:-5]: json.load(open(os.path.join(NOTES, n))) for n in os.listdir(NOTES)}
 
 
 def pty_works():
@@ -163,9 +171,11 @@ def case(name, expect_code, *, args=None, logged_in=True, others=(), bg_status='
                    **(stub or {})}, f)
     config = os.path.join(tmp, 'config')
     shutil.rmtree(config, ignore_errors=True)
+    shutil.rmtree(NOTES, ignore_errors=True)
     env = dict(GENV, PATH=bindir + os.pathsep + os.environ['PATH'], STUB_STATE=state,
                AGENTIC_GITHUB_FLOW_GH=GH_CMD, CLAUDE_CODE_SESSION_ID='me', CLAUDE_EFFORT='high',
-               CLAUDE_CONFIG_DIR=config, AGENTIC_GITHUB_FLOW_START_WAIT_S='8')
+               CLAUDE_CONFIG_DIR=config, AGENTIC_GITHUB_FLOW_START_WAIT_S='8',
+               AGENTIC_GITHUB_FLOW_HANDOVER_STATE=NOTES)
     env.pop('CLAUDE_CODE_HOST_SESSION_ID', None)
     env.update(env_extra or {})
     argv = args if args is not None else [wt, '#12 · next', '--model', 'claude-opus-5-5']
@@ -305,20 +315,50 @@ else:
     OLD_CLAIM = 'claimed for chat "#12 · next" (local_%s), branch agent/12-x, worktree %s' % (OLD, wt)
     old_in_wt = lambda status, sid=OLD: [{'cwd': wt, 'sessionId': sid, 'name': '#12 · next',
                                           'status': status}]
-    case('hand-over: the calling chat stays in its own worktree', 0, args=HANDOVER,
+    def noted(*ids):
+        def check(log, out):
+            got = notes()
+            if set(got) != set(ids):
+                return 'notes for %s, want %s' % (sorted(got), sorted(ids))
+            if any(n['worktree'] != os.path.realpath(wt) or n['successor'] != 'local_' + SID
+                   or n['issue'] != 12 for n in got.values()):
+                return 'note %s' % got
+            return order_ok(log, out)
+        return check
+
+    def no_note(log, out):
+        return 'notes written: %s' % sorted(notes()) if notes() else None
+
+    case('hand-over: the calling chat stays in its own worktree, noted', 0, args=HANDOVER,
          gh=claimed(OLD_CLAIM), others=old_in_wt('busy'),
-         env_extra={'CLAUDE_CODE_SESSION_ID': OLD}, check=order_ok)
-    case('hand-over for an idle chat by another chat (an orchestrator)', 0, args=HANDOVER,
-         gh=claimed(OLD_CLAIM), others=old_in_wt('idle'), cwd=primary, check=order_ok)
+         env_extra={'CLAUDE_CODE_SESSION_ID': OLD}, check=noted(OLD))
+    case('hand-over for an idle chat by another chat (an orchestrator), noted', 0, args=HANDOVER,
+         gh=claimed(OLD_CLAIM), others=old_in_wt('idle'), cwd=primary, check=noted(OLD))
     case('hand-over for a chat that is not idle refused', 1, args=HANDOVER,
-         gh=claimed(OLD_CLAIM), others=old_in_wt('busy'), cwd=primary, check=nothing_started)
+         gh=claimed(OLD_CLAIM), others=old_in_wt('busy'), cwd=primary,
+         check=lambda log, out: nothing_started(log, out) or no_note(log, out))
     case('hand-over with another, unnamed chat in the worktree refused', 1, args=HANDOVER,
          gh=claimed(OLD_CLAIM), others=old_in_wt('idle') + old_in_wt('idle', 'eeeeffff-9999-8888'),
          cwd=primary, check=nothing_started)
     case('hand-over for an idle chat the claim does not name refused', 1, args=HANDOVER,
          gh=claimed(THEIRS), others=old_in_wt('idle'), cwd=primary, check=nothing_started)
-    case('without --handover the chat in the worktree still refuses', 1,
-         gh=claimed(OLD_CLAIM), others=old_in_wt('idle'), cwd=primary, check=nothing_started)
+    case('hand-over for an idle chat named only in an older claim refused', 1, args=HANDOVER,
+         gh=claimed(OLD_CLAIM, THEIRS), others=old_in_wt('idle'), cwd=primary,
+         check=nothing_started)
+    case('hand-over: an id glued to a path is no name', 1, args=HANDOVER,
+         gh=claimed('claimed for chat "#12 · next" (see /logs/%s/x), worktree /w/12-x' % OLD),
+         others=old_in_wt('idle'), cwd=primary, check=nothing_started)
+    case('hand-over: an id followed by a path is no name', 1, args=HANDOVER,
+         gh=claimed('claimed for chat "#12 · next" (see local_%s/logs), worktree /w/12-x' % OLD),
+         others=old_in_wt('idle'), cwd=primary, check=nothing_started)
+    case('hand-over: a claim naming two idle chats there refused', 1, args=HANDOVER,
+         gh=claimed(OLD_CLAIM + ', and local_eeeeffff-9999-8888'),
+         others=old_in_wt('idle') + old_in_wt('idle', 'eeeeffff-9999-8888'), cwd=primary,
+         check=nothing_started)
+    case('without --handover the chat in the worktree still refuses, nothing noted', 1,
+         gh=claimed(OLD_CLAIM), others=old_in_wt('idle'), cwd=primary,
+         check=lambda log, out: nothing_started(log, out) or no_note(log, out))
+    case('a plain start notes no hand-over', 0, check=lambda log, out: order_ok(log, out) or no_note(log, out))
 
     def unsure_with_id(log, out):
         if not out.strip().startswith('unsure:') or 'nothing started' in out:

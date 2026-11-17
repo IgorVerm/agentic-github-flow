@@ -23,6 +23,10 @@ result, written by the app as a tool result, never text the agent wrote, and the
                                                  common one), checked the same way: an app-made
                                                  worktree under a renamed key, or a worktree
                                                  made by a tool, may still hold work
+  no worktreePath, the worktree's chat handed  -> pass: start_issue_chat.py --handover noted that
+  its issue over in place (handover_note.py)     this chat handed over to a successor working on
+                                                 in that worktree, which the archive leaves in
+                                                 place (no worktreePath; measured, #80)
   no worktreePath, the directory is gone, or  -> pass: archiving removes no worktree there
   is in a primary checkout or no repository
   no worktreePath and no working directory    -> deny: nothing says where the chat worked
@@ -59,6 +63,9 @@ import sys
 
 TOOL = "mcp__ccd_session_mgmt__archive_session"
 GET = "mcp__ccd_session_mgmt__get_session"
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))  # -I leaves it off
+import handover_note  # noqa: E402
+
 CHECK = os.path.join(os.path.dirname(os.path.realpath(__file__)), "chat_archivable.py")
 CHECK_TIMEOUT_S = 40  # hooks.json gives the hook 60 s
 
@@ -223,6 +230,11 @@ def check_worktree(data: dict) -> int:
         except (OSError, subprocess.TimeoutExpired) as e:
             return deny(f"git did not answer for {cwd}: {e}")
         if not worktree:
+            return 0
+        # A chat that handed its unfinished issue over in place (#80): its successor works on in
+        # this worktree, which archiving leaves alone because the app did not make it (no
+        # worktreePath); archived, the old chat takes no message and cannot work beside it.
+        if handover_note.handed_over(str(data.get("sessionId") or ""), worktree):
             return 0
     try:
         r = subprocess.run([sys.executable, CHECK, worktree, *(["--landed"] if side else [])],

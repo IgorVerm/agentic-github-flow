@@ -150,6 +150,17 @@ def main() -> int:
         pushed = os.path.join(tmp, "wt-pushed")
         primary = os.path.join(tmp, "repo")
         os.makedirs(os.path.join(ahead, "sub"))  # a working directory below a worktree's top
+        # Hand-over notes (#80): this chat handed over in place in `inplace` (a commit not on
+        # GitHub, as `ahead`); OTHER's note names another worktree than the one it works in.
+        inplace = os.path.join(tmp, "wt-inplace")
+        git("worktree", "add", "-q", "-b", "agent/inplace", inplace, cwd=primary)
+        git("commit", "-q", "--allow-empty", "-m", "in flight", cwd=inplace)
+        ENV["AGENTIC_GITHUB_FLOW_HANDOVER_STATE"] = os.path.join(tmp, "handovers")
+        os.environ["AGENTIC_GITHUB_FLOW_HANDOVER_STATE"] = ENV["AGENTIC_GITHUB_FLOW_HANDOVER_STATE"]
+        sys.path.insert(0, os.path.join(PLUGIN, "scripts"))
+        import handover_note
+        handover_note.write([APP], inplace, "local_succ0001", 12)
+        handover_note.write([OTHER], clean, "local_succ0002", 13)
 
         def session(sid, wt=None, **where):
             # without a worktreePath, the app reports where the chat works (default: primary)
@@ -219,6 +230,10 @@ def main() -> int:
             ("other ok: detached side chat, branch pushed", [use("a", OTHER, T1), res("a", side(OTHER, pushed, detached=True), T1)], OTHER, None, None, False, 0),
             ("self not-ok: side chat, pull request open", [use("a", "self", T1), res("a", side(APP, pushed), T1)], "self", None, None, False, 2),
             ("self ok: side chat, landed", [use("a", "self", T1), res("a", side(APP, clean), T1)], "self", None, None, False, 0),
+            ("self ok: handed over in place, cwd in a worktree with a commit not on GitHub", [use("a", "self", T1), res("a", me(cwd=inplace), T1)], "self", None, None, False, 0),
+            ("self not-ok: handed over, but the app made the worktree (worktreePath)", [use("a", "self", T1), res("a", me(inplace), T1)], "self", None, None, False, 2),
+            ("other not-ok: its hand-over note names another worktree", [use("a", OTHER, T1), res("a", other(cwd=ahead), T1)], OTHER, None, None, False, 2),
+            ("other not-ok: no hand-over note, cwd in a worktree with a commit not on GitHub", [use("a", OTHER, T1), res("a", other(cwd=dirty), T1)], OTHER, None, None, False, 2),
             ("self not-ok: side chat, cwd in a pushed worktree", [use("a", "self", T1), res("a", {"sessionId": APP, "cwd": pushed, "parentSessionId": "local_parent"}, T1)], "self", None, None, False, 2),
         ]
         bad = 0

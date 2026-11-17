@@ -29,7 +29,9 @@ the old chat still in the worktree (measured 2026-11-17, #80, desktop app: a suc
 there by the old chat itself, and one started by another session, each got its brief and
 answered on --model; the earlier failure "this session's branch is checked out somewhere else",
 seen with CLI 2.1.292, did not recur). The new session is told apart from the kept one by its
-id, not its title. Then it runs
+id, not its title. With --handover, exit 0 also writes the hand-over note for the kept chat
+(handover_note.py), on which archive_guard.py lets that chat be archived: the successor works on
+in the worktree, which the archive leaves in place. Then it runs
 `claude --bg --name <title> --model <model> --effort <level> <ready prompt>` in <worktree>,
 waits up to 120 s until `claude agents --json --cwd <worktree>` lists that one session idle and
 its transcript (`<CLAUDE_CONFIG_DIR or ~/.claude>/projects/*/<sessionId>.jsonl`) holds a real
@@ -74,6 +76,9 @@ import shutil
 import subprocess
 import sys
 import time
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))  # -I leaves it off
+import handover_note  # noqa: E402
 
 READY = "Reply with exactly one line: ready. Use no tools."
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
@@ -244,14 +249,17 @@ def own_claim(wt: str, issue: int, comments) -> set[str]:
         names.update({re.escape(top), re.escape(real(top))})
     if any(re.search(r"(?<![\w./-])" + n + r"(?![\w.-]|/[\w.-])", newest) for n in names):
         return mine
-    idle = set()
+    named = []
     for row in agents(wt):
         sid = str(row.get("sessionId") or "")
-        if row.get("status") == "idle" and len(sid) >= 8 and re.search(
-                r"(?<![\w./-])(?:local_)?" + re.escape(sid) + r"(?![\w.-])", newest):
-            idle.add(sid)
-    if idle:
-        return idle
+        if len(sid) >= 8 and re.search(
+                r"(?<![\w./-])(?:local_)?" + re.escape(sid) + r"(?![\w.-]|/[\w.-])", newest):
+            named.append(row)
+    if len(named) > 1:
+        raise Fail(f"the newest claim on issue #{issue} names {len(named)} chats in {wt}: "
+                   "--handover hands over for exactly one")
+    if named and named[0].get("status") == "idle":
+        return {str(named[0].get("sessionId"))}
     raise Fail(f"the newest claim on issue #{issue} names another chat, and no chat it names sits "
                f"idle in {wt}: --handover hands over only this chat's own claim, or that of an "
                "idle chat in the worktree")
@@ -406,6 +414,11 @@ def main(argv: list[str]) -> int:
     try:
         keep = preflight(wt, a.title, a.model, effort, a.prefix, a.handover)
         code, line = start(wt, a.title, a.model, effort, keep)
+        if code == 0 and a.handover and keep:
+            issue = title_issue(a.title, a.prefix)[1]
+            if not handover_note.write(keep, wt, line.split()[-1], issue):
+                line += ("; the hand-over note could not be written: the archive guard will "
+                         "refuse to archive the old chat")
     except Fail as e:
         code, line = 1, f"fail: {e}; nothing started"
     except subprocess.TimeoutExpired as e:

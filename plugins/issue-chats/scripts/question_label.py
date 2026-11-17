@@ -9,8 +9,10 @@ one; it never writes the question or the answer to GitHub itself, so the words s
 and pass the personal-data guard on the chat's own `gh` command.
 
 It acts only in a repository whose HANDOFF.md, as the default branch holds it, has
-`## Issue chats settings`. Asking and answering also need an issue-chat worktree: a branch or
-worktree folder named `<issue>-<name>` (`agent/<issue>-<name>`). Per event:
+`## Issue chats settings`. Asking and answering also need an issue-chat worktree: the branch
+`agent/<issue>-<name>`, or, in a linked worktree only, the folder `<issue>-<name>` (a worktree
+tool that names branches its own way); `release/2025-01` or a checkout called `2024-site` is
+none. Per event:
 
   PreToolUse AskUserQuestion, or       the issue lacks the label -> deny (exit 2), naming the
   mcp__ccd_turn__wrap_up with          command that posts the question and adds the label;
@@ -21,8 +23,10 @@ worktree folder named `<issue>-<name>` (`agent/<issue>-<name>`). Per event:
   back, or the user typed it)          no marker -> nothing (a start brief, an unrelated
                                        message, another chat's question keep the label)
   PostToolUse Bash running             the pull request merged -> remove the label from the
-  `merge_pr.py <n>`, `gh pr merge <n>` issues it closes; the issue closed -> remove it there.
-  or `gh issue close <n>`              `cd <dir> &&` in front and `-R/--repo` are followed.
+  `merge_pr.py <n>`, `gh pr merge <n>` issues it closes in the same repository (-R, else
+  or `gh issue close <n>`              origin's URL; not waiting for CLOSED, which GitHub sets
+                                       seconds later); the issue CLOSED -> remove it there.
+                                       `cd <dir> &&` in front and `-R/--repo` are followed.
 
 Known limits: two questions open on one issue at once lose the label at the first answer (the
 chat adds it again); a question asked in plain text, and an issue closed on github.com or by a
@@ -32,8 +36,11 @@ the close). Codex runs no such hooks.
 It never blocks for its own failures: no gh, no network, no repository -> pass silently, since a
 question to the user must always be possible. Deny is exit 2 with the reason on stderr; notes
 to the chat are JSON `additionalContext` on stdout.
+The marker folder is the user's own: $CLAUDE_PLUGIN_DATA/question-markers, else
+~/.cache/agentic-github-flow/question-markers, made 0700 and not used when it is a symlink or
+another user's; markers open without following symlinks. Never the shared temp folder.
 AGENTIC_GITHUB_FLOW_GH (a JSON list) replaces `gh`; AGENTIC_GITHUB_FLOW_QUESTION_STATE replaces
-the marker folder (default: <temp>/agentic-github-flow-questions).
+the marker folder.
 Tests: python3 tests/question_label.py
 """
 from __future__ import annotations
@@ -44,7 +51,7 @@ import re
 import shlex
 import subprocess
 import sys
-import tempfile
+import stat
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)  # -I leaves the script's folder off sys.path
@@ -54,14 +61,17 @@ ASK = "AskUserQuestion"
 WRAP_UP = "mcp__ccd_turn__wrap_up"
 DEFAULT_LABEL = "needs-user"
 GH_TIMEOUT_S = 10  # hooks.json gives the hook 30 s
-ISSUE_DIR = re.compile(r"^(?:[^/]+/)*(\d+)-")
+ISSUE_BRANCH = re.compile(r"^agent/(\d+)-")
+ISSUE_DIR = re.compile(r"^(\d+)-[A-Za-z]")
+REMOTE = re.compile(r"github\.com[:/]+([\w.-]+)/([\w.-]+?)(?:\.git)?/?$")
 CLOSERS = [
     ("pr", re.compile(r"(?:^|[\s/])merge_pr\.py\s+(\d+)\b")),
     ("pr", re.compile(r"\bgh\s+pr\s+merge\s+#?(\d+)\b")),
     ("issue", re.compile(r"\bgh\s+issue\s+close\s+#?(\d+)\b")),
 ]
 LEADING_CD = re.compile(r"^\s*cd\s+(\"[^\"]+\"|'[^']+'|[^\s;&|]+)\s*&&")
-REPO_FLAG = re.compile(r"(?:-R|--repo)[\s=]+([\w.-]+/[\w.-]+)")
+SEPARATOR = re.compile(r"&&|\|\||[;|\n]")
+REPO_FLAG = re.compile(r"(?:^|\s)(?:-R|--repo)(?:\s+|=)([\w.-]+/[\w.-]+)(?=\s|$)")
 
 
 class Unread(Exception):
@@ -111,8 +121,30 @@ def chat_issue(path: str) -> tuple[str, str, int] | None:
         return None
     top, label = found
     branch = git(path, "branch", "--show-current").stdout.strip()
-    m = ISSUE_DIR.match(branch) or ISSUE_DIR.match(os.path.basename(top))
+    m = ISSUE_BRANCH.match(branch)
+    if not m and linked_worktree(path):  # a worktree tool that names branches its own way
+        m = ISSUE_DIR.match(os.path.basename(top))
     return (top, label, int(m.group(1))) if m else None
+
+
+def linked_worktree(path: str) -> bool:
+    """A linked worktree (its git dir differs from the common one), not a primary checkout."""
+    p = git(path, "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir")
+    dirs = p.stdout.split()
+    return p.returncode == 0 and len(dirs) == 2 and dirs[0] != dirs[1]
+
+
+def own_repo(top: str, flag: str | None) -> str | None:
+    """owner/name of the repository a command acts on: its -R flag, else origin's URL."""
+    if flag:
+        return flag.lower()
+    m = REMOTE.search(git(top, "remote", "get-url", "origin").stdout.strip())
+    return f"{m.group(1)}/{m.group(2)}".lower() if m else None
+
+
+def ref_repo(ref: dict) -> str:
+    r = ref.get("repository") or {}
+    return f"{(r.get('owner') or {}).get('login', '')}/{r.get('name', '')}".lower()
 
 
 def labels_of(issue: int, cwd: str, repo: list[str] | None = None) -> list[str]:
@@ -124,14 +156,67 @@ def remove_label(issue: int, label: str, cwd: str, repo: list[str] | None = None
     gh(["issue", "edit", str(issue), "--remove-label", label, *(repo or [])], cwd)
 
 
-def state_dir() -> str:
-    return os.environ.get("AGENTIC_GITHUB_FLOW_QUESTION_STATE") or os.path.join(
-        tempfile.gettempdir(), "agentic-github-flow-questions")
+def state_dir() -> str | None:
+    """The marker folder, private to this user, or None when it cannot be trusted.
+
+    Not the shared temp folder: on a multi-user host another user could make it first and read
+    or redirect the markers. The plugin's data folder, else one under the user's home; made 0700,
+    and refused when it is a symlink or another user's."""
+    path = (os.environ.get("AGENTIC_GITHUB_FLOW_QUESTION_STATE")
+            or (os.path.join(os.environ["CLAUDE_PLUGIN_DATA"], "question-markers")
+                if os.environ.get("CLAUDE_PLUGIN_DATA") else None)
+            or os.path.join(os.path.expanduser("~"), ".cache", "agentic-github-flow",
+                            "question-markers"))
+    try:
+        os.makedirs(path, mode=0o700, exist_ok=True)
+        st = os.lstat(path)
+    except OSError:
+        return None
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
+        return None
+    if hasattr(os, "getuid") and st.st_uid != os.getuid():
+        return None
+    return path
 
 
-def marker(session: str) -> str:
+def marker(folder: str, session: str) -> str:
     safe = re.sub(r"[^A-Za-z0-9_.-]", "_", session or "unknown")
-    return os.path.join(state_dir(), safe + ".json")
+    return os.path.join(folder, safe + ".json")
+
+
+def write_marker(session: str, content: dict) -> None:
+    folder = state_dir()
+    if not folder:
+        return
+    path = marker(folder, session)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(content, f)
+    except OSError:
+        pass
+
+
+def take_marker(session: str) -> dict | None:
+    """This session's marker, removed as it is read (a stale one goes too)."""
+    folder = state_dir()
+    if not folder:
+        return None
+    path = marker(folder, session)
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(fd, encoding="utf-8") as f:
+            content = json.load(f)
+    except (OSError, ValueError):
+        return None
+    finally:
+        try:
+            if os.path.lexists(path):
+                os.remove(path)
+        except OSError:
+            pass
+    return content if isinstance(content, dict) else None
 
 
 def note(event: str, text: str) -> int:
@@ -162,29 +247,18 @@ def on_ask(data: dict) -> int:
               f"the label is missing: gh label create {shlex.quote(label)}). Then ask again. "
               f"The rule: issue-handover method.md §4, Questions for the user.", file=sys.stderr)
         return 2
-    try:
-        os.makedirs(state_dir(), exist_ok=True)
-        with open(marker(data.get("session_id", "")), "w", encoding="utf-8") as f:
-            json.dump({"issue": issue, "label": label, "top": top}, f)
-    except OSError:
-        pass
+    write_marker(data.get("session_id", ""), {"issue": issue, "label": label, "top": top})
     return 0
 
 
 def on_answer(data: dict, event: str) -> int:
-    path = marker(data.get("session_id", ""))
-    try:
-        with open(path, encoding="utf-8") as f:
-            asked = json.load(f)
-    except (OSError, ValueError):
+    asked = take_marker(data.get("session_id", ""))
+    if not asked:
         return 0
     issue, label, top = asked.get("issue"), asked.get("label"), asked.get("top")
-    if not isinstance(issue, int) or not label or not top or not os.path.isdir(top):
+    if not isinstance(issue, int) or not isinstance(label, str) or not label \
+            or not isinstance(top, str) or not os.path.isdir(top):
         return 0
-    try:
-        os.remove(path)
-    except OSError:
-        pass
     try:
         if label in labels_of(issue, top):
             remove_label(issue, label, top)
@@ -199,7 +273,14 @@ def on_answer(data: dict, event: str) -> int:
 
 def on_bash(data: dict) -> int:
     command = (data.get("tool_input") or {}).get("command") or ""
-    hits = [(kind, int(m.group(1))) for kind, rx in CLOSERS for m in rx.finditer(command)]
+    hits = []
+    for kind, rx in CLOSERS:
+        for m in rx.finditer(command):
+            # -R/--repo counts only inside this command's own segment, so `grep -R src/lib`
+            # elsewhere on the line is never read as a repository.
+            segment = SEPARATOR.split(command[m.start():], maxsplit=1)[0]
+            flag = REPO_FLAG.search(segment)
+            hits.append((kind, int(m.group(1)), flag.group(1) if flag else None))
     if not hits:
         return 0
     where = data.get("cwd") or ""
@@ -211,17 +292,22 @@ def on_bash(data: dict) -> int:
     if not found:
         return 0
     top, label = found
-    repo_m = REPO_FLAG.search(command)
-    repo = ["-R", repo_m.group(1)] if repo_m else []
     removed, failed = [], []
-    for kind, n in hits:
+    for kind, n, flag in hits:
+        repo = ["-R", flag] if flag else []
         try:
             if kind == "pr":
                 pr = gh_json(["pr", "view", str(n), "--json", "state,closingIssuesReferences",
                               *repo], top) or {}
                 if pr.get("state") != "MERGED":
                     continue
-                issues = [i.get("number") for i in pr.get("closingIssuesReferences") or []]
+                # Only this repository's issues: a reference to another repository's #n must
+                # not take the label off this one's #n. Not waiting for CLOSED: GitHub closes
+                # the referenced issues a few seconds after the merge (#70 read OPEN just after
+                # PR #71 merged), and a merged pull request closes them.
+                here = own_repo(top, flag)
+                issues = [i.get("number") for i in pr.get("closingIssuesReferences") or []
+                          if here and ref_repo(i) == here]
             else:
                 st = gh_json(["issue", "view", str(n), "--json", "state", *repo], top) or {}
                 issues = [n] if st.get("state") == "CLOSED" else []

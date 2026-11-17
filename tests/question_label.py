@@ -33,8 +33,10 @@ if a[:2] == ['issue', 'edit'] and a[3] == '--remove-label':
     s['issues'][a[2]]['labels'].remove(a[4]); json.dump(s, open(p, 'w')); sys.exit(0)
 if a[:2] == ['pr', 'view']:
     r = s['prs'][a[2]]
-    print(json.dumps({'state': r['state'],
-                      'closingIssuesReferences': [{'number': n} for n in r['closing']]})); sys.exit(0)
+    refs = [{'number': n, 'repository': {'name': name, 'owner': {'login': owner}}}
+            for n, owner, name in ([c, 'Owner', 'Name'] if isinstance(c, int) else c
+                                   for c in r['closing'])]
+    print(json.dumps({'state': r['state'], 'closingIssuesReferences': refs})); sys.exit(0)
 sys.exit(2)
 '''
 
@@ -75,6 +77,7 @@ class QuestionLabel(unittest.TestCase):
         git(path, 'add', 'HANDOFF.md')
         git(path, 'commit', '-q', '-m', 'handoff')
         git(path, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
+        git(path, 'remote', 'add', 'origin', 'https://github.com/owner/name.git')
         return path
 
     def gh_state(self, issues, prs=None, fail=False):
@@ -147,6 +150,42 @@ class QuestionLabel(unittest.TestCase):
         self.assertEqual(self.ask()[0], 0)
         self.assertEqual(self.gh()['log'], [])
 
+    def test_numbered_branches_that_are_no_issue_chat_are_left_alone(self):
+        self.gh_state({2025: ([], 'OPEN'), 1: ([], 'OPEN')})
+        for branch in ('release/2025-01', 'hotfix/1-2-3', '2025-01-release'):
+            git(self.repo, 'checkout', '-q', '-b', branch, 'main')
+            self.assertEqual(self.ask()[0], 0, branch)
+        self.assertEqual(self.gh()['log'], [])
+
+    def test_numbered_primary_checkout_is_no_issue_chat(self):
+        repo = self.make_repo('2024-site', '| ready label | `agent-ready` |')
+        self.gh_state({2024: ([], 'OPEN')})
+        self.assertEqual(self.ask(cwd=repo)[0], 0)
+        self.assertEqual(self.gh()['log'], [])
+
+    def test_linked_worktree_folder_names_the_issue(self):
+        wt = os.path.join(self.tmp.name, '8-own-naming')
+        git(self.repo, 'worktree', 'add', '-q', '-b', 'feature-x', wt, 'main')
+        self.gh_state({8: ([], 'OPEN')})
+        self.assertEqual(self.ask(cwd=wt)[0], 2)
+
+    def test_malformed_input_never_blocks(self):
+        self.gh_state({7: ([], 'OPEN')})
+        code, _, err = self.run_hook('PreToolUse', tool_name='mcp__ccd_turn__wrap_up',
+                                     tool_input='not a dict')
+        self.assertEqual(code, 0)
+        self.assertIn('hook failed', err)  # the hook's own exception, passed, not denied
+
+    def test_untrusted_marker_folder_is_not_used(self):
+        real = os.path.join(self.tmp.name, 'elsewhere')
+        os.makedirs(real)
+        os.symlink(real, self.markers)
+        self.gh_state({7: (['needs-user'], 'OPEN')})
+        self.assertEqual(self.ask()[0], 0)
+        self.assertEqual(os.listdir(real), [])
+        self.run_hook('UserPromptSubmit', prompt='Red')
+        self.assertEqual(self.gh()['issues']['7']['labels'], ['needs-user'])
+
     def test_github_unreachable_never_blocks_a_question(self):
         self.gh_state({7: ([], 'OPEN')}, fail=True)
         self.assertEqual(self.ask()[0], 0)
@@ -202,6 +241,23 @@ class QuestionLabel(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(self.gh()['issues']['3']['labels'], [])
         self.assertIn('#3', json.loads(out)['hookSpecificOutput']['additionalContext'])
+
+    def test_merge_leaves_another_repositorys_issue_number_alone(self):
+        self.gh_state({3: (['needs-user'], 'OPEN')},
+                      prs={12: {'state': 'MERGED', 'closing': [[3, 'someone', 'elsewhere']]}})
+        self.bash('gh pr merge 12 --merge')
+        self.assertEqual(self.gh()['issues']['3']['labels'], ['needs-user'])
+
+    def test_issue_close_that_did_not_close_keeps_the_label(self):
+        self.gh_state({5: (['needs-user'], 'OPEN')})
+        self.bash('gh issue close 5')
+        self.assertEqual(self.gh()['issues']['5']['labels'], ['needs-user'])
+
+    def test_repo_flag_of_another_command_is_not_read(self):
+        self.gh_state({5: (['needs-user'], 'CLOSED')})
+        self.bash('grep -R src/lib . ; gh issue close 5')
+        self.assertTrue(all('-R' not in call for call in self.gh()['log']))
+        self.assertEqual(self.gh()['issues']['5']['labels'], [])
 
     def test_unmerged_pull_request_keeps_the_label(self):
         self.gh_state({3: (['needs-user'], 'OPEN')}, prs={12: {'state': 'OPEN', 'closing': [3]}})

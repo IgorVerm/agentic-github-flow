@@ -1,5 +1,5 @@
 {
-  "description": "agentic-github-flow issue chats: archive a desktop chat only when its worktree is clean and its commits are on GitHub; keep an issue's question label true while a chat waits on the user",
+  "description": "agentic-github-flow issue chats: archive a desktop chat only when its worktree is clean and its commits are on GitHub; keep an issue's question label true while a chat waits on the user; enforce the context limit",
   "hooks": {
     "PreToolUse": [
       {
@@ -21,6 +21,16 @@
             "timeout": 30
           }
         ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/context-gate.sh\"",
+            "timeout": 30
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -33,6 +43,16 @@
             "timeout": 30
           }
         ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/context-gate.sh\"",
+            "timeout": 30
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
@@ -41,6 +61,11 @@
           {
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/scripts/question_label.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/context-gate.sh\"",
             "timeout": 30
           }
         ]

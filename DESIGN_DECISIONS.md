@@ -3,6 +3,26 @@
 Rulings of the maintainers named in `HANDOFF.md`, newest first, with their words. Detail lives on
 the linked issue.
 
+## Issue chats hand over at 300k context; past 600k the user decides, 2026-11-17
+
+**Decision (the maintainer):** "zet de grens op 300k" (set the limit to 300k); "boven 2x grens
+moet de chat manueel toestemming van mij krijgen om door te werken" (above twice the limit the
+chat needs my manual permission to work on); subagents "zelfde grens" (the same limit); for all
+repositories ("2 ja voor alle repos"); "boven 300k doorwerken mag als een chat dicht bij een
+oplossing denkt te zitten" (working on past 300k is allowed when a chat thinks it is close to a
+solution); "zorg dat we af en toe die 300k waarde herzien indien de werking van context zou
+wijzigen" (make sure we review the 300k value now and then, should the way context works
+change). **What:** `context limit` defaults to 300,000 tokens in every repository with issue
+chats; the issue-chats hook `context_limit.py` tells a chat past it to hand over after its step
+unless it is close to a solution, and past twice it lets only asking the user and the hand-over
+run until the user answers. Measured before (30 days, Igor's transcripts): in pax_deorum, with a
+150k limit as a sentence, 335 of 349 issue chats passed it and 51% of their usage came from calls
+above 300k. **Binds:** `plugins/issue-chats/scripts/context_limit.py`, `context-gate.sh`,
+`hooks/hooks.json`, `skills/issue-handover/method.md` §1 and §4, `tests/context_limit.py`.
+**Review by:** 2027-02-17 — and earlier when Claude Code's context window, prompt-cache lifetime
+or compaction changes; measure the share of issue-chat usage above the limit again and compare.
+**Detail:** issue #77.
+
 ## The question label enforced by a hook, not by a rule or a GitHub Action, 2026-11-17
 
 **Decision (the maintainer):** asked whether the rule could be enforced "via script/hook zodat

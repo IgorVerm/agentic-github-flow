@@ -10,7 +10,9 @@
 - manifests: each plugin's two manifests and both marketplace entries agree on name and version,
   every plugin folder is listed, the repository URL is the same everywhere it is written, and a
   plugin whose files differ from the default branch (origin/main, when fetched) has a new version;
-- copies: the security plugin's gitignore-secrets is byte-identical to templates/gitignore-secrets.
+- copies: the security plugin's gitignore-secrets is byte-identical to templates/gitignore-secrets;
+- review dates: a DESIGN_DECISIONS.md entry with `**Review by:** YYYY-MM-DD` fails the check once
+  that date has passed, so the value it fixes is looked at again (#77).
 The author's name is assembled below, so this file does not count as a mention.
 """
 import json
@@ -157,6 +159,16 @@ if base.returncode == 0:
 # copies
 if read('templates/gitignore-secrets') != read('plugins/security/scripts/gitignore-secrets'):
     fail('plugins/security/scripts/gitignore-secrets differs from templates/gitignore-secrets')
+
+# review dates: a decision that carries `**Review by:** YYYY-MM-DD` is looked at again by then
+import datetime  # noqa: E402
+today = datetime.date.today().isoformat()
+for m in re.finditer(r'^## (.+?)\n(?:(?!^## ).*\n)*?.*\*\*Review by:\*\* (\d{4}-\d{2}-\d{2})(.*)$',
+                     read('DESIGN_DECISIONS.md'), re.M):
+    if m.group(2) < today:
+        fail('DESIGN_DECISIONS.md: "%s" was due for review on %s%s Review it with the '
+             'maintainer, record the outcome and set the next date.'
+             % (m.group(1), m.group(2), m.group(3).rstrip()))
 
 if errors:
     print('\n'.join(errors))

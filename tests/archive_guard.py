@@ -128,14 +128,15 @@ def wiring() -> list[str]:
         entries = json.load(fh)["hooks"]["PreToolUse"]
     problems = []
     found = [e for e in entries if re.fullmatch(e.get("matcher", ""), TOOL)]
-    if not found:
-        problems.append("hooks.json: no PreToolUse entry matches " + TOOL)
-    for entry in found:
-        for hook in entry.get("hooks", []):
-            command = hook.get("command", "")
-            if "archive_guard.py" not in command or not command.rstrip().endswith("|| exit 2"):
-                problems.append("hooks.json: the guard must run archive_guard.py and end in "
-                                "`|| exit 2`: " + command)
+    # Other hooks may match archive_session too (context-gate.sh matches every tool, #77); the
+    # guard must be among them and fail closed.
+    guards = [h.get("command", "") for e in found for h in e.get("hooks", [])
+              if "archive_guard.py" in h.get("command", "")]
+    if not guards:
+        problems.append("hooks.json: no PreToolUse entry for " + TOOL + " runs archive_guard.py")
+    for command in guards:
+        if not command.rstrip().endswith("|| exit 2"):
+            problems.append("hooks.json: the guard must end in `|| exit 2`: " + command)
     with open(os.path.join(PLUGIN, "scripts", "run-guard.sh"), encoding="utf-8") as fh:
         if not fh.read().rstrip().endswith("exit 2"):
             problems.append("run-guard.sh: without Python it must deny (exit 2)")

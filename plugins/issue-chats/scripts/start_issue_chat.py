@@ -10,8 +10,8 @@ rule covers it instead of allow rules on `claude --bg *`, which would also admit
 `--dangerously-skip-permissions`, `--settings` or any prompt. It refuses before starting
 anything unless: the platform is macOS or Linux (it needs `script`); the terminal CLI is logged
 in; <worktree> is a clean linked git worktree (never a primary checkout) in which no active
-session works (so never the starting chat's own worktree, where the app later refuses the
-brief); no other active session carries <chat title>; title, model and effort are plain values;
+session works but, with --handover, the chat whose claim is handed over (below); no other active
+session carries <chat title> but that chat; title, model and effort are plain values;
 the title has the fixed form that names the chat's GitHub issue: `<prefix>#<issue> · <topic>`,
 `<prefix>Requirements · #<issue> · <topic>` or `<prefix>Requirements · new · <topic>` (the
 prefix is the repository's optional setting, empty by default, e.g. `--prefix "Web · "`); and
@@ -21,7 +21,15 @@ and it hands the issue over before its branch is ready (context limit, two faile
 then the issue's newest claim comment (signed, opening with `claimed for chat`) must name the
 calling chat, by its session id (`CLAUDE_CODE_SESSION_ID`, or `CLAUDE_CODE_HOST_SESSION_ID` as
 `local_<id>`) or by the full path of the worktree its working directory is in, so the flag
-cannot take over another chat's claim. Then it runs
+cannot take over another chat's claim; or it names by session id a chat that sits idle in
+<worktree>, for which another chat (an orchestrator) hands over. That chat, the calling one or
+the idle one, may stay in <worktree>, where the successor works on its branch in flight; any
+other session there still refuses, and one named but busy too. The app delivers the brief with
+the old chat still in the worktree (measured 2026-11-17, #80, desktop app: a successor started
+there by the old chat itself, and one started by another session, each got its brief and
+answered on --model; the earlier failure "this session's branch is checked out somewhere else",
+seen with CLI 2.1.292, did not recur). The new session is told apart from the kept one by its
+id, not its title. Then it runs
 `claude --bg --name <title> --model <model> --effort <level> <ready prompt>` in <worktree>,
 waits up to 120 s until `claude agents --json --cwd <worktree>` lists that one session idle and
 its transcript (`<CLAUDE_CONFIG_DIR or ~/.claude>/projects/*/<sessionId>.jsonl`) holds a real
@@ -132,7 +140,9 @@ def real(path: str) -> str:
 
 
 def preflight(wt: str, title: str, model: str, effort: str | None, prefix: str = "",
-              handover: bool = False) -> None:
+              handover: bool = False) -> set[str]:
+    """The checks before anything starts; returns the sessions that may stay in <wt> (with
+    --handover: the chat whose claim is handed over), else an empty set."""
     if sys.platform not in ("darwin", "linux"):
         raise Fail(f"no form of `script` known for {sys.platform}: give the user the brief")
     if not shutil.which("script"):
@@ -166,20 +176,25 @@ def preflight(wt: str, title: str, model: str, effort: str | None, prefix: str =
     common = real(os.path.join(wt, git(wt, "rev-parse", "--git-common-dir")))
     if gd == common:
         raise Fail(f"{wt} is a primary checkout, not a linked worktree")
+    keep: set[str] = set()
     if git(wt, "status", "--porcelain"):
-        raise Fail(f"{wt} has changes: the next chat needs a fresh worktree")
+        raise Fail(f"{wt} has changes: commit what is verified first (a hand-over), or the next "
+                   "chat needs a fresh worktree")
     if issue is not None:
-        unclaimed(wt, issue, handover)
+        keep = unclaimed(wt, issue, handover)
     me = os.environ.get("CLAUDE_CODE_SESSION_ID")
     for row in agents():
+        sid = str(row.get("sessionId"))
         cwd = real(str(row.get("cwd") or "/nonexistent"))
         if cwd == wt or cwd.startswith(wt + os.sep):
-            raise Fail(f"session {row.get('sessionId')} already works in {wt}")
-        if row.get("name") == title and row.get("sessionId") != me:
-            raise Fail(f"session {row.get('sessionId')} already carries the title {title!r}")
+            if sid not in keep:
+                raise Fail(f"session {sid} already works in {wt}")
+        if row.get("name") == title and sid != me and sid not in keep:
+            raise Fail(f"session {sid} already carries the title {title!r}")
+    return keep
 
 
-def unclaimed(wt: str, issue: int, handover: bool = False) -> None:
+def unclaimed(wt: str, issue: int, handover: bool = False) -> set[str]:
     """The issue is open and nobody claimed it (no assignee), read in the worktree's repository;
     with handover, the caller's own claim may stand."""
     command = gh_command()
@@ -196,28 +211,31 @@ def unclaimed(wt: str, issue: int, handover: bool = False) -> None:
     if data.get("state") != "OPEN":
         raise Fail(f"issue #{issue} is {str(data.get('state')).lower()}, not open")
     if not data.get("assignees"):
-        return
+        return set()
     if handover:
-        own_claim(issue, data.get("comments"))
-        return
+        return own_claim(wt, issue, data.get("comments"))
     who = ", ".join(str(a.get("login")) for a in data["assignees"] if isinstance(a, dict))
     raise Fail(f"issue #{issue} is already claimed (assigned to {who}): another chat works on it")
 
 
-def own_claim(issue: int, comments) -> None:
+def own_claim(wt: str, issue: int, comments) -> set[str]:
     """--handover: the newest signed claim comment names this chat, by its session id or by
     the full path of the worktree it works in (never a folder name alone, which another
-    repository's worktree may share)."""
+    repository's worktree may share); or it names, by session id, a chat that sits idle in <wt>
+    (another chat, an orchestrator, hands over for it). Returns the sessions that may stay in
+    <wt>: this chat's ids, or that idle chat."""
     claims = [str(c.get("body") or "") for c in comments or [] if isinstance(c, dict)]
     claims = [b for b in claims if CLAIM.match(b)]
     if not claims:
         raise Fail(f"issue #{issue} is assigned but has no signed claim comment: --handover "
                    "hands over only this chat's own claim")
     newest = claims[-1]
-    names = set()
+    names, mine = set(), set()
     for var in ("CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_HOST_SESSION_ID"):
         v = os.environ.get(var, "").strip()
         v = v[len("local_"):] if v.startswith("local_") else v
+        if v:
+            mine.add(v)
         if len(v) >= 8:
             names.add("(?:local_)?" + re.escape(v))
     p = run(["git", "rev-parse", "--show-toplevel"])
@@ -225,12 +243,22 @@ def own_claim(issue: int, comments) -> None:
         top = p.stdout.strip()
         names.update({re.escape(top), re.escape(real(top))})
     if any(re.search(r"(?<![\w./-])" + n + r"(?![\w.-]|/[\w.-])", newest) for n in names):
-        return
-    raise Fail(f"the newest claim on issue #{issue} names another chat, not this one (session "
-               "id or worktree): --handover hands over only this chat's own claim")
+        return mine
+    idle = set()
+    for row in agents(wt):
+        sid = str(row.get("sessionId") or "")
+        if row.get("status") == "idle" and len(sid) >= 8 and re.search(
+                r"(?<![\w./-])(?:local_)?" + re.escape(sid) + r"(?![\w.-])", newest):
+            idle.add(sid)
+    if idle:
+        return idle
+    raise Fail(f"the newest claim on issue #{issue} names another chat, and no chat it names sits "
+               f"idle in {wt}: --handover hands over only this chat's own claim, or that of an "
+               "idle chat in the worktree")
 
 
-def start(wt: str, title: str, model: str, effort: str | None) -> tuple[int, str]:
+def start(wt: str, title: str, model: str, effort: str | None,
+          keep: set[str] = frozenset()) -> tuple[int, str]:
     cmd = ["claude", "--bg", "--name", title, "--model", model]
     if effort:
         cmd += ["--effort", effort]
@@ -239,7 +267,7 @@ def start(wt: str, title: str, model: str, effort: str | None) -> tuple[int, str
     m = re.search(r"backgrounded\s*·\s*(\S+)", p.stdout + p.stderr)
     if p.returncode != 0 or not m:
         try:
-            running = agents(wt)
+            running = [r for r in agents(wt) if str(r.get("sessionId")) not in keep]
         except (Fail, subprocess.TimeoutExpired) as e:
             return 2, (f"unsure: claude --bg gave no short id ({(p.stderr or p.stdout).strip()[:200]})"
                        f" and the sessions in {wt} could not be listed: {e}")
@@ -248,7 +276,7 @@ def start(wt: str, title: str, model: str, effort: str | None) -> tuple[int, str
         return 1, f"fail: claude --bg: {(p.stderr or p.stdout).strip()[:300]}"
     short = m.group(1)
     try:
-        return after_start(wt, title, short, model)
+        return after_start(wt, title, short, model, keep)
     except (Fail, subprocess.TimeoutExpired) as e:
         try:
             s = run(["claude", "stop", short])
@@ -309,7 +337,8 @@ def same_model(requested: str, got: str) -> bool:
     return want == got or re.fullmatch(re.escape(want) + r"-[0-9]{8}", got) is not None
 
 
-def after_start(wt: str, title: str, short: str, model: str) -> tuple[int, str]:
+def after_start(wt: str, title: str, short: str, model: str,
+                keep: set[str] = frozenset()) -> tuple[int, str]:
     def stop_and(code: int, msg: str) -> tuple[int, str]:
         s = run(["claude", "stop", short])
         if s.returncode != 0:
@@ -320,7 +349,7 @@ def after_start(wt: str, title: str, short: str, model: str) -> tuple[int, str]:
     limit = wait_s()
     deadline = time.monotonic() + limit
     while time.monotonic() < deadline:
-        rows = agents(wt)
+        rows = [r for r in agents(wt) if str(r.get("sessionId")) not in keep]
         if len(rows) > 1:
             return stop_and(1, f"{len(rows)} sessions run in {wt}")
         if rows and rows[0].get("name") == title and rows[0].get("status") == "idle":
@@ -375,8 +404,8 @@ def main(argv: list[str]) -> int:
         effort = None
     wt = real(a.worktree)
     try:
-        preflight(wt, a.title, a.model, effort, a.prefix, a.handover)
-        code, line = start(wt, a.title, a.model, effort)
+        keep = preflight(wt, a.title, a.model, effort, a.prefix, a.handover)
+        code, line = start(wt, a.title, a.model, effort, keep)
     except Fail as e:
         code, line = 1, f"fail: {e}; nothing started"
     except subprocess.TimeoutExpired as e:

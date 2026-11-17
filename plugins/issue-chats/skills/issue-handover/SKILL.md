@@ -216,9 +216,12 @@ local-main mode: landed).
 
 **A hand-over before the branch is ready** (context limit, two failed corrections) keeps the
 issue: commit what is verified, a signed state comment on the issue (branch, worktree, head
-commit, what is checked, the next step), then step 5 for the same issue with `--handover` (the
-claim is this chat's own: the tool refuses unless the issue's newest claim comment names this
-chat's `local_<sessionId>` or worktree) and a new claim comment naming the new chat and the
-worktree in flight, which the new chat works in. Never an archive: this chat's commits are not
-on GitHub. A later `archive-finished-chats` archives it once they are, or once a successor's
+commit, what is checked, the next step), then step 5 for the same issue with `--handover` and
+this chat's own worktree as the worktree (no new one: the successor works on the branch in
+flight, with its build output; the tool refuses unless the issue's newest claim comment names
+this chat's `local_<sessionId>` or worktree, and lets this chat stay in the worktree), and a new
+claim comment naming the new chat and that worktree. Then this chat ends its turn and works no
+more. Another chat, such as an orchestrator, hands over the same way for a chat that sits idle
+in its worktree: `--handover` accepts a claim that names that idle chat by its session id
+(#80). Never an archive: this chat's commits are not on GitHub. A later `archive-finished-chats` archives it once they are, or once a successor's
 branch that holds them is pushed (the worktree check then names that branch).

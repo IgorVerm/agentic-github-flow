@@ -9,7 +9,8 @@ session's transcript (its reply to the ready prompt: a real one on a chosen mode
 stand-in `gh` (AGENTIC_GITHUB_FLOW_GH) answers `issue view` for the title's issue. Each case exposes one way
 the hand-over could go wrong: a next chat started in a primary checkout, a dirty or busy
 worktree, a second chat with the same title, a second chat on an issue another chat has claimed
-(assigned, also when --handover claims it is the caller's own) or one that is closed or
+(assigned, also when --handover claims it is the caller's own), a hand-over that cannot keep
+the chat whose claim it hands over in the worktree in flight or keeps another (#80), or one that is closed or
 unreadable, a title without its GitHub issue or the repository prefix, a refused value reaching
 `claude --bg`, a session left running after a failure, or a chat opened in the app before its
 background run stopped, or a chat opened although it never answered the ready prompt or answered
@@ -60,7 +61,8 @@ elif a[:2] == ['agents', '--json']:
     rows = s['others'] + [r for r in s['bg'] if not r.get('stopped')]
     if '--cwd' in a:
         cwd = os.path.realpath(a[a.index('--cwd') + 1])
-        rows = [r for r in s['bg'] if os.path.realpath(r['cwd']) == cwd and not r.get('stopped')]
+        rows = [r for r in s['others'] + s['bg']
+                if os.path.realpath(r['cwd']) == cwd and not r.get('stopped')]
         s['polls'] = s.get('polls', 0) + 1
         late = s.get('reply_after_polls')
         if rows and late and s['polls'] == late:
@@ -297,6 +299,26 @@ else:
     case('a claim naming a longer path refused', 1, args=HANDOVER,
          gh=claimed('claimed for chat "#12 · next", branch agent/12, worktree %s-old/x'
                     % primary), cwd=primary, check=nothing_started)
+
+    # Hand-over in the worktree in flight (#80): the chat whose claim is handed over may stay.
+    OLD = 'aaaabbbb-1111-2222-3333-444455556666'
+    OLD_CLAIM = 'claimed for chat "#12 · next" (local_%s), branch agent/12-x, worktree %s' % (OLD, wt)
+    old_in_wt = lambda status, sid=OLD: [{'cwd': wt, 'sessionId': sid, 'name': '#12 · next',
+                                          'status': status}]
+    case('hand-over: the calling chat stays in its own worktree', 0, args=HANDOVER,
+         gh=claimed(OLD_CLAIM), others=old_in_wt('busy'),
+         env_extra={'CLAUDE_CODE_SESSION_ID': OLD}, check=order_ok)
+    case('hand-over for an idle chat by another chat (an orchestrator)', 0, args=HANDOVER,
+         gh=claimed(OLD_CLAIM), others=old_in_wt('idle'), cwd=primary, check=order_ok)
+    case('hand-over for a chat that is not idle refused', 1, args=HANDOVER,
+         gh=claimed(OLD_CLAIM), others=old_in_wt('busy'), cwd=primary, check=nothing_started)
+    case('hand-over with another, unnamed chat in the worktree refused', 1, args=HANDOVER,
+         gh=claimed(OLD_CLAIM), others=old_in_wt('idle') + old_in_wt('idle', 'eeeeffff-9999-8888'),
+         cwd=primary, check=nothing_started)
+    case('hand-over for an idle chat the claim does not name refused', 1, args=HANDOVER,
+         gh=claimed(THEIRS), others=old_in_wt('idle'), cwd=primary, check=nothing_started)
+    case('without --handover the chat in the worktree still refuses', 1,
+         gh=claimed(OLD_CLAIM), others=old_in_wt('idle'), cwd=primary, check=nothing_started)
 
     def unsure_with_id(log, out):
         if not out.strip().startswith('unsure:') or 'nothing started' in out:

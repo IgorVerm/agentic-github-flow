@@ -242,8 +242,11 @@ What works, from Bash in a turn a notification began, with no click and no promp
   it has answered;
 - after `claude stop <short id>`, `script -q /dev/null claude --desktop --resume <sessionId>`
   opens it in the desktop app as `local_<sessionId>` (plain `--desktop` refuses without a
-  terminal); started in the starting chat's own worktree, the later message failed with "this
-  session's branch is checked out somewhere else", hence the fresh worktree;
+  terminal); a next chat for a new issue gets a fresh worktree. Started in the starting chat's
+  own worktree, the later message once failed with "this session's branch is checked out
+  somewhere else" (CLI 2.1.292); measured again on 2026-11-17 (#80) it was delivered, both when
+  the old chat itself started the successor and when another session did, so a hand-over before
+  the branch is ready continues in the worktree in flight (`start_issue_chat.py --handover`);
 - `send_message` to `local_<sessionId>` with the brief came back "delivered; its turn has
   started"; the new chat then ran `set_session_title` and `move_sessions ["self"]` into the
   repository's section.

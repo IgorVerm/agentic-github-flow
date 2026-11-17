@@ -116,7 +116,7 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
       from the primary checkout, named `<issue>-<short name>`; never this chat's own worktree,
       which still holds this chat's branch. A hand-over of this chat's own unfinished issue is
       the exception (*A hand-over before the branch is ready* below): there it is this chat's
-      own worktree.
+      own worktree when a tool made it, a new one from this chat's head when the app did.
    2. **Model and effort:** the settings' model and effort; unset, this chat's own: the `model`
       of `get_session "self"`, and the effort in `$CLAUDE_EFFORT` (the tool takes it when
       `--effort` is left out).
@@ -235,13 +235,15 @@ local_<id>`), so nothing can wake it to work beside its successor: an archived c
 message. The archive leaves the worktree in place, since the app did not make it (no
 `worktreePath`; measured, #80), and the guard hook lets it pass on the note although the commits
 are not on GitHub. Another chat, such as an orchestrator, hands over the same way for a chat
-that sits idle in its worktree: `--handover` accepts a newest claim that names exactly that one
-idle chat by its session id; after "delivered" it archives that chat (`get_session`, then
-`archive_session`). A chat that claimed its issue only by its app id (`local_<id>` other than its
+that sits idle in its worktree: first `get_session <that chat's id>` must show no
+`worktreePath` (else no hand-over in place: a new worktree from that chat's head, as below);
+`--handover` accepts a newest claim that names exactly that one idle chat by its session id;
+after "delivered" it archives that chat (`archive_session`). A chat that claimed its issue only by its app id (`local_<id>` other than its
 CLI session id) cannot be handed over for this way; the tool refuses. When the archive is
 refused all the same (live background work, the note not written), end that work and try once
 more; still refused, report it to the user with the guard's reason, end the turn and do nothing
-more in this worktree: the user archives the chat. **With a `worktreePath`** (an app-made
+more in this worktree: the user archives the chat (only a chat without `worktreePath` is handed
+over in place, so that archive leaves the worktree). **With a `worktreePath`** (an app-made
 worktree), not in place: step 5 with `--handover` in a new worktree on a new branch from this
 chat's head (the worktree tool with `--base <head commit>`), the successor working there; this
 chat is not archived now, and `archive-finished-chats` archives it once its commits are on

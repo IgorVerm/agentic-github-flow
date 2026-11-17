@@ -48,7 +48,8 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
   repository by the row `automatic merge` | `on` in `HANDOFF.md` §Landing settings, next to the
   landing mode (`landing.py` owns it, `--explain` reports it); an overlay cannot switch it on. There
   `merge_pr.py --ready` marks an agent's own draft ready and merges it when its checks, review,
-  overlap line and paths allow it. It is off here (Landing settings below). The review it needs
+  overlap line and paths allow it. Here it is on (§Landing settings below owns the value); the
+  chain ran live on pull requests #61 and #69. The review it needs
   comes from the core skill `review-change` (#39), whose `review_verdict.py` writes the verdict
   comment and owns its format; `merge_pr.py` parses it through the same module.
 - Unasked push (#26): under a standing grant (`HANDOFF.md` §Standing permissions or an overlay)

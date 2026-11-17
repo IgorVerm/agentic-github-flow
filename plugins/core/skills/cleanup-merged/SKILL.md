@@ -37,18 +37,18 @@ the setting); the scripts read it themselves.
    still the merged pull request's head (or in the default branch), with a lease on that tip,
    so a commit someone pushed after the merge is never lost. A refusal: leave the branch and
    tell the user. The `pre-push` template allows the deletion on the same terms.
-4. **The issue.** `gh issue view <n> --json state`. A closing keyword in the pull request closed
+4. **The issue.** `gh issue view <n> --json state,labels`. A closing keyword in the pull request closed
    it at the merge. Still open and fully resolved: close it with a signed comment naming the pull
    request and the merge commit, or in local-main mode
    `Landed in <landing sha>; verified on remote <landing> at <remote tip>.` with what landed and
    the checks. Resolved in part: comment what remains and leave it open.
-   A closed issue keeps no question label: remove it with
-   `gh issue edit <n> --remove-label <label>` (`needs-user`, unless the issue-chats settings
-   name another).
    Record in that signed comment each branch the sweep printed as DELETED that had a remote
    copy or belongs to that issue, with its head SHA: the SHA is the way back until git prunes
    the commit. Branches that existed only locally and belong to no such issue are not
    published; they go in the report. Open no issue just to hold SHAs.
+   A closed issue keeps no question label: when its labels show one, remove it with
+   `gh issue edit <n> --remove-label <label>` (`needs-user`, unless the issue-chats settings
+   name another).
 5. **Report** what was removed and what was kept, with the reasons, and every DELETED branch
    with its SHA and restore command.
 

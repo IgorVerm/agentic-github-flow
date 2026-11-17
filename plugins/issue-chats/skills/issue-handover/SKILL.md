@@ -84,7 +84,9 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
    the issue stays open and assigned until the push's cleanup closes it. Landing refused: stop
    and report, no hand-over. A correction to an earlier comment is a new comment, never an edit. Each open question for the user stands on its owning issue,
    signed, with the settings' question label: `needs-user` unless the settings name another
-   (method.md §1), never GitHub's built-in `question`.
+   (method.md §1), never GitHub's built-in `question`. Once the user answers one, the chat
+   records the answer there and removes the label in the same step, unless another question on
+   that issue is still open (method.md §4, *Questions for the user*).
 3. **Pick the next issue:** `git fetch origin`, then
    `python3 <plugin>/scripts/next_issue.py -C <this worktree>`, with `--area <area label>` when
    this chain is limited to an area. It prints the ready issues in pick order:

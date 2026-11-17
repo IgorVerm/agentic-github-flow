@@ -28,7 +28,10 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
     macOS only); Codex uses its own thread tools; elsewhere the chat hands over a brief to paste.
     A hook (`question_label.py`, #75) keeps an issue's question label true in Claude Code: it
     refuses a question the work waits on while the issue lacks the label and removes the label
-    at the answer and at the close. Measured offline only; not yet in a live desktop chat.
+    at the answer and at the close. Measured live in the desktop app (#75).
+    A second hook (`context_limit.py`, #77) enforces `context limit` (default 300,000): past it a
+    note to hand over, past twice it only asking the user and the hand-over run until the user
+    answers. Measured offline; not yet in a live chat.
 - Efficient design (#37): the core skill `efficient-design` is a checklist at design and review
   (work per frame, request or job run grows with what changed, not with all data), and the core
   rule *Work grows with what changed* has the author write an `Efficient design:` line in the
@@ -105,7 +108,7 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
 | merging the landing branch in the sandbox | `plugins/core/scripts/merge_landing.py` header, `frozen_unexplained` in `plugins/core/scripts/work_proof.py`, `plugins/core/skills/ship-change/SKILL.md` step 2, `DESIGN_DECISIONS.md`, `tests/merge_landing.py` |
 | the security scanners | `plugins/security/scripts/*.py` headers, `plugins/security/skills/review-security/sources.md`, `tests/scan_secrets.py`, `tests/audit_dependencies.py` |
 | the pre-push hook | `templates/pre-push` header, `plugins/core/scripts/push_paths.py`, the push check in `plugins/guards/scripts/pre_tool_personal_data.py`, `tests/pre_push_checks.py`, its older refusals in `tests/worktree_tools.py` (`PrePushTests`) |
-| issue chats | `plugins/issue-chats/skills/issue-handover/method.md`, `plugins/issue-chats/scripts/*.py` headers, `tests/next_issue.py`, `tests/start_issue_chat.py`, `tests/chat_archivable.py`, `tests/archive_guard.py`, `tests/question_label.py` |
+| issue chats | `plugins/issue-chats/skills/issue-handover/method.md`, `plugins/issue-chats/scripts/*.py` headers, `tests/next_issue.py`, `tests/start_issue_chat.py`, `tests/chat_archivable.py`, `tests/archive_guard.py`, `tests/question_label.py`, `tests/context_limit.py` |
 
 ## Landing settings
 

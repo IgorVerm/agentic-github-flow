@@ -156,17 +156,17 @@ def remove_label(issue: int, label: str, cwd: str, repo: list[str] | None = None
     gh(["issue", "edit", str(issue), "--remove-label", label, *(repo or [])], cwd)
 
 
-def state_dir() -> str | None:
-    """The marker folder, private to this user, or None when it cannot be trusted.
+def state_dir(name: str = "question-markers",
+              env: str = "AGENTIC_GITHUB_FLOW_QUESTION_STATE") -> str | None:
+    """The marker folder <name>, private to this user, or None when it cannot be trusted.
 
     Not the shared temp folder: on a multi-user host another user could make it first and read
     or redirect the markers. The plugin's data folder, else one under the user's home; made 0700,
-    and refused when it is a symlink or another user's."""
-    path = (os.environ.get("AGENTIC_GITHUB_FLOW_QUESTION_STATE")
-            or (os.path.join(os.environ["CLAUDE_PLUGIN_DATA"], "question-markers")
+    and refused when it is a symlink or another user's. context_limit.py uses it too."""
+    path = (os.environ.get(env)
+            or (os.path.join(os.environ["CLAUDE_PLUGIN_DATA"], name)
                 if os.environ.get("CLAUDE_PLUGIN_DATA") else None)
-            or os.path.join(os.path.expanduser("~"), ".cache", "agentic-github-flow",
-                            "question-markers"))
+            or os.path.join(os.path.expanduser("~"), ".cache", "agentic-github-flow", name))
     try:
         os.makedirs(path, mode=0o700, exist_ok=True)
         st = os.lstat(path)

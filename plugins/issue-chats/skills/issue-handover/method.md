@@ -249,11 +249,13 @@ wake it to work beside its successor: an archived chat takes no message. The arc
 worktree in place, since the app did not make it (no `worktreePath`; measured, #80), and the
 guard hook lets it pass on the note although the commits are not on GitHub.
 
-**For an idle chat**, another chat such as an orchestrator hands over the same way: first
-`get_session <that chat's id>` must show no `worktreePath` (else no hand-over in place: a new
-worktree from that chat's head, as below); `--handover` accepts a newest claim that names
-exactly that one idle chat by its session id; after "delivered" it archives that chat
-(`archive_session`). A chat that claimed its issue only by its app id (`local_<id>` other than
+**For an idle chat**, another chat such as an orchestrator hands over the same way, in place
+only: first `get_session <that chat's id>` must show no `worktreePath`; `--handover` accepts a
+newest claim that names exactly that one idle chat by its session id; after "delivered" it
+archives that chat (`archive_session`). An idle chat with a `worktreePath` it does not hand over
+for (the tool would refuse a new worktree, where that chat does not sit, and the old chat would
+stay unarchived beside its issue): it reports to the user, who wakes that chat to hand over
+itself or archives it after its work is safe. A chat that claimed its issue only by its app id (`local_<id>` other than
 its CLI session id) cannot be handed over for this way; the tool refuses.
 
 **A refused archive** (live background work, the note not written): end that work and try once

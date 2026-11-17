@@ -234,7 +234,7 @@ def check_worktree(data: dict) -> int:
         # A chat that handed its unfinished issue over in place (#80): its successor works on in
         # this worktree, which archiving leaves alone because the app did not make it (no
         # worktreePath); archived, the old chat takes no message and cannot work beside it.
-        if (os.sep + os.path.join(".claude", "worktrees") + os.sep) not in worktree + os.sep and \
+        if "/.claude/worktrees/" not in worktree.replace("\\", "/") + "/" and \
                 handover_note.handed_over(str(data.get("sessionId") or ""), worktree):
             return 0  # never for a worktree in the app's own folder, whatever get_session says
     try:

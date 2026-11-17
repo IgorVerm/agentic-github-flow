@@ -223,28 +223,10 @@ local-main mode: landed).
 
 **A hand-over before the branch is ready** (context limit, two failed corrections) keeps the
 issue: commit what is verified, a signed state comment on the issue (branch, worktree, head
-commit, what is checked, the next step). **In place** only when `get_session "self"` shows no
-`worktreePath` (a worktree a tool made; the app removes one it made when its chat is archived):
-step 5 for the same issue with `--handover` and this chat's own worktree as the worktree (no new one: the successor works on the branch in
-flight, with its build output; the tool refuses unless the issue's newest claim comment names
-this chat's `local_<sessionId>` or worktree, and lets this chat stay in the worktree), and a new
-claim comment naming the new chat and that worktree. Exit 0 also notes the hand-over
-(`handover_note.py`); then, once the brief came back "delivered", this chat archives itself
-(`get_session "self"`, then `archive_session "self"`, reason `handed #<issue> over in place to
-local_<id>`), so nothing can wake it to work beside its successor: an archived chat takes no
-message. The archive leaves the worktree in place, since the app did not make it (no
-`worktreePath`; measured, #80), and the guard hook lets it pass on the note although the commits
-are not on GitHub. Another chat, such as an orchestrator, hands over the same way for a chat
-that sits idle in its worktree: first `get_session <that chat's id>` must show no
-`worktreePath` (else no hand-over in place: a new worktree from that chat's head, as below);
-`--handover` accepts a newest claim that names exactly that one idle chat by its session id;
-after "delivered" it archives that chat (`archive_session`). A chat that claimed its issue only by its app id (`local_<id>` other than its
-CLI session id) cannot be handed over for this way; the tool refuses. When the archive is
-refused all the same (live background work, the note not written), end that work and try once
-more; still refused, report it to the user with the guard's reason, end the turn and do nothing
-more in this worktree: the user archives the chat (only a chat without `worktreePath` is handed
-over in place, so that archive leaves the worktree). **With a `worktreePath`** (an app-made
-worktree), not in place: step 5 with `--handover` in a new worktree on a new branch from this
-chat's head (the worktree tool with `--base <head commit>`), the successor working there; this
-chat is not archived now, and `archive-finished-chats` archives it once its commits are on
-GitHub or a successor's pushed branch holds them (the worktree check then names that branch).
+commit, what is checked, the next step), then step 5 for the same issue with `--handover` and a
+new claim comment naming the new chat and its worktree. **In place** (this chat's own worktree,
+only when `get_session "self"` shows no `worktreePath`): after "delivered", archive this chat
+(`get_session "self"`, `archive_session "self"`, reason `handed #<issue> over in place to
+local_<id>`). **With a `worktreePath`**: a new worktree on a branch from this chat's head, and
+no archive now. The route in full, the orchestrator's way for an idle chat, and what to do when
+the archive is refused: method.md *A hand-over before the branch is ready*.

@@ -1,5 +1,5 @@
 {
-  "description": "agentic-github-flow issue chats: archive a desktop chat only when its worktree is clean and its commits are on GitHub",
+  "description": "agentic-github-flow issue chats: archive a desktop chat only when its worktree is clean and its commits are on GitHub; keep an issue's question label true while a chat waits on the user",
   "hooks": {
     "PreToolUse": [
       {
@@ -9,6 +9,39 @@
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-guard.sh\" \"${CLAUDE_PLUGIN_ROOT}/scripts/archive_guard.py\" || exit 2",
             "timeout": 60
+          }
+        ]
+      },
+      {
+        "matcher": "^(AskUserQuestion|mcp__ccd_turn__wrap_up)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/scripts/question_label.py\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^(AskUserQuestion|Bash)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/scripts/question_label.py\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/scripts/question_label.py\"",
+            "timeout": 30
           }
         ]
       }

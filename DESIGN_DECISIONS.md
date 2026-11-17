@@ -3,6 +3,20 @@
 Rulings of the maintainers named in `HANDOFF.md`, newest first, with their words. Detail lives on
 the linked issue.
 
+## The question label enforced by a hook, not by a rule or a GitHub Action, 2026-11-17
+
+**Decision (the maintainer):** asked whether the rule could be enforced "via script/hook zodat
+het afgedwongen is ipv een suggestie voor een agent" (by a script or hook, so that it is
+enforced instead of a suggestion to an agent), then on the proposed design "Ja, zo bouwen" (yes,
+build it like that), and on its GitHub Action for closed issues "niet via actions" (not through
+Actions). **What:** the issue-chats hook `question_label.py` refuses a question the work waits
+on while the issue lacks the question label, and removes the label at the answer and when a
+merge or `gh issue close` by an agent closes the issue; it posts no words to GitHub. No bullet in
+`rules/core.md` (its budget, and the gap is in issue chats only); no workflow, so an issue closed
+on github.com keeps its label until `cleanup-merged` step 4. **Binds:**
+`plugins/issue-chats/scripts/question_label.py`, `plugins/issue-chats/hooks/hooks.json`,
+`tests/question_label.py`. **Detail:** issue #75.
+
 ## Worktree clones on by default on macOS, 2026-11-11
 
 **Decision (the maintainer):** "B, standaard aan op macOS, overal waar klonen lukt: APFS,

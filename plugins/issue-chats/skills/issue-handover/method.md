@@ -280,7 +280,12 @@ notification began. So:
   signed comment on that issue and in the same step removes the question label
   (`gh issue edit <n> --remove-label <label>`), unless another question there is still open,
   which that comment then names. Closing an issue removes its question label too
-  (`cleanup-merged` step 4).
+  (`cleanup-merged` step 4). In Claude Code the plugin's hook `question_label.py` enforces the
+  label where a tool call shows the wait (#75; its header owns the details): it refuses
+  `AskUserQuestion`, and the desktop app's `wrap_up` with `blocked: true`, while the issue lacks
+  the label; it removes the label when that question is answered, and when `merge_pr.py`,
+  `gh pr merge` or `gh issue close` closes the issue. It writes no words to GitHub: the
+  question and the answer stay the chat's to post. A question in plain text it cannot see.
 - **The machine stays awake:** at the start of long work the chat calls `request_keep_awake`
   with `until: "session_idle"`. It prevents idle sleep only; a closed laptop lid still sleeps.
 - **The fallback is the user's click:** when the start from the CLI fails, the chat makes sure

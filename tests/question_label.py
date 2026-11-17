@@ -94,7 +94,7 @@ class QuestionLabel(unittest.TestCase):
     def run_hook(self, event, cwd=None, session='s1', **extra):
         data = dict(hook_event_name=event, session_id=session, cwd=cwd or self.repo, **extra)
         p = subprocess.run([sys.executable, '-I', HOOK], input=json.dumps(data), env=self.env,
-                           capture_output=True, text=True, timeout=60)
+                           capture_output=True, text=True, encoding="utf-8", timeout=60)
         return p.returncode, p.stdout, p.stderr
 
     def ask(self, **kw):
@@ -179,7 +179,10 @@ class QuestionLabel(unittest.TestCase):
     def test_untrusted_marker_folder_is_not_used(self):
         real = os.path.join(self.tmp.name, 'elsewhere')
         os.makedirs(real)
-        os.symlink(real, self.markers)
+        try:
+            os.symlink(real, self.markers, target_is_directory=True)
+        except OSError:  # Windows without the symlink privilege
+            self.skipTest('cannot make a symlink here')
         self.gh_state({7: (['needs-user'], 'OPEN')})
         self.assertEqual(self.ask()[0], 0)
         self.assertEqual(os.listdir(real), [])
@@ -281,7 +284,7 @@ class QuestionLabel(unittest.TestCase):
 
     def test_bad_input_passes(self):
         p = subprocess.run([sys.executable, '-I', HOOK], input='not json', env=self.env,
-                           capture_output=True, text=True, timeout=60)
+                           capture_output=True, text=True, encoding="utf-8", timeout=60)
         self.assertEqual(p.returncode, 0)
 
 

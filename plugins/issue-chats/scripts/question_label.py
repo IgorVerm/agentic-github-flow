@@ -347,6 +347,11 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    for stream in (sys.stdin, sys.stdout, sys.stderr):  # UTF-8, also where Windows uses cp1252
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError):
+            pass
     try:
         sys.exit(main())
     except Exception as e:  # never stop a question or a command over the hook's own fault

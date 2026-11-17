@@ -105,7 +105,8 @@ class ContextLimit(unittest.TestCase):
         self.assertIn('311k', self.post()[1])
 
     def test_settings_set_the_limit(self):
-        for cell, expect in (('about 150,000 tokens', '150k'), ('`200k`', '200k')):
+        for cell, expect in (('about 150,000 tokens', '150k'), ('`200k`', '200k'),
+                             ('0.25M', '250k'), ('120,000, 200k', '120k')):
             repo = self.make_repo('r' + expect, '| context limit | %s |' % cell)
             git(repo, 'checkout', '-q', '-b', 'agent/8-x')
             self.at(250_000)
@@ -130,16 +131,35 @@ class ContextLimit(unittest.TestCase):
                            ('Write', {}), ('Agent', {}), ('Read', {})):
             self.assertEqual(self.pre(tool, args)[0], 2, (tool, args))
 
-    def test_the_users_answer_lets_it_work_on_for_half_a_limit(self):
+    def message(self, kind, when='2999-01-01T00:00:00.000Z', text='ga door'):
+        with open(self.transcript, 'a') as f:
+            f.write(json.dumps({'type': 'user', 'timestamp': when, 'origin': {'kind': kind},
+                                'message': {'role': 'user', 'content': text}}) + '\n')
+
+    def test_the_users_typed_answer_lets_it_work_on_for_half_a_limit(self):
         self.at(610_000)
-        self.pre('Edit')
-        code, ctx, _ = self.run_hook('UserPromptSubmit', prompt='ga door')
-        self.assertIn('until 760k', ctx)
+        self.assertEqual(self.pre('Edit')[0], 2)
+        self.message('human')
         self.assertEqual(self.pre('Edit')[0], 0)
+        self.assertIn('until 760k', self.post('Edit')[1])
         self.at(759_000)
         self.assertEqual(self.pre('Edit')[0], 0)
         self.at(761_000)
         self.assertEqual(self.pre('Edit')[0], 2)
+
+    def test_notifications_and_other_sessions_grant_nothing(self):
+        self.at(610_000)
+        self.pre('Edit')
+        for kind in ('task-notification', 'peer', None):
+            self.message(kind, text='<task-notification>done</task-notification>')
+            self.assertEqual(self.pre('Edit')[0], 2, kind)
+
+    def test_a_message_before_the_stop_grants_nothing(self):
+        self.at(400_000)
+        self.message('human', when='2000-01-01T00:00:00.000Z')
+        self.at(610_000)
+        self.assertEqual(self.pre('Edit')[0], 2)  # the stop
+        self.assertEqual(self.pre('Edit')[0], 2)  # the older message is no answer to it
 
     def test_tool_answer_also_grants(self):
         self.at(610_000)
@@ -147,11 +167,25 @@ class ContextLimit(unittest.TestCase):
         self.assertIn('Follow that answer', self.post('AskUserQuestion')[1])
         self.assertEqual(self.pre('Edit')[0], 0)
 
-    def test_a_message_before_any_stop_grants_nothing(self):
-        self.at(400_000)
-        self.assertEqual(self.run_hook('UserPromptSubmit', prompt='hi')[1], '')
+    def test_compaction_clears_stop_and_grant(self):
         self.at(610_000)
+        self.pre('Edit')
+        self.post('AskUserQuestion')  # grant until 760k
+        self.at(80_000)
+        self.post()
+        self.at(650_000)
         self.assertEqual(self.pre('Edit')[0], 2)
+
+    def test_a_question_on_the_issue_runs_while_stopped(self):
+        self.at(610_000)
+        for command in ("gh issue comment 7 --body 'Continue? a; b | c `x`' && gh issue edit 7 --add-label needs-user",
+                        "gh issue comment 7 --body \"$(cat <<'EOF'\nContinue past 600k?\n| a | b |\nEOF\n)\"",
+                        "git log --oneline -3 2>&1 | tail -3"):
+            self.assertEqual(self.pre('Bash', {'command': command})[0], 0, command)
+        for command in ("git status\nmake", "git status $(make)", "git -c alias.x='!make' x",
+                        "echo x > f.txt", "gh issue comment 7 --body \"`make`\""):
+            self.assertEqual(self.pre('Bash', {'command': command})[0], 2, command)
+        self.assertEqual(self.pre('Skill', {'skill': 'issue-handover'})[0], 0)
 
     # subagents
     def test_subagent_gets_the_same_limit_and_no_way_on(self):
@@ -163,6 +197,7 @@ class ContextLimit(unittest.TestCase):
         code, _, err = self.pre('Bash', {'command': 'git status'}, agent_id='ab1')
         self.assertEqual(code, 2)
         self.assertIn('report', err)
+        self.assertEqual(self.pre('SubagentHandback', agent_id='ab1')[0], 0)  # its report goes
         self.assertEqual(self.pre('Edit')[0], 0)  # the main chat is still at 100k
 
     # where it does nothing

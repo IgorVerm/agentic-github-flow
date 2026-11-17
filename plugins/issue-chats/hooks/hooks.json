@@ -62,11 +62,6 @@
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/scripts/question_label.py\"",
             "timeout": 30
-          },
-          {
-            "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/context-gate.sh\"",
-            "timeout": 30
           }
         ]
       }

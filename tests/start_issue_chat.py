@@ -70,6 +70,8 @@ elif a[:2] == ['agents', '--json']:
     print(json.dumps(rows, indent=2))
 elif a[:1] == ['--bg']:
     name = a[a.index('--name') + 1]
+    if s.get('bg_fail_clean'):  # refused before any session started
+        print('error: refused', file=sys.stderr); save(); sys.exit(1)
     s['bg'].append({'cwd': os.getcwd(), 'kind': 'background', 'sessionId': s['sid'],
                     'name': name, 'status': s['bg_status']})
     if s.get('bg_fail'):
@@ -348,6 +350,17 @@ else:
     case('hand-over: an id glued to a path is no name', 1, args=HANDOVER,
          gh=claimed('claimed for chat "#12 · next" (see /logs/%s/x), worktree /w/12-x' % OLD),
          others=old_in_wt('idle'), cwd=primary, check=nothing_started)
+    case('hand-over: an id glued after other text is no name', 1, args=HANDOVER,
+         gh=claimed('claimed for chat "#12 · next" (ref-%s), worktree /w/12-x' % OLD),
+         others=old_in_wt('idle'), cwd=primary, check=nothing_started)
+    case('hand-over: the app refuses the open, unsure, no note', 2, args=HANDOVER,
+         gh=claimed(OLD_CLAIM), others=old_in_wt('busy'), desktop_ok=False,
+         env_extra={'CLAUDE_CODE_SESSION_ID': OLD}, check=no_note)
+    case('hand-over: claude --bg starts nothing; the kept chat is no half-made one', 1,
+         args=HANDOVER, gh=claimed(OLD_CLAIM), others=old_in_wt('busy'),
+         env_extra={'CLAUDE_CODE_SESSION_ID': OLD}, stub={'bg_fail_clean': True}, needs_pty=False,
+         check=lambda log, out: no_note(log, out) or (
+             None if out.strip().startswith('fail:') else 'last line %r' % out))
     case('hand-over: an id followed by a path is no name', 1, args=HANDOVER,
          gh=claimed('claimed for chat "#12 · next" (see local_%s/logs), worktree /w/12-x' % OLD),
          others=old_in_wt('idle'), cwd=primary, check=nothing_started)

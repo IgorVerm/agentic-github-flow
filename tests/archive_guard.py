@@ -159,7 +159,11 @@ def main() -> int:
         os.environ["AGENTIC_GITHUB_FLOW_HANDOVER_STATE"] = ENV["AGENTIC_GITHUB_FLOW_HANDOVER_STATE"]
         sys.path.insert(0, os.path.join(PLUGIN, "scripts"))
         import handover_note
-        handover_note.write([APP], inplace, "local_succ0001", 12)
+        handover_note.write([APP[len("local_"):]], inplace, "local_succ0001", 12)  # bare CLI id
+        appwt = os.path.join(primary, ".claude", "worktrees", "x")  # a worktree in the app's folder
+        git("worktree", "add", "-q", "-b", "agent/appwt", appwt, cwd=primary)
+        git("commit", "-q", "--allow-empty", "-m", "in flight", cwd=appwt)
+        handover_note.write(["cccccccc-0000-0000-0000-000000000003"], appwt, "local_succ0003", 14)
         handover_note.write([OTHER], clean, "local_succ0002", 13)
 
         def session(sid, wt=None, **where):
@@ -232,6 +236,7 @@ def main() -> int:
             ("self ok: side chat, landed", [use("a", "self", T1), res("a", side(APP, clean), T1)], "self", None, None, False, 0),
             ("self ok: handed over in place, cwd in a worktree with a commit not on GitHub", [use("a", "self", T1), res("a", me(cwd=inplace), T1)], "self", None, None, False, 0),
             ("self not-ok: handed over, but the app made the worktree (worktreePath)", [use("a", "self", T1), res("a", me(inplace), T1)], "self", None, None, False, 2),
+            ("other not-ok: a note for a worktree in the app's own folder", [use("a", "local_cccccccc-0000-0000-0000-000000000003", T1), res("a", {"sessionId": "local_cccccccc-0000-0000-0000-000000000003", "cwd": appwt}, T1)], "local_cccccccc-0000-0000-0000-000000000003", None, None, False, 2),
             ("other not-ok: its hand-over note names another worktree", [use("a", OTHER, T1), res("a", other(cwd=ahead), T1)], OTHER, None, None, False, 2),
             ("other not-ok: no hand-over note, cwd in a worktree with a commit not on GitHub", [use("a", OTHER, T1), res("a", other(cwd=dirty), T1)], OTHER, None, None, False, 2),
             ("self not-ok: side chat, cwd in a pushed worktree", [use("a", "self", T1), res("a", {"sessionId": APP, "cwd": pushed, "parentSessionId": "local_parent"}, T1)], "self", None, None, False, 2),
@@ -242,6 +247,20 @@ def main() -> int:
             ok = got == want
             bad += not ok
             print(f"{'ok  ' if ok else 'FAIL'} exit {got} (want {want})  {name}")
+        # A note folder that is a symlink is not trusted: the handed-over chat is checked as usual.
+        real_notes = ENV["AGENTIC_GITHUB_FLOW_HANDOVER_STATE"]
+        link = os.path.join(tmp, "handovers-link")
+        try:
+            os.symlink(real_notes, link, target_is_directory=True)
+        except OSError:
+            link = None  # Windows without the symlink privilege
+        if link:
+            ENV["AGENTIC_GITHUB_FLOW_HANDOVER_STATE"] = link
+            got = run(tmp, "symlinked note folder", [use("a", "self", T1), res("a", me(cwd=inplace), T1)], "self")
+            ENV["AGENTIC_GITHUB_FLOW_HANDOVER_STATE"] = real_notes
+            ok = got == 2
+            bad += not ok
+            print(f"{'ok  ' if ok else 'FAIL'} exit {got} (want 2)  self not-ok: the note folder is a symlink")
         for problem in wiring():
             bad += 1
             print("FAIL " + problem)

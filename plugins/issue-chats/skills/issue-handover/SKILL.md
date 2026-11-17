@@ -159,11 +159,13 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
    two. Exit 1 of step 5.3 left none. After exit 2 or an undelivered message:
    `local_<sessionId>` in `list_sessions` gets `archive_session` (it has done nothing; its
    worktree is the new, clean one, which the archive keeps); otherwise
-   `claude agents --json --cwd "<new worktree>"` must print `[]`, or, in a hand-over before the
-   branch is ready, list no session but this chat (or the idle chat handed over for). There the
-   old chat is not archived: it keeps its issue until a successor is open. Never `claude rm`: it deletes
-   a session's worktree. Remove a claim step 5.4 made (`gh issue edit <n> --remove-assignee
-   @me` and a comment why). If the half-made chat cannot be ruled out or archived, leave no
+   `claude agents --json --cwd "<new worktree>"` must print `[]`. In a hand-over in place the
+   worktree is this chat's own, with commits not on GitHub: the guard refuses to archive a
+   half-made successor there, so `claude agents --json --cwd` must list no session but this
+   chat (or the idle chat handed over for), else report and stop; the old chat keeps its issue
+   and its claim, and is not archived. Never `claude rm`: it deletes
+   a session's worktree. Outside a hand-over, remove a claim step 5.4 made (`gh issue edit <n>
+   --remove-assignee @me` and a comment why). If the half-made chat cannot be ruled out or archived, leave no
    card: report it and stop. Then a card, `start_session` with `initiation: "own_initiative"`,
    `context: "fresh"`, `title`, `prompt` the start brief, `background` (at least 80 characters)
    what is ready to push and why this issue is next, `use_worktree: true`,
@@ -221,8 +223,9 @@ local-main mode: landed).
 
 **A hand-over before the branch is ready** (context limit, two failed corrections) keeps the
 issue: commit what is verified, a signed state comment on the issue (branch, worktree, head
-commit, what is checked, the next step), then step 5 for the same issue with `--handover` and
-this chat's own worktree as the worktree (no new one: the successor works on the branch in
+commit, what is checked, the next step). **In place** only when `get_session "self"` shows no
+`worktreePath` (a worktree a tool made; the app removes one it made when its chat is archived):
+step 5 for the same issue with `--handover` and this chat's own worktree as the worktree (no new one: the successor works on the branch in
 flight, with its build output; the tool refuses unless the issue's newest claim comment names
 this chat's `local_<sessionId>` or worktree, and lets this chat stay in the worktree), and a new
 claim comment naming the new chat and that worktree. Exit 0 also notes the hand-over
@@ -235,5 +238,11 @@ are not on GitHub. Another chat, such as an orchestrator, hands over the same wa
 that sits idle in its worktree: `--handover` accepts a newest claim that names exactly that one
 idle chat by its session id; after "delivered" it archives that chat (`get_session`, then
 `archive_session`). A chat that claimed its issue only by its app id (`local_<id>` other than its
-CLI session id) cannot be handed over for this way; the tool refuses. A later `archive-finished-chats` archives it once they are, or once a successor's
-branch that holds them is pushed (the worktree check then names that branch).
+CLI session id) cannot be handed over for this way; the tool refuses. When the archive is
+refused all the same (live background work, the note not written), end that work and try once
+more; still refused, report it to the user with the guard's reason, end the turn and do nothing
+more in this worktree: the user archives the chat. **With a `worktreePath`** (an app-made
+worktree), not in place: step 5 with `--handover` in a new worktree on a new branch from this
+chat's head (the worktree tool with `--base <head commit>`), the successor working there; this
+chat is not archived now, and `archive-finished-chats` archives it once its commits are on
+GitHub or a successor's pushed branch holds them (the worktree check then names that branch).

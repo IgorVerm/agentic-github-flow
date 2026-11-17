@@ -14,7 +14,8 @@ of `HANDOFF.md` on the default branch as last fetched (`refs/remotes/origin/HEAD
 origin/main, origin/master, else local main or master): a change to them counts once merged.
 It does not fetch; fetch first.
 
-The order: `priority: critical`, then `priority: high`, then the rest, oldest first. When the row
+The order: `priority: critical`, then `priority: high`, then the rest, then `priority: low`,
+oldest first within each. When the row
 `spread over areas` says yes, the rest goes first from the areas no running chain works in yet:
 an area is taken when an open issue with its label is assigned (the claim) and its newest claim
 or hand-off comment, right after the signature `🤖 <agent> (<role>):`, is a claim (`claimed for
@@ -131,11 +132,15 @@ def spread_areas(text: str | None) -> list[str] | None:
 
 def rank(issue: dict) -> int:
     names = {lab["name"] for lab in issue.get("labels", [])}
-    return 0 if "priority: critical" in names else 1 if "priority: high" in names else 2
+    if "priority: critical" in names:
+        return 0
+    if "priority: high" in names:
+        return 1
+    return 3 if "priority: low" in names else 2
 
 
 def normal_order(ready: list[dict]) -> list[dict]:
-    """Critical, high, the rest; oldest first within each."""
+    """Critical, high, the rest, low; oldest first within each."""
     return sorted(ready, key=lambda i: (rank(i), i["number"]))
 
 
@@ -165,7 +170,7 @@ def taken_areas(open_issues: list[dict], areas: list[str], cwd: str) -> set[str]
 
 
 def spread_order(ready: list[dict], areas: list[str], taken: set[str]) -> list[dict]:
-    """Critical and high first; then the rest in a free area; then all others."""
+    """Critical and high first; then the rest in a free area; then all others; low last."""
     def in_free_area(issue: dict) -> bool:
         mine = {lab["name"] for lab in issue.get("labels", [])} & set(areas)
         return bool(mine) and not (mine & taken)

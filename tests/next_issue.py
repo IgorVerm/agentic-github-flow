@@ -161,6 +161,17 @@ class NextIssue(unittest.TestCase):
         order, _ = self.picks()
         self.assertEqual(order, [11, 9, 3, 5, 6, 7, 8])
 
+    def test_low_priority_comes_after_the_rest(self):
+        # #1 is the oldest, but `priority: low` puts it behind every unlabelled issue
+        self.issues.append(issue(1, 'priority: low'))
+        self.write_state(self.issues)
+        self.assertEqual(self.picks()[0], [11, 9, 3, 5, 6, 7, 8, 1])
+        self.settings('| spread over areas | yes: `area:a`, `area:b`, `area:c` |')
+        self.issues[-1] = issue(1, 'area:b', 'priority: low')
+        self.write_state(self.issues)
+        # low stays last even in a free area
+        self.assertEqual(self.picks()[0], [11, 9, 7, 8, 3, 5, 6, 1])
+
     def test_spread_skips_a_taken_area_and_keeps_high_first(self):
         self.settings('| spread over areas | yes: `area:a`, `area:b`, `area:c`; not `art` |')
         order, r = self.picks()

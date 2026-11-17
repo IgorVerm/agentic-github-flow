@@ -83,11 +83,13 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
    `landed on local <landing branch> at <commit>` and the fields of `local-main.md` §1;
    the issue stays open and assigned until the push's cleanup closes it. Landing refused: stop
    and report, no hand-over. A correction to an earlier comment is a new comment, never an edit. Each open question for the user stands on its owning issue,
-   signed, with the question label.
+   signed, with the settings' question label: `needs-user` unless the settings name another
+   (method.md §1), never GitHub's built-in `question`.
 3. **Pick the next issue:** `git fetch origin`, then
    `python3 <plugin>/scripts/next_issue.py -C <this worktree>`, with `--area <area label>` when
    this chain is limited to an area. It prints the ready issues in pick order:
-   `priority: critical` first, then `priority: high`, then the rest, oldest first; with
+   `priority: critical` first, then `priority: high`, then the rest, `priority: low` last,
+   oldest first within each; with
    `spread over areas` on, the rest from an area no chat works in yet comes first. Exit 3:
    GitHub was not read, stop here. Take the first line unless you say in one line why another
    matters more. Skip an issue whose body names `after #n` for an issue that is still open

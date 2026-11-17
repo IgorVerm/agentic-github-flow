@@ -273,7 +273,8 @@ notification began. So:
   `archive_session` refuses a session with live background work. After the hand-over, a
   subagent's report is the one thing a chat may end its turn for (`issue-handover`, *End your
   own live work*).
-- **Questions for the user go on the owning issue** with the question label. They do not block
+- **Questions for the user go on the owning issue** with the question label (`needs-user`
+  unless §1's settings name another; never GitHub's built-in `question`). They do not block
   the hand-over unless the next step needs the answer. A question that is really new scope gets
   the requirements label instead.
 - **The machine stays awake:** at the start of long work the chat calls `request_keep_awake`

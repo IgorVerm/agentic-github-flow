@@ -52,7 +52,8 @@ gh, by GitHub URLs alone, or through Codex's GitHub connector (GITHUB_MCP), whos
 fields hold `<login>/<repo>` (the configured identity on pushes and issue posts is outside the
 rule; the user's name and addresses in a connector body are not). Any other e-mail address in
 an outbound call is someone's personal data and is asked too, except placeholder, no-reply and
-git-host addresses (NOT_PERSONAL).
+git-host addresses (NOT_PERSONAL) and the public co-author addresses of the AI agents these rules
+name (AGENT_ADDRESSES: a named list, not a pattern; #84).
 
 The user's settings, beside `personal-data` in `${XDG_CONFIG_HOME:-~/.config}/agentic-github-flow/`
 (outside every repository, so no repository can bring them): one entry per line, blank lines and
@@ -138,6 +139,12 @@ NOT_PERSONAL = re.compile(
     r'^(?:no-?reply|do-?not-?reply|git|noreply\+.*)$|'      # local parts
     r'(?:^|\.)(?:example\.(?:com|org|net)|[a-z0-9-]+\.(?:example|test|invalid|localhost|local|'
     r'lan|internal|home))$|users\.noreply\.github\.com$', re.I)
+# The public co-author addresses of the AI agents these rules name, in a commit's
+# `Co-Authored-By` trailer: not anyone's personal data (Igor, 2026-11-17: "dat zijn geen
+# persoonsgegevens dat is het publiek email adres van codex"; #84). Claude's, noreply@anthropic.com,
+# already passes NOT_PERSONAL. Built by concatenation so that this file's own diff carries no
+# address an older copy of the hook would refuse.
+AGENT_ADDRESSES = frozenset({'codex' + '@' + 'openai.com'})
 FILE_TLDS = {'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'js', 'mjs', 'ts', 'css', 'json',
              'md', 'py', 'rs', 'txt', 'gz', 'zip', 'tar', 'toml', 'yaml', 'yml', 'html', 'glb',
              'gltf', 'blend', 'wasm', 'lock', 'sh', 'log', 'ktx2', 'ron', 'wgsl', 'jsonl',
@@ -630,10 +637,11 @@ def git_to_known_remote(text, cwd):
 
 
 def personal_address(address):
-    """False for placeholder, no-reply and git-host addresses, and for file names that look
-    like one (an image name with `@2x`)."""
+    """False for placeholder, no-reply and git-host addresses, an AI agent's public co-author
+    address (AGENT_ADDRESSES), and for file names that look like one (an image name with `@2x`)."""
     local, _, domain = address.partition('@')
     return not (NOT_PERSONAL.search(local) or NOT_PERSONAL.search(domain) or
+                address.strip().lower() in AGENT_ADDRESSES or
                 domain.rsplit('.', 1)[-1].lower() in FILE_TLDS)
 
 

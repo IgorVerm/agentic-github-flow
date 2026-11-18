@@ -3,6 +3,19 @@
 Rulings of the maintainers named in `HANDOFF.md`, newest first, with their words. Detail lives on
 the linked issue.
 
+## A Codex issue chat starts its integrator and waits for the receipt, 2026-11-18
+
+**Decision (the maintainer):** "zorg dat voortaan elke codex issuechat zelf de integrator start
+en pas stopt als die de overdracht heeft aangenomen" (make sure that from now on every Codex
+issue chat starts the integrator itself and stops only once it has accepted the hand-over).
+**What:** on the independent local-main route a Codex issue chat freezes its commit, starts the
+integrator in its own turn, and ends the turn or hands over only after the integrator explicitly
+accepted that exact commit with access to the worktree and evidence, recorded on the issue;
+before a retry it looks for an existing integrator, and without a receipt it keeps custody and
+reports. Which changes take the independent route is unchanged. **Binds:**
+`plugins/issue-chats/skills/issue-handover/codex.md` *Start the integrator*, the reference in
+`SKILL.md` step 2. **Detail:** issue #85.
+
 ## Issue chats hand over at 300k context; past 600k the user decides, 2026-11-17
 
 **Decision (the maintainer):** "zet de grens op 300k" (set the limit to 300k); "boven 2x grens

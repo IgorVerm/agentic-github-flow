@@ -362,6 +362,19 @@ class Push(unittest.TestCase):
         r = self.push(b)
         self.assertEqual(r.returncode, 0, r.stderr)
 
+    def test_an_agents_public_coauthor_address_passes_and_no_other(self):
+        # #84: Codex's public co-author address is no one's personal data; a look-alike is.
+        codex = 'codex' + '@' + 'openai.com'
+        b = self.branch()
+        self.commit('a.txt', 'a\n', 'a\n\nCo-Authored-By: Codex <%s>\n%s' % (codex, NOREPLY))
+        r = self.push(b)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for other in ('codex.bot' + '@' + 'openai.com', 'jan' + '@' + 'openai.com',
+                      'codex' + '@' + 'openai.com.evil.be'):
+            self.git(self.repo, 'switch', '-q', '-C', 'agent/x', 'main')
+            self.commit('b.txt', 'b\n', 'b\n\nCo-Authored-By: X <%s>' % other)
+            self.refused(self.push('agent/x'), 'personal data', 'e-mail address')
+
     def test_address_in_an_annotated_tag_is_refused(self):
         self.git(self.repo, 'tag', '-a', 'v1', '-m', 'release for ' + OTHER)
         self.refused(self.push('v1'), 'personal data', 'tag message')

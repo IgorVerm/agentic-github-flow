@@ -32,35 +32,45 @@ them.
   comment, SKILL.md step 5.4) before the new chat starts work, so a Claude chain skips it. After
   an uncertain result, look at the existing chats before you retry, so there are never two.
 - **Start the integrator** (local-main mode, the independent route of the `ship-change` skill's
-  `local-main.md` §2; Igor, #85: every Codex issue chat starts the integrator itself and stops
-  only once it has accepted the hand-over). In the author's turn, before SKILL.md step 3:
+  `local-main.md` §2): this chat starts the integrator itself and ends its turn only once the
+  integrator has accepted the hand-over. In the author's turn, before SKILL.md step 3:
   1. **Freeze the source:** the branch clean at an exact commit S, and the hand-over of §2 step 1
      on the issue: S in full, the branch, the worktree, the checks and the evidence paths, what
      is not covered, the `Efficient design:` line. Write nothing more to the branch.
-  2. **Look first:** in `list_threads` and among this chat's own subagents, an integrator of this
-     issue at S. If there is one, go to 4 with it; never start a second.
+  2. **Look first:** in `list_threads` and among this chat's own subagents, any integrator of this
+     issue. One at S: go to 4 with it. One at another commit: correct it to S with
+     `send_message_to_thread` and go to 4, or stop it first; never run two.
   3. **Start it:** a fresh chat (`create_thread` as in *Create a fresh chat*, titled
-     `#<issue> · integrate <S, 8 characters>`; the issue keeps this chat's claim) that did not
+     `<title prefix>#<issue> · integrate <S, 8 characters>`; no worktree of its own beyond the
+     integration worktree §2 step 3 may make; the issue keeps this chat's claim) that did not
      write the change. A subagent may do it only if this turn waits for its report, since it is
      this chat's own live work (SKILL.md *End your own live work*). The brief: the issue, S, the
-     branch, the worktree, the evidence, `local-main.md` §2 steps 2 to 4 with the `review-change`
-     skill, and the ask to answer first with an acceptance that names S in full and confirms it
-     read the worktree at S (`git -C <worktree> rev-parse HEAD`) and the evidence.
+     branch, the worktree, the evidence, this chat's thread id, `local-main.md` §2 steps 2 to 4
+     with the `review-change` skill; that it lands nothing before `integrator accepted <S>:` is
+     on the issue; that a finding, a refused landing or a conflict goes back to this chat
+     (`send_message_to_thread` to its thread id and a signed comment on the issue), which then
+     holds S again; that it posts the landing record and then messages this chat. And the ask to
+     answer first with an acceptance that names S in full and confirms it read the clean worktree
+     at S (`git -C <worktree> status --porcelain` empty, `rev-parse HEAD` equal to S) and the
+     evidence.
   4. **The receipt:** wait in this turn (a bounded `wait_threads`, then `read_thread`; for a
-     subagent, its reply). Only an explicit acceptance of exactly S that confirms access to the
+     subagent, its reply). Only an explicit acceptance of exactly S that confirms the clean
      worktree and the evidence counts; a created thread, a delivered brief or a launch result does
      not. Then a signed comment on the issue whose text after the signature opens with
      `integrator accepted <S>:`, with the integrator's thread or agent id and what it confirmed.
      Only after that comment does this chat end its turn or go on with the hand-over.
   5. **No receipt** (a refusal, a timeout, an uncertain result, another commit): back to 2 before
-     any retry. When it stays unconfirmed, a signed comment opening `integrator pending <S>:` with
-     the exact failure; this chat keeps custody of S and the issue, hands nothing over (no next
-     pick) and reports to the user, as for a refused landing (SKILL.md step 2).
+     any retry. When it stays unconfirmed, stop or correct the integrator that 2 or 3 found or
+     started, then a signed comment opening `integrator pending <S>:` with its thread id, if any,
+     and the exact failure; this chat keeps custody of S and the issue, hands nothing over (no
+     next pick) and reports to the user, as for a refused landing (SKILL.md step 2).
 
   After the receipt the integrator owns the review, the landing and its record on the issue, whose
-  text opens with `landed on local <landing branch> at <commit>` (SKILL.md step 2). At SKILL.md step
-  6 this chat tells the user who accepted S, in place of what landed; it is archived once the
-  landing passes the worktree check (by `archive-finished-chats` when its own turn has ended).
+  text opens with `landed on local <landing branch> at <commit>` (SKILL.md step 2). At SKILL.md
+  step 6 this chat tells the user who accepted S, in place of what landed. The integrator's
+  message after its record, or after sending S back, begins this chat's next turn: it reads the
+  issue, takes S back or, once landed, runs *Archive* below for the integrator's thread and then
+  its own.
 - **Status:** report in this chat; the issue's claim and state comments keep their duties. Do
   not send routine status to other chats.
 - **Archive:** after the merge, the cleanup, the `merged:` comment and the worktree check

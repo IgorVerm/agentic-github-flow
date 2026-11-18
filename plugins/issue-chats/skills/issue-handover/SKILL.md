@@ -80,8 +80,8 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
    The issue stays open and assigned; the merge closes it. **In local-main mode** land the work
    instead (`local-main.md` §1; for the independent route a subagent that did not write it
    reviews and lands it, §2; a Codex chat starts that integrator itself and ends its turn or
-   hands over only after its receipt, [codex.md](codex.md) *Start the integrator*), then the
-   signed comment opens with
+   hands over only after its receipt, and the integrator posts the landing comment,
+   [codex.md](codex.md) *Start the integrator*), then the signed comment opens with
    `landed on local <landing branch> at <commit>` and the fields of `local-main.md` §1;
    the issue stays open and assigned until the push's cleanup closes it. Landing refused: stop
    and report, no hand-over. A correction to an earlier comment is a new comment, never an edit. Each open question for the user stands on its owning issue,

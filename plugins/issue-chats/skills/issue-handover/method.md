@@ -457,7 +457,7 @@ and `merge_pr.py` the same way (never `git push`, `gh pr merge` or `gh pr ready`
 themselves). Never a broad allow, and every ask and deny
 rule stays. A rule or a sandbox exclusion never names the copy under `~/.claude/plugins/cache/`:
 its folder names the version, so an update silently breaks it; `install.sh --update` names each
-one left. The README of this repository has the rule's form.
+one left. The installation guide of this repository, `docs/install.md`, has the rule's form.
 
 **Per repository,** on a branch, through a pull request the user approves:
 

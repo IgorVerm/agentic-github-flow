@@ -14,6 +14,13 @@ where the repository uses that stack.
 - Object-level checks: a request that names an id proves the caller may act on that object; a
   random identifier is no protection, and an organisation or tenant id the request carries is
   checked against the caller's membership on the server.
+- An insert or update takes only the fields the caller may set, never a spread request body
+  (`owner_id`, `tenant_id`, `role`, `is_admin`, a price); an endpoint that takes a list of ids
+  checks each one or filters by the caller's tenant on the server (API1 and API3:2023, Mass
+  Assignment and Multi-Tenant Security cheat sheets).
+- A queued job or scheduled export checks the user's rights and tenant again when it runs, never
+  from a tenant id in the message; a signed download link is made after that check, for one
+  object, with a short expiry (ASVS 8.3.2, Multi-Tenant Security cheat sheet).
 - Deny by default; role checks in the client are presentation only. Admin paths check a
   server-side claim or table, never a flag the client sent.
 - Cross-site requests: no state change on `GET` or during rendering. An endpoint authenticated by
@@ -36,6 +43,13 @@ where the repository uses that stack.
   or a cookie read by hand.
 - Sign-up, sign-in and reset do not reveal whether an account exists; rate limits or CAPTCHA on
   those routes; passwords never logged or echoed.
+- A reset token is random, single-use, short-lived and stored hashed; a password change ends it,
+  no log holds it, the reset page sends `Referrer-Policy: no-referrer`, and a reset does not
+  bypass MFA (Forgot Password cheat sheet, ASVS 6.4.3).
+- MFA: every route behind it checks on the server that the session passed the second factor (an
+  IdP's `amr` or `acr` claim), so a half-finished sign-in reaches nothing; recovery codes are
+  single-use and stored hashed; turning MFA off or changing a factor, the e-mail address or the
+  password needs re-authentication (MFA cheat sheet, ASVS 6.5.1, 6.5.2, 6.8.4, 7.5.1).
 - Redirects after sign-in use a sanitized relative path; `next`, `redirectTo` and `returnUrl`
   parameters are checked against an allow list, never passed through (no open redirector).
 - OAuth flows use the authorization code with PKCE or the provider's `nonce`, verify `state`, and
@@ -73,6 +87,10 @@ where the repository uses that stack.
   handler's), never by the `accept` attribute or the `Content-Type` the client sent; a size limit
   holds; the stored name is generated, not the visitor's file name; the file lands in private
   storage, never in a folder the site serves as is (File Upload cheat sheet; ASVS V5).
+- XML parsers run with DTDs and external entities off, in every stack. An archive is extracted
+  only within a limit on entry count and total uncompressed size, each entry's resolved path
+  inside the target folder, no symlinks (zip slip; XXE Prevention and File Upload cheat sheets,
+  ASVS 1.5.1, 5.2.3, 5.3.3).
 - Database access through the client library or parameterized SQL; string-built SQL, including
   in migrations and stored functions, is a finding.
 - Shell: no string-built commands from input (`exec`, `spawn` with `shell: true`, `subprocess`

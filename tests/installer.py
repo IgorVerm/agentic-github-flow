@@ -14,7 +14,8 @@ a symlinked ~/.codex/AGENTS.md refused before any change, a missing client skipp
 merging and removing the settings, rules and hooks (the git guard and the personal-data hook in
 ~/.codex/hooks.json beside the user's own entries, the latter added by --update to an older
 install), the opt-in sandbox-network guard (only with --guards sandbox, kept by a rerun and
---update, removed by --uninstall), the Codex rules as regular copies (refreshed by
+--update, removed by --uninstall), the opt-in Google Cloud guard (--guards gcloud: its ask and
+deny rules and its Codex rules copy, the same way), the Codex rules as regular copies (refreshed by
 --update, a link of an earlier version replaced, a changed copy left by --uninstall), --with
 issue-chats installed beside core in both clients and kept on a plain rerun, settings entries
 that name a plugin's version folder reported by an install and --update but left unchanged, an
@@ -446,6 +447,46 @@ class InstallerTests(unittest.TestCase):
             if after.get(key) == {}:
                 del after[key]
         self.assertEqual(after, settings)
+
+    def test_gcloud_guard_is_opt_in_kept_and_removed(self):
+        settings = {'permissions': {'ask': ['Bash(make *)']}, 'model': 'example'}
+        self.write(json.dumps(settings).encode(), '.claude', 'settings.json')
+        os.makedirs(self.path('.codex'))
+        copy = self.path('.codex', 'rules', 'agentic-github-flow-gcloud.rules')
+
+        def rules():
+            return json.loads(self.read('.claude', 'settings.json'))['permissions']
+        code, out = self.install('--guards')
+        self.assertEqual(code, 0, out)
+        self.assertNotIn('Bash(gcloud *)', rules()['ask'], 'plain --guards must not add it')
+        self.assertFalse(os.path.lexists(copy))
+        code, out = self.install('--guards', 'sandbox,gcloud')
+        self.assertEqual(code, 0, out)
+        self.assertIn('Bash(gcloud *)', rules()['ask'])
+        self.assertIn('Bash(cloud-sql-proxy *)', rules()['ask'])
+        self.assertIn('Read(~/.config/gcloud/**)', rules()['deny'])
+        self.assertIn('Bash(make *)', rules()['ask'])
+        self.assertEqual(len(self.sandbox_entries()), 1)
+        self.assertTrue(os.path.isfile(copy) and not os.path.islink(copy), copy)
+        with open(copy, 'rb') as a, open(os.path.join(self.source, 'plugins', 'guards', 'policy',
+                                                      'gcloud.rules'), 'rb') as b:
+            self.assertEqual(a.read(), b.read())
+        for args in ((), ('--update',)):  # a plain rerun and --update keep it, once
+            code, out = self.install(*args)
+            self.assertEqual(code, 0, out)
+            self.assertEqual(rules()['ask'].count('Bash(gcloud *)'), 1, out)
+            self.assertTrue(os.path.isfile(copy), out)
+        with open(self.path('.agentic-github-flow', '.state', 'install.json'),
+                  encoding='utf-8') as f:
+            self.assertTrue(json.load(f)['gcloud_guard'])
+        code, out = self.install('--uninstall')
+        self.assertEqual(code, 0, out)
+        after = json.loads(self.read('.claude', 'settings.json'))
+        for key in ('enabledPlugins', 'extraKnownMarketplaces'):  # the client's own bookkeeping
+            if after.get(key) == {}:
+                del after[key]
+        self.assertEqual(after, settings)
+        self.assertFalse(os.path.lexists(copy))
 
     def test_sandbox_guard_notes_a_sandbox_that_is_off(self):
         settings = {'hooks': {}, 'model': 'example'}  # an empty hooks object stays

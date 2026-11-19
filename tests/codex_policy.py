@@ -11,6 +11,8 @@ read). Exits 77 (skipped) when no codex command is found.
          names what does cover it.
 Part 2 checks policy/delete-guard.rules: DELETE_CASES alone and combined with git-safety.rules
 (and default.rules when present), DELETE_GAPS alone (what prefix rules cannot see, pinned).
+Part 3 checks the opt-in policy/gcloud.rules (--guards gcloud, #89) the same way: GCLOUD_CASES
+alone and combined with the other two (and default.rules), GCLOUD_GAPS alone.
 Run before committing any change to either rules file: one failing match/not_match example stops
 the whole file from loading.
 """
@@ -18,6 +20,7 @@ import json, os, shlex, shutil, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 RULES = os.path.join(HERE, "..", "plugins", "guards", "policy", "git-safety.rules")
 DELETE_RULES = os.path.join(HERE, "..", "plugins", "guards", "policy", "delete-guard.rules")
+GCLOUD_RULES = os.path.join(HERE, "..", "plugins", "guards", "policy", "gcloud.rules")
 DEFAULT = os.path.expanduser("~/.codex/rules/default.rules")
 BUNDLED = ("/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",)  # macOS app
 CODEX = (os.environ.get("CODEX") or shutil.which("codex")
@@ -100,6 +103,23 @@ DELETE_GAPS = [
 ("xargs -d '\\n' rm -rf", "none", "known-gap:unlisted flag value; sandbox only"),
 ]
 
+GCLOUD_CASES = [
+("gcloud run deploy web --source .","prompt"),("gcloud auth list","prompt"),("gcloud auth print-access-token","prompt"),
+("gcloud sql connect db --user=postgres","prompt"),("gcloud","prompt"),("gsutil cp gs://b/x .","prompt"),
+("bq query --use_legacy_sql=false x","prompt"),("cloud-sql-proxy p:europe-west1:db","prompt"),("cloud_sql_proxy -instances=x","prompt"),
+# must stay usable
+("ls ~/.config","none"),("gcloudx","none"),("bqx","none"),("git status","none"),("psql -h localhost","none"),
+]
+
+# (command, decision, what covers it): prefix rules see the program's name at the start only.
+GCLOUD_GAPS = [
+("/opt/homebrew/bin/gcloud auth list", "none", "known-gap:full path; Claude: sandbox read deny on the credentials"),
+("env gcloud auth list", "none", "known-gap:wrapper; Claude: sandbox read deny on the credentials"),
+("bash -c 'gcloud auth list'", "none", "known-gap:wrapper in execpolicy check; Codex unwraps its own bash -lc, unmeasured"),
+("cat ~/.config/gcloud/application_default_credentials.json", "none", "known-gap:Codex rules cannot close a folder; the written rule"),
+("psql -h 10.0.0.5 -U app prod", "none", "known-gap:a database client to production looks like any other"),
+]
+
 def decide(rule_files, cmd):
     args = [CODEX, "execpolicy", "check"]
     for r in rule_files:
@@ -143,7 +163,19 @@ def main():
         if alone != expected:
             fails += 1
             print(f"GAP CHANGED delete-guard  {cmd!r}: expected {expected}, got {alone} ({tag})")
-    n = len(CASES) + len(GAPS) + len(DELETE_CASES) + len(DELETE_GAPS)
+    gc_files = [GCLOUD_RULES, RULES, DELETE_RULES] + ([DEFAULT] if combined else [])
+    for cmd, expected in GCLOUD_CASES:
+        alone = decide([GCLOUD_RULES], cmd)
+        comb = decide(gc_files, cmd)
+        if alone != expected or (comb != expected and not (expected == "none" and comb in ("allow", "none"))):
+            fails += 1
+            print(f"FAIL gcloud  {cmd!r}: expected {expected}, alone={alone}, combined={comb}")
+    for cmd, expected, tag in GCLOUD_GAPS:
+        alone = decide([GCLOUD_RULES], cmd)
+        if alone != expected:
+            fails += 1
+            print(f"GAP CHANGED gcloud  {cmd!r}: expected {expected}, got {alone} ({tag})")
+    n = len(CASES) + len(GAPS) + len(DELETE_CASES) + len(DELETE_GAPS) + len(GCLOUD_CASES) + len(GCLOUD_GAPS)
     print(f"{n - fails}/{n} pass" + ("" if combined else " (default.rules absent: alone only)"))
     return 1 if fails else 0
 

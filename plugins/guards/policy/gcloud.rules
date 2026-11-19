@@ -1,0 +1,16 @@
+# Google Cloud credentials for Codex (execpolicy), from agentic-github-flow: opt-in, installed
+# only with --guards gcloud (issue #89). The Claude Code twin is the "gcloud" key of
+# claude-permissions.json. The installer copies this file into ~/.codex/rules/ like the others.
+# Test: python3 tests/codex_policy.py (part 3).
+# Prefix rules match the program's name at the start of a command only: a full path
+# (/opt/homebrew/bin/gcloud), a wrapper (env, bash -c) and a database client to a production
+# database are NOT caught (pinned in tests/codex_policy.py). Codex rules cannot close the
+# credential folder (~/.config/gcloud) to reads either; the rule text binds there.
+
+prefix_rule(
+    pattern = [["gcloud", "gsutil", "bq", "cloud-sql-proxy", "cloud_sql_proxy"]],
+    decision = "prompt",
+    justification = "Google Cloud commands act with the user's own Google Cloud credentials, on live projects and data: the user approves each one.",
+    match = ["gcloud run deploy web", "gcloud auth list", "gsutil ls gs://b", "bq query x", "cloud-sql-proxy p:r:i", "gcloud"],
+    not_match = ["gcloudx", "bqx", "ls", "git status"],
+)

@@ -132,6 +132,7 @@ Add options to the install command as needed:
 | `--with security,web-deploy,issue-chats` | also install those plugins (any of them) |
 | `--guards` | also install the guards (see below) |
 | `--guards sandbox` | the guards plus the opt-in [sandbox-network guard](#sandbox-network-guard-opt-in) (Claude Code) |
+| `--guards gcloud` | the guards plus the opt-in [Google Cloud guard](#google-cloud-guard-opt-in) (both clients); `--guards sandbox,gcloud` for both extras |
 | `--overlay <git-url-or-path>` | add a company or personal overlay (repeatable) |
 | `--no-claude`, `--no-codex` | leave one client alone |
 | `--claude-bin <path>`, `--codex-bin <path>` | a client that is not on `PATH` |
@@ -183,6 +184,9 @@ the same version.
 - With `--guards sandbox`, also: one `PreToolUse` entry in `~/.claude/settings.json` that runs
   the sandbox-network guard from the clone, beside your own hooks (`--update` replaces and
   `--uninstall` removes only that entry).
+- With `--guards gcloud`, also: the Google Cloud ask and deny rules merged into
+  `~/.claude/settings.json` like the others, and a third rules file copied into
+  `~/.codex/rules/`.
 
 With `--with issue-chats`, the plugin's archive hook comes with the plugin; the installer adds no
 permission rule for it (see [Issue chats](#issue-chats)).
@@ -248,6 +252,26 @@ call (Claude Code's `allowed_domains`, `host` or `host:port`). For a private add
 `NO_PROXY` and `no_proxy` for that call: clients that honour their CIDR entries (`curl`) go
 straight to the address, which the sandbox refuses. The exact rules are in the guard's header,
 `plugins/guards/scripts/pre_tool_sandbox_network.py`.
+
+### Google Cloud guard (opt-in)
+
+An agent on your machine can use your Google Cloud login: `gcloud`, `gsutil`, `bq` and
+`cloud-sql-proxy` act with your own credentials on live projects and data. `--guards gcloud`
+makes each of those commands wait for your approval (Claude Code: an ask rule; Codex: a prompt
+rule), and in Claude Code denies reading and editing the gcloud configuration folder
+(`~/.config/gcloud/`; on Windows `%APPDATA%\gcloud`, not measured there), which holds your
+login and the Application Default Credentials file. A Read deny also closes the folder to Claude
+Code's Bash sandbox, so a command you approve still cannot read your credentials inside the
+sandbox: it runs only outside it, which asks again.
+
+Opt-in, because an agent that deploys to Google Cloud on purpose would ask at every command. It
+is not complete: rules match a program's name at the start of a command, so a full path
+(`/opt/homebrew/bin/gcloud`) or a wrapper (`env`, `bash -c`) is not asked about (in Claude
+Code the sandbox still keeps the credentials closed); Codex rules cannot close a folder; a folder
+moved with `CLOUDSDK_CONFIG` or a key file named in `GOOGLE_APPLICATION_CREDENTIALS` is not
+covered; and a database client such as `psql` to a production database looks like one to a local
+database. The written rules still bind there. The rules: the `gcloud` key of
+`plugins/guards/policy/claude-permissions.json` and `plugins/guards/policy/gcloud.rules`.
 
 ## Issue chats
 

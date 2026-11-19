@@ -5,7 +5,7 @@ Run it through install.sh (macOS, Linux) or install.ps1 (Windows): they find Pyt
 the clone exists in ~/.agentic-github-flow and start this file from it.
 
 Usage:
-  installer.py [--with security,web-deploy,issue-chats] [--guards [sandbox]]
+  installer.py [--with security,web-deploy,issue-chats] [--guards [sandbox,gcloud]]
                [--overlay <git-url-or-path>]...
                [--no-claude] [--no-codex] [--claude-bin <path>] [--codex-bin <path>]
   installer.py --update      pull the clone, then repeat the recorded install
@@ -36,6 +36,11 @@ What it does, per client (Claude Code, Codex):
   plugins/guards/scripts/pre_tool_sandbox_network.py from this clone (its header owns what it
   does). It is not in the guards plugin's hooks.json, so only this flag turns it on; --update
   replaces and --uninstall removes only the recorded entry.
+- The Google Cloud guard (--guards gcloud, opt-in, both clients; #89): the guards above plus the
+  `gcloud` lists of claude-permissions.json merged like the others (ask before gcloud, gsutil,
+  bq and cloud-sql-proxy; deny reading and editing the gcloud configuration folder) and
+  policy/gcloud.rules copied into ~/.codex/rules/ like the other rules (prompt for the same
+  programs). Kept by a rerun and --update, removed by --uninstall like the rest.
 - Versioned paths (Claude Code, read-only): each install and --update names every permission
   rule and sandbox exclusion in ~/.claude/settings.json that points into the plugin cache, whose
   folder names the version, and gives the same entry with this clone's path, which stays the
@@ -67,7 +72,7 @@ PLUGINS = {'core': 'agentic-github-flow-core', 'security': 'agentic-github-flow-
            'web-deploy': 'agentic-github-flow-web-deploy',
            'issue-chats': 'agentic-github-flow-issue-chats', 'guards': 'agentic-github-flow-guards'}
 NEEDS = {'web-deploy': ['security']}
-GUARD_EXTRAS = ('sandbox',)  # opt-in guards named after --guards
+GUARD_EXTRAS = ('sandbox', 'gcloud')  # opt-in guards named after --guards
 BEGIN = '<!-- >>> agentic-github-flow >>> -->'
 END = '<!-- <<< agentic-github-flow <<< -->'
 NOTE = ('<!-- Managed by the agentic-github-flow installer: edit outside these markers; '
@@ -324,11 +329,15 @@ def backup(path):
         shutil.copy2(path, '%s.agentic-github-flow-backup-%s' % (path, stamp))
 
 
-def merge_permissions(state):
+def merge_permissions(state, gcloud=False):
     path = os.path.join(claude_dir(), 'settings.json')
     with open(os.path.join(CLONE, 'plugins', 'guards', 'policy', 'claude-permissions.json'),
               encoding='utf-8') as f:
-        wanted = json.load(f)['permissions']
+        policy = json.load(f)
+    wanted = {kind: list(policy['permissions'][kind]) for kind in ('ask', 'deny')}
+    if gcloud:  # the opt-in Google Cloud guard
+        for kind in ('ask', 'deny'):
+            wanted[kind] += policy['gcloud'][kind]
     data = load_json(path)
     created = data is None
     data = data if data is not None else {}
@@ -543,6 +552,7 @@ def remove_sandbox_hook(state):
 
 CODEX_RULES = (('git-safety.rules', 'agentic-github-flow-git-safety.rules'),
                ('delete-guard.rules', 'agentic-github-flow-delete-guard.rules'))
+CODEX_GCLOUD_RULES = (('gcloud.rules', 'agentic-github-flow-gcloud.rules'),)  # --guards gcloud
 
 
 def file_hash(path):
@@ -553,11 +563,11 @@ def file_hash(path):
         return None
 
 
-def rules_targets():
-    """[(source, target)] for the Codex rules files."""
+def rules_targets(gcloud=False):
+    """[(source, target)] for the Codex rules files, the opt-in Google Cloud rules with gcloud."""
     folder = os.path.join(codex_dir(), 'rules')
     return [(os.path.join(CLONE, 'plugins', 'guards', 'policy', name), os.path.join(folder, copy))
-            for name, copy in CODEX_RULES]
+            for name, copy in CODEX_RULES + (CODEX_GCLOUD_RULES if gcloud else ())]
 
 
 LEGACY = 'legacy'  # a rules file recorded by its path alone (0.1: a link, a copy on Windows)
@@ -600,14 +610,15 @@ def own_rules_file(target, source, digest):
 
 def source_of(target):
     names = {copy: os.path.join(CLONE, 'plugins', 'guards', 'policy', name)
-             for name, copy in CODEX_RULES}
+             for name, copy in CODEX_RULES + CODEX_GCLOUD_RULES}
     return names.get(os.path.basename(target), '')
 
 
 def codex_guards(state):
     # Copies, never links: Codex skips a symlinked .rules file without a warning.
     record, copied = rules_record(state), {}
-    current = [target for _, target in rules_targets()]
+    targets = rules_targets(state.get('gcloud_guard', False))
+    current = [target for _, target in targets]
     for target, digest in record.items():  # copies under an earlier CODEX_HOME
         if target in current or not os.path.lexists(target):
             continue
@@ -618,7 +629,7 @@ def codex_guards(state):
             copied[target] = digest
             say('skip', 'codex: %s changed since the install; left as it is, and Codex keeps '
                         'loading it while CODEX_HOME points there' % target)
-    for source, target in rules_targets():
+    for source, target in targets:
         os.makedirs(os.path.dirname(target), exist_ok=True)
         if os.path.lexists(target) and not own_rules_file(target, source, record.get(target)):
             say('skip', 'codex: %s changed since the install; left as it is (remove or replace '
@@ -736,11 +747,11 @@ def resolve_overlays(sources, updating, failures):
 
 # ---- the steps --------------------------------------------------------------------------------
 
-def preflight(plan, guards, state, sandbox=False):
+def preflight(plan, guards, state, sandbox=False, gcloud=False):
     """Refuse before any change when a file this run would edit is a symlink or unreadable."""
     if guards and 'codex' in plan:
         record = rules_record(state)
-        for _, rules in rules_targets():
+        for _, rules in rules_targets(gcloud):
             if os.path.lexists(rules) and rules not in record:
                 raise Refused('%s exists and was not made by this installer; move it away first'
                               % rules)
@@ -781,10 +792,10 @@ def install(args, state, updating=False):
     if not plan:
         say('FAIL', 'no client found: install Claude Code or Codex first')
         return 1
-    preflight(plan, args.guards, state, args.sandbox and 'claude' in plan)
+    preflight(plan, args.guards, state, args.sandbox and 'claude' in plan, args.gcloud)
     overlays = resolve_overlays(args.overlay, updating, failures)
     state.update({'with': [w for w in wanted if w != 'core'], 'guards': args.guards,
-                  'sandbox_guard': args.sandbox,
+                  'sandbox_guard': args.sandbox, 'gcloud_guard': args.gcloud,
                   'overlays': overlays, 'clients': sorted(plan),
                   'claude_bin': args.claude_bin or state.get('claude_bin'),
                   'codex_bin': args.codex_bin or state.get('codex_bin')})
@@ -813,7 +824,7 @@ def install(args, state, updating=False):
         save_state(state)
     if args.guards:
         if 'claude' in plan:
-            merge_permissions(state)
+            merge_permissions(state, args.gcloud)
             if args.sandbox:
                 add_sandbox_hook(state)
         elif args.sandbox:
@@ -889,6 +900,7 @@ def resume_update(args, state):
     args.with_plugins = state.get('with', [])
     args.guards = state.get('guards', False)
     args.sandbox = state.get('sandbox_guard', False)
+    args.gcloud = state.get('gcloud_guard', False)
     args.overlay = [o['source'] for o in state.get('overlays', [])]
     clients = state.get('clients', ['claude', 'codex'])
     args.no_claude = 'claude' not in clients
@@ -901,9 +913,10 @@ def main(argv=None):
         prog='install', description='Install agentic-github-flow for Claude Code and Codex.')
     parser.add_argument('--with', dest='with_plugins', default='',
                         help='extra plugins, comma-separated: security, web-deploy, issue-chats')
-    parser.add_argument('--guards', nargs='?', const='', default=None, metavar='sandbox',
+    parser.add_argument('--guards', nargs='?', const='', default=None, metavar='sandbox,gcloud',
                         help='also install the guards; "--guards sandbox" adds the opt-in '
-                             'sandbox-network guard for Claude Code')
+                             'sandbox-network guard for Claude Code, "--guards gcloud" the '
+                             'opt-in Google Cloud guard (both may be named, comma-separated)')
     parser.add_argument('--overlay', action='append', default=[], metavar='GIT-URL-OR-PATH',
                         help='a company or personal overlay with an AGENTS.md (repeatable)')
     parser.add_argument('--update', action='store_true', help='pull and repeat the install')
@@ -920,6 +933,7 @@ def main(argv=None):
         parser.error('unknown guard(s) for --guards: %s (choose from %s)' % (
             ', '.join(g for g in extras if g not in GUARD_EXTRAS), ', '.join(GUARD_EXTRAS)))
     args.guards, args.sandbox = args.guards is not None, 'sandbox' in extras
+    args.gcloud = 'gcloud' in extras
     args.with_plugins = [w.strip() for w in args.with_plugins.split(',') if w.strip()]
     unknown = [w for w in args.with_plugins if w not in PLUGINS or w == 'guards']
     if unknown:
@@ -944,6 +958,7 @@ def main(argv=None):
                                        key=list(PLUGINS).index)
             args.guards = args.guards or state.get('guards', False)
             args.sandbox = args.sandbox or state.get('sandbox_guard', False)
+            args.gcloud = args.gcloud or state.get('gcloud_guard', False)
             known = [o['source'] for o in state.get('overlays', [])]
             args.overlay = known + [o for o in args.overlay if o not in known]
         return install(args, state)

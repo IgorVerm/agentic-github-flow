@@ -15,7 +15,9 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
   - security: the dependency audit names what it cannot audit and can ask osv-scanner for a
     second opinion; review-security has due dates, acceptances and stack notes, and
     `sources.md` (sources, read dates, the osv-scanner pin).
-  - web-deploy: mail-domain and EU privacy checks.
+  - web-deploy: mail-domain and EU privacy checks; a Google Cloud route (Cloud Run, IAP, Cloud
+    SQL, Secret Manager) beside Vercel + Supabase, written from Google's documentation and not
+    yet exercised in a live project (#89).
   - guards: a delete guard for Claude Code (asks, never denies); Codex prompt rules for deletes;
     Codex rules files installed as copies, because Codex skips a symlinked rules file; the
     personal-data guard's settings `exempt-dirs` and `local-mcp`, and its Codex hook installed by

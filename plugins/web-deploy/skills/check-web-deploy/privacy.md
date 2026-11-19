@@ -34,7 +34,7 @@ Vercel and Resend (read 2026-10-27). Findings use the severities of
   supervisory authority (Art. 77). None on a site with sign-up or a contact form is Medium.
   Google sign-in needs its URL too ([google-auth.md](google-auth.md)).
 - **Deletion reaches every table.** Every table holding a user's data references
-  `auth.users(id)` with `on delete cascade`, or one deletion function removes those rows and
+  `auth.users(id)` (on Cloud SQL, the application's users table) with `on delete cascade`, or one deletion function removes those rows and
   the user's storage objects; a row or object that survives the user's deletion is a finding
   (Article 17: erasure without undue delay). An export may be answered by hand on request; it
   needs no button.
@@ -46,4 +46,6 @@ Vercel and Resend (read 2026-10-27). Findings use the severities of
   unless `vercel.json` `regions` or the project settings say otherwise. Functions that handle
   personal data run next to the Supabase project (for Frankfurt, `fra1`), or the notice names
   the transfer to the United States and its safeguard; a notice that says the data stays in
-  the EU while the functions run in `iad1` is a finding.
+  the EU while the functions run in `iad1` is a finding. On Google Cloud the same holds for the
+  Cloud Run service, the Cloud SQL instance and the secrets' replication
+  ([cloud-run.md](cloud-run.md) §Region).

@@ -35,7 +35,7 @@ Ask these in one message, with your recommendation, and wait for the answers.
 
 1. **Personal machine or work machine?** For work on an employer's or a client's code, the
    organisation's AI policy comes first: ask whether the organisation has a company overlay
-   (a git repository with an `AGENTS.md`, started from
+   (a git repository, or a folder, with an `AGENTS.md` at its root, started from
    [`templates/company-overlay/AGENTS.md`](../templates/company-overlay/AGENTS.md)) and where it
    lives. Without one, tell the person that their agents will ask where the AI policy is before
    working on the organisation's code, and that someone in the organisation can make the
@@ -121,8 +121,9 @@ always the same version. Tell the person what changed:
   imports there; `--update` rewrites it.
 - Both clients: the clone registered as the plugin marketplace `agentic-github-flow`, and the
   chosen plugins installed from it.
-- With `--guards`: the guards plugin in Claude Code; the ask and deny rules merged into
-  `~/.claude/settings.json` (merged, never replaced, with a backup beside it); the Codex
+- With `--guards`: the guards plugin in Claude Code (Codex has no guards plugin: its guards are
+  the rules and hooks that follow); the ask and deny rules merged into
+  `~/.claude/settings.json` (merged, never replaced); the Codex
   execpolicy rules (git safety and delete prompts) copied into `~/.codex/rules/`; the git guard
   and the personal-data guard added to `~/.codex/hooks.json` beside the person's own entries.
   In Codex the personal-data guard denies instead of asking, because a Codex hook cannot ask;
@@ -130,7 +131,14 @@ always the same version. Tell the person what changed:
   `--update` and `--uninstall`: the installer's docstring.
 - With `--guards sandbox`, also: one `PreToolUse` entry in `~/.claude/settings.json` that runs the
   sandbox-network guard from the clone.
-- Overlays given as a git URL are cloned into `~/.agentic-github-flow/overlays/`.
+- Overlays: one given as a git URL is cloned into `~/.agentic-github-flow/overlays/`; one given
+  as a folder is used where it is, so it must stay there (Claude Code imports it by its absolute
+  path). Codex gets the overlay's text written out, so after an overlay changes, run
+  `install.sh --update` (it also pulls the cloned ones).
+- Backups: before each change to an existing `~/.claude/settings.json` or `~/.codex/hooks.json`,
+  by an install, `--update` or `--uninstall`, the installer copies it beside itself as
+  `<file>.agentic-github-flow-backup-<date>-<time>`. These copies stay; they are the person's to
+  delete.
 - Everything added is recorded in `~/.agentic-github-flow/.state/install.json`, so `--update`
   repeats it and `--uninstall` removes exactly that.
 
@@ -141,9 +149,11 @@ Nothing is sent anywhere except the git and plugin fetches: no telemetry.
 1. **The last line is `done`** and no line says `FAIL`. On a `FAIL`, go to step 6.
 2. **Codex with `--guards`:** Codex runs a new hook only after the person trusts it once: ask
    them to run `/hooks` in Codex and trust the two hooks the installer named.
-3. **The plugins are installed:** `claude plugin list` shows `agentic-github-flow-core`
-   (and each chosen plugin) from the marketplace `agentic-github-flow`; `codex plugin list`
-   the same for Codex.
+3. **The plugins are installed:** `claude plugin list` shows `agentic-github-flow-core`, each
+   chosen plugin and, with `--guards`, `agentic-github-flow-guards`, from the marketplace
+   `agentic-github-flow`. For Codex the installer's `ok codex: add …` lines are the proof (its
+   `plugin list` also lists plugins that are only available); Codex never gets the guards
+   plugin.
 4. **A fresh session loads the rules:** ask the person to start a new session in each client
    (the running ones do not reload) and ask it "Which agentic-github-flow rules and skills do you
    have?". It should name the rules (ask before a push, work in a worktree, issues as the queue)
@@ -152,9 +162,10 @@ Nothing is sent anywhere except the git and plugin fetches: no telemetry.
    work (`git init` in a temporary folder, one commit), ask the fresh session to run
    `git reset --hard`. Claude Code must refuse it (the deny list) and Codex must forbid it (the
    execpolicy rules). Then delete the scratch folder with the system's trash.
-6. **Settings that point into the plugin cache:** each install names every permission rule and
-   sandbox exclusion in `~/.claude/settings.json` that points into `~/.claude/plugins/cache/`,
-   and gives the same entry with the clone's path. Pass that list on: such an entry silently
+6. **Settings that point into the plugin cache:** if `~/.claude/settings.json` has permission
+   rules or sandbox exclusions that point into `~/.claude/plugins/cache/`, each install names
+   them and gives the same entry with the clone's path; when there are none it prints nothing.
+   Pass such a list on: such an entry silently
    stops matching after an update. The installer changes none of them; a permission change is
    the person's to make.
 
@@ -314,9 +325,9 @@ agreement, through a branch like any other change:
 
 `--update` pulls the clone and repeats what was installed. `--uninstall` removes exactly what the
 installer recorded that it added; it leaves the person's own lines in `~/.claude/CLAUDE.md` and
-`~/.codex/AGENTS.md` byte for byte as they were, and leaves the clone: delete
-`~/.agentic-github-flow` afterwards, with the person's agreement and the system's trash, to remove
-it completely. Neither combines with `--with`, `--guards` or `--overlay`; to change what is
+`~/.codex/AGENTS.md` byte for byte as they were. It leaves the clone, the backups of step 3, the
+settings files of step 5 and anything made per repository: delete those afterwards, with the
+person's agreement and the system's trash, to remove it completely. Neither combines with `--with`, `--guards` or `--overlay`; to change what is
 installed, run the installer without `--update` (step 3). On Windows, use `install.ps1` with the same options. After either, start a
 new session in each client.
 

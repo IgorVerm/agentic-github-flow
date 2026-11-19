@@ -21,7 +21,7 @@ assignee here: an assignee is the claim of whoever works on it, and the overlap 
 1. **Search first:** `gh issue list --state open --search "<key words>"`. If an open issue
    covers it, comment there (with the user's words if they are new) instead of opening a
    second one.
-2. **Write the issue.** The body starts with `🤖 <agent> (<role>):`, then: what happens (the
+2. **Write the issue.** The body starts with `🤖 <model> (<role>):`, then: what happens (the
    reporter's own words, quoted, when the user reported it); what is known from the code or a
    measurement and what is not; the first step; the check that proves it fixed; the sections
    to read (named sections, not whole documents) and the code paths it will touch, which the

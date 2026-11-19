@@ -110,7 +110,7 @@ Conflicts whose combined intent is unclear go to the user.
 ## 4. Prepare the pull request
 
 Write the title and body to a file outside the repository. The body starts with
-`🤖 <agent> (<role>):` and holds what changed and why, how it was checked, what is not covered,
+`🤖 <model> (<role>):` and holds what changed and why, how it was checked, what is not covered,
 a line `Overlap check: <result>` (step 5), a line `Efficient design: <result>` (the
 `efficient-design` skill; `no part runs repeatedly or over growing data` when that is so), and
 `Closes #<n>` for the issue it finishes (a closing keyword is right here: the merge is the

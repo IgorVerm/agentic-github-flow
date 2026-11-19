@@ -32,7 +32,7 @@ policy is and which data may go into a prompt, and follow the answer.
     include, re-opening a decision, cancelling work;
   - changes to these rules, to permission or security settings, to hooks.
 - **When the user describes a problem or asks a question, the deliverable is your assessment.**
-  Report what you found; apply a fix when asked for one.
+  Report what you found; fix it when asked to.
 - **Large work with open requirements starts with a specification:** the `spec-first` skill;
   `requirements` splits it into ready issues.
 - **Issue chats:** where `HANDOFF.md` on the default branch has *Issue chats settings*, the
@@ -101,7 +101,8 @@ Agents have destroyed hours of uncommitted work with `reset --hard` and `checkou
   so on the issue. A pull request body may close its issue with a closing keyword: the merge
   publishes it.
 - **Agents post under the user's account, so sign every comment** and every issue or pull
-  request body with `🤖 <agent> (<role>):`. An unsigned comment is the human's.
+  request body with `🤖 <model> (<role>):` (`Claude Opus 5.5`). An unsigned comment is the
+  human's.
 - **Read what the task needs:** the repository's `AGENTS.md` and `HANDOFF.md`, the issue, and
   what `HANDOFF.md` names for that work.
 - **Each repository keeps the same few documents** (the `repo-docs` skill has the layout and

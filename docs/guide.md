@@ -36,8 +36,10 @@ requires it.
   repository of your own that you alone write to, on your local `main`. Either way you decide
   every push, and nothing is merged without your word unless you switched that on for the
   repository ([How finished work lands](#how-finished-work-lands)).
-- **Another agent reviews:** before a pull request is merged, an agent that did not write it
-  reviews the exact commit.
+- **Another agent reviews larger work:** a larger or risky change is reviewed by an agent that
+  did not write it, on the exact commit; a small, low-risk change (a fix in one place, a
+  document) the author checks itself. A pull request an agent merges on its own always needs
+  that independent review.
 - **Destructive git is off the table:** no force-push, no rewritten history, no discarded
   uncommitted work, unless you ask for that exact operation. With the guards installed, hooks
   enforce this instead of trusting the agent to remember.
@@ -91,8 +93,9 @@ At every landing the agent checks how the repository lands work, and says on the
 found:
 
 - **Pull request:** the agent pushes its branch and opens a pull request, and you (or your
-  team's reviewers) merge it. This is the mode for every team's repository, and whenever GitHub
-  cannot tell.
+  team's reviewers) merge it. This is the mode for every team's repository, and whenever
+  GitHub's answer cannot settle it. When GitHub cannot be asked at all, the agent decides
+  nothing: it asks again where it can, or follows the repository's setting.
 - **Local main:** for a repository of your own that only you write to. The agent still works on
   a branch, then moves your local `main` forward to the checked commit; you push `main` when you
   want.

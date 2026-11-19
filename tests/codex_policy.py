@@ -113,8 +113,10 @@ GCLOUD_CASES = [
 
 # (command, decision, what covers it): prefix rules see the program's name at the start only.
 GCLOUD_GAPS = [
-("/opt/homebrew/bin/gcloud auth list", "none", "known-gap:full path; Claude: sandbox read deny on the credentials"),
-("env gcloud auth list", "none", "known-gap:wrapper; Claude: sandbox read deny on the credentials"),
+("/opt/homebrew/bin/gcloud auth list", "none", "known-gap:full path; Claude with sandbox.enabled: read deny on the credentials; else the written rule"),
+("env gcloud auth list", "none", "known-gap:wrapper; Claude with sandbox.enabled: read deny on the credentials; else the written rule"),
+("CLOUDSDK_CORE_PROJECT=prod gcloud run deploy", "none", "known-gap:variable in front; Claude with sandbox.enabled: read deny; else the written rule"),
+("terraform apply", "none", "known-gap:other tools on the same credentials; Claude with sandbox.enabled: read deny; else the written rule"),
 ("bash -c 'gcloud auth list'", "none", "known-gap:wrapper in execpolicy check; Codex unwraps its own bash -lc, unmeasured"),
 ("cat ~/.config/gcloud/application_default_credentials.json", "none", "known-gap:Codex rules cannot close a folder; the written rule"),
 ("psql -h 10.0.0.5 -U app prod", "none", "known-gap:a database client to production looks like any other"),

@@ -462,6 +462,7 @@ class InstallerTests(unittest.TestCase):
         self.assertFalse(os.path.lexists(copy))
         code, out = self.install('--guards', 'sandbox,gcloud')
         self.assertEqual(code, 0, out)
+        self.assertIn('closed to Bash commands only with the sandbox on', out)
         self.assertIn('Bash(gcloud *)', rules()['ask'])
         self.assertIn('Bash(cloud-sql-proxy *)', rules()['ask'])
         self.assertIn('Read(~/.config/gcloud/**)', rules()['deny'])

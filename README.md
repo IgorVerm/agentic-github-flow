@@ -260,17 +260,22 @@ An agent on your machine can use your Google Cloud login: `gcloud`, `gsutil`, `b
 makes each of those commands wait for your approval (Claude Code: an ask rule; Codex: a prompt
 rule), and in Claude Code denies reading and editing the gcloud configuration folder
 (`~/.config/gcloud/`; on Windows `%APPDATA%\gcloud`, not measured there), which holds your
-login and the Application Default Credentials file. A Read deny also closes the folder to Claude
-Code's Bash sandbox, so a command you approve still cannot read your credentials inside the
-sandbox: it runs only outside it, which asks again.
+login and the Application Default Credentials file. With Claude Code's Bash sandbox on
+(`sandbox.enabled`, which this guard does not switch on) a Read deny also closes the folder to
+every Bash command, so a command you approve still cannot read your credentials inside the
+sandbox: it runs only outside it, which asks again. Without the sandbox the Read and Edit deny
+covers only Claude's own file tools, not Bash; the installer says so when the sandbox is off.
 
 Opt-in, because an agent that deploys to Google Cloud on purpose would ask at every command. It
 is not complete: rules match a program's name at the start of a command, so a full path
-(`/opt/homebrew/bin/gcloud`) or a wrapper (`env`, `bash -c`) is not asked about (in Claude
-Code the sandbox still keeps the credentials closed); Codex rules cannot close a folder; a folder
-moved with `CLOUDSDK_CONFIG` or a key file named in `GOOGLE_APPLICATION_CREDENTIALS` is not
-covered; and a database client such as `psql` to a production database looks like one to a local
-database. The written rules still bind there. The rules: the `gcloud` key of
+(`/opt/homebrew/bin/gcloud`), a wrapper (`env`, `bash -c`) or a variable in front
+(`CLOUDSDK_CORE_PROJECT=prod gcloud …`) is not asked about, and neither are other tools that use
+the same credentials (Terraform's Google provider, `docker push` through gcloud's credential
+helper, `kubectl`, `firebase`). With the sandbox on, the credentials stay closed to those inside
+it; without it, a Bash command such as `cat` reads them. Codex rules cannot close a folder; a
+folder moved with `CLOUDSDK_CONFIG` or a key file named in `GOOGLE_APPLICATION_CREDENTIALS` is
+not covered; and a database client such as `psql` to a production database looks like one to a
+local database. The written rules still bind there. The rules: the `gcloud` key of
 `plugins/guards/policy/claude-permissions.json` and `plugins/guards/policy/gcloud.rules`.
 
 #### Setting up gcloud
@@ -302,8 +307,8 @@ your own terminal (in Claude Code, `! <command>`): the logins open a browser, an
    Client role (`roles/cloudsql.client`).
 
 **With `--guards gcloud`:** every `gcloud`, `gsutil`, `bq` and `cloud-sql-proxy` command an
-agent proposes asks you first, and in Claude Code its sandbox cannot read the gcloud folder, so a
-command you approve runs only outside the sandbox, which asks again. Setting up and connecting
+agent proposes asks you first, and in Claude Code with the sandbox on the sandbox cannot read the
+gcloud folder, so a command you approve runs only outside the sandbox, which asks again. Setting up and connecting
 as above, in your own terminal, is not affected. Keep a proxy to a production database in your
 own terminal too: an agent's database client connected to it looks like any other, and the
 guard does not see it.

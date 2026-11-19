@@ -53,12 +53,14 @@ def main():
                          if entries.count(r) > 1]
             findings += [f'gcloud {name}: {r} is already a default rule' for r in entries
                          if r in default]
-        for program in ('gcloud', 'gsutil', 'bq', 'cloud-sql-proxy'):
+        for program in ('gcloud', 'gsutil', 'bq', 'cloud-sql-proxy', 'cloud_sql_proxy'):
             for rule in (f'Bash({program})', f'Bash({program} *)'):
                 if rule not in gcloud['ask']:
                     findings.append(f'gcloud ask: missing {rule}')
-        if 'Read(~/.config/gcloud/**)' not in gcloud['deny']:
-            findings.append('gcloud deny: missing Read(~/.config/gcloud/**)')
+        for folder in ('~/.config/gcloud/**', '~/AppData/Roaming/gcloud/**'):
+            for tool in ('Read', 'Edit'):
+                if f'{tool}({folder})' not in gcloud['deny']:
+                    findings.append(f'gcloud deny: missing {tool}({folder})')
         print(f'gcloud: {len(gcloud["ask"])} ask and {len(gcloud["deny"])} deny rules')
     for finding in findings:
         print('FAIL ' + finding)

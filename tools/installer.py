@@ -40,7 +40,8 @@ What it does, per client (Claude Code, Codex):
   `gcloud` lists of claude-permissions.json merged like the others (ask before gcloud, gsutil,
   bq and cloud-sql-proxy; deny reading and editing the gcloud configuration folder) and
   policy/gcloud.rules copied into ~/.codex/rules/ like the other rules (prompt for the same
-  programs). Kept by a rerun and --update, removed by --uninstall like the rest.
+  programs). Kept by a rerun and --update, removed by --uninstall like the rest. Without
+  "sandbox.enabled" the folder deny covers only Claude's own file tools: the installer notes it.
 - Versioned paths (Claude Code, read-only): each install and --update names every permission
   rule and sandbox exclusion in ~/.claude/settings.json that points into the plugin cache, whose
   folder names the version, and gives the same entry with this clone's path, which stays the
@@ -356,6 +357,12 @@ def merge_permissions(state, gcloud=False):
         dump_json(path, data)
     say('ok', 'claude: %d ask and deny rules merged into %s (%d new)' % (
         len(wanted['ask']) + len(wanted['deny']), path, added_now))
+    sandbox = data.get('sandbox') if isinstance(data.get('sandbox'), dict) else {}
+    if gcloud and (WINDOWS or sandbox.get('enabled') is not True):
+        say('note', 'claude: the gcloud folder is closed to Bash commands only with the sandbox on '
+                    '("sandbox.enabled" true in %s%s); without it the deny covers only Claude\'s '
+                    'own file tools' % (path, '; Claude Code has no sandbox on native Windows'
+                                        if WINDOWS else ''))
 
 
 def linked(path, what):

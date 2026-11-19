@@ -124,9 +124,10 @@ Cloud* (read 2026-11-19).
 - [ ] **IAM & Admin → Audit Logs**: Data Access logs (*Data Read*, *Data Write*) on for Cloud SQL,
       Identity-Aware Proxy and Secret Manager. They are off by default and cost money: the issue
       notes the choice.
-- [ ] **IAM & Admin → Organization Policies**: *Restrict Public IP access on Cloud SQL instances*
-      and *Restrict Authorized Networks on Cloud SQL instances* enforced (they apply only to new
-      settings), *Allowed ingress settings (Cloud Run)* limited to the setting in use, *Domain
+- [ ] **IAM & Admin → Organization Policies**: *Restrict Authorized Networks on Cloud SQL
+      instances* enforced, and *Restrict Public IP access on Cloud SQL instances* too when the
+      instance uses private IP only (enforcing it rules out the public IP that
+      [cloud-sql.md](cloud-sql.md) accepts with the connector; both apply only to new settings), *Allowed ingress settings (Cloud Run)* limited to the setting in use, *Domain
       restricted sharing* set to the organisation's customer ID, and, for an EU promise,
       *Resource Location Restriction* `in:eu-locations`. Service account keys: the section below.
 - [ ] **The live response**: `curl -sI https://<production URL>` (and the `run.app` URL if it is

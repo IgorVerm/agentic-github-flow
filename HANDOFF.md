@@ -15,12 +15,17 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
   - security: the dependency audit names what it cannot audit and can ask osv-scanner for a
     second opinion; review-security has due dates, acceptances and stack notes, and
     `sources.md` (sources, read dates, the osv-scanner pin).
-  - web-deploy: mail-domain and EU privacy checks.
+  - web-deploy: mail-domain and EU privacy checks; a Google Cloud route (Cloud Run, IAP, Cloud
+    SQL, Secret Manager) beside Vercel + Supabase, written from Google's documentation and not
+    yet exercised in a live project (#89).
   - guards: a delete guard for Claude Code (asks, never denies); Codex prompt rules for deletes;
     Codex rules files installed as copies, because Codex skips a symlinked rules file; the
     personal-data guard's settings `exempt-dirs` and `local-mcp`, and its Codex hook installed by
     `--guards` (#15); the opt-in sandbox-network guard for Claude Code (`--guards sandbox`,
-    #20), wired by the installer in `~/.claude/settings.json`, not by the plugin's hooks.
+    #20), wired by the installer in `~/.claude/settings.json`, not by the plugin's hooks; the
+    opt-in Google Cloud guard (`--guards gcloud`, #89): ask rules for `gcloud`, `gsutil`, `bq`
+    and `cloud-sql-proxy`, the gcloud configuration folder closed to reads, and Codex prompt
+    rules (`plugins/guards/policy/gcloud.rules`); permission rules only, no hook.
   - issue-chats (new, opt-in): one issue per chat, hand-over to the next ready issue, archiving
     only once a chat's work is on GitHub (also when a successor's pushed branch holds it); a
     side chat started with `start_session` only once its work landed or its pull request merged. The method: `plugins/issue-chats/skills/issue-handover/method.md`.
@@ -102,7 +107,7 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
 | a skill | its `SKILL.md`, `plugins/core/skills/repo-docs/skill-standard.md`, `tests/skills_format.py` |
 | the installer | `tools/installer.py` (its docstring owns the behaviour), `tests/installer.py`, `docs/install.md` (the installing agent's guide, kept true to the docstring) |
 | the documents for users | `README.md` (the entry), `docs/guide.md` (for colleagues: what it does, what to ask for), `docs/install.md` (for the installing agent) |
-| the guards | `plugins/guards/scripts/*.py` headers, `plugins/guards/policy/*.rules`, `tests/git_guard.py`, `tests/delete_guard.py` (cases in `tests/delete_guard_cases.py`; `tests/delete_guard_differential.py` checks it never asks less than before issue 4), `tests/personal_data_guard.py`, `tests/sandbox_network_guard.py` (with `--guards sandbox` in `tools/installer.py`), `tests/codex_policy.py` |
+| the guards | `plugins/guards/scripts/*.py` headers, `plugins/guards/policy/*.rules`, `tests/git_guard.py`, `tests/delete_guard.py` (cases in `tests/delete_guard_cases.py`; `tests/delete_guard_differential.py` checks it never asks less than before issue 4), `tests/personal_data_guard.py`, `tests/sandbox_network_guard.py` (with `--guards sandbox` in `tools/installer.py`), `tests/claude_permissions.py`, `tests/codex_policy.py` (part 3: the opt-in `gcloud.rules`) |
 | automatic merging and the unasked push | `plugins/core/scripts/merge_pr.py`, `push_branch.py` and `review_verdict.py` headers, `plugins/core/skills/ship-change/SKILL.md` steps 6 to 8, `plugins/core/skills/review-change/SKILL.md`, `DESIGN_DECISIONS.md`, `tests/merge_pr.py`, `tests/push_branch.py`, `tests/review_verdict.py` |
 | landing modes | `plugins/core/scripts/landing.py` and `promote_main.py` headers, `plugins/core/skills/ship-change/` (`SKILL.md`, `local-main.md`), `tests/landing.py`, `tests/promote_main.py` |
 | worktrees and cleanup | `plugins/core/scripts/*.py` headers, `plugins/core/skills/cleanup-merged/SKILL.md`, `tests/worktree_tools.py`, `tests/new_worktree.py`, `tests/overlap_check.py` |

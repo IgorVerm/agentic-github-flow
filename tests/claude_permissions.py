@@ -6,7 +6,9 @@ and deny rules that the installer merges with --guards: it parses, no rule appea
 both lists, there is no allow list, and every plain git rule has its `git -C *` twin. Claude rules
 match command text, and `git -C <dir>` puts the folder before the subcommand, so a rule without
 its twin is bypassed by the spelling agents use most. A rule that already starts with `git *` or
-`git -c` needs no twin.
+`git -c` needs no twin. The opt-in `gcloud` lists (--guards gcloud, #89): ask and deny only, no
+duplicate and no rule the default lists already hold, each program both bare and with arguments,
+and the gcloud configuration folder closed to reads.
 """
 import json
 import os
@@ -19,7 +21,8 @@ POLICY = os.path.join(HERE, '..', 'plugins', 'guards', 'policy', 'claude-permiss
 
 def main():
     with open(POLICY, encoding='utf-8') as f:
-        rules = json.load(f)['permissions']
+        policy = json.load(f)
+    rules = policy['permissions']
     findings = []
     if set(rules) != {'ask', 'deny'}:
         findings.append('permissions must hold exactly ask and deny, found %s' % sorted(rules))
@@ -39,6 +42,26 @@ def main():
     for rule in ('Bash(git push --force*)', 'Bash(git reset --hard*)', 'Bash(git push*)'):
         if rule not in rules['deny'] + rules['ask']:
             findings.append(f'missing core rule {rule}')
+    gcloud = {k: v for k, v in policy.get('gcloud', {}).items() if k != 'description'}
+    if set(gcloud) != {'ask', 'deny'}:
+        findings.append('gcloud must hold exactly ask and deny, found %s' % sorted(gcloud))
+    else:
+        default = set(rules['ask']) | set(rules['deny'])
+        for name in ('ask', 'deny'):
+            entries = gcloud[name]
+            findings += [f'gcloud {name}: duplicate {r}' for r in sorted(set(entries))
+                         if entries.count(r) > 1]
+            findings += [f'gcloud {name}: {r} is already a default rule' for r in entries
+                         if r in default]
+        for program in ('gcloud', 'gsutil', 'bq', 'cloud-sql-proxy', 'cloud_sql_proxy'):
+            for rule in (f'Bash({program})', f'Bash({program} *)'):
+                if rule not in gcloud['ask']:
+                    findings.append(f'gcloud ask: missing {rule}')
+        for folder in ('~/.config/gcloud/**', '~/AppData/Roaming/gcloud/**'):
+            for tool in ('Read', 'Edit'):
+                if f'{tool}({folder})' not in gcloud['deny']:
+                    findings.append(f'gcloud deny: missing {tool}({folder})')
+        print(f'gcloud: {len(gcloud["ask"])} ask and {len(gcloud["deny"])} deny rules')
     for finding in findings:
         print('FAIL ' + finding)
     print('OK' if not findings else f'{len(findings)} findings')

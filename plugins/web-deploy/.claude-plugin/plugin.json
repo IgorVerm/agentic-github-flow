@@ -1,7 +1,7 @@
 {
   "name": "agentic-github-flow-web-deploy",
-  "version": "0.2.0",
-  "description": "Pre-deploy hardening check for a website on Vercel with Supabase and optional Google sign-in, including its mail domain and EU privacy.",
+  "version": "0.3.0",
+  "description": "Pre-deploy hardening check for a website on Vercel with Supabase (optional Google sign-in) or on Google Cloud (Cloud Run, Cloud SQL, IAP, Secret Manager), including its mail domain and EU privacy.",
   "author": {
     "name": "MAI-Tech",
     "url": "https://mai-tech.be"
@@ -13,6 +13,7 @@
     "security",
     "vercel",
     "supabase",
+    "google-cloud",
     "deploy"
   ],
   "dependencies": [

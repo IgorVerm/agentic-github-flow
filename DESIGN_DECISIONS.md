@@ -16,6 +16,23 @@ signatures (`Claude Code`, `Codex`) stay valid. **Binds:** `rules/core.md` §Wor
 `review-change` (the `--agent` value), `requirements`, `open-issue`, `ship-change`,
 `local-main.md`, `review-security`. **Detail:** issue #95.
 
+## Google Cloud guard: ask, by permission rules, opt-in, 2026-11-19
+
+**Decision (the maintainer):** "A, opt-in", choosing from the options on issue #89: ask before
+`gcloud`, `gsutil`, `bq` and `cloud-sql-proxy` and deny reading the gcloud configuration folder
+with permission rules (A), over a new hook that refuses with a per-folder exemption (B) or no
+guard (C); and opt-in as `--guards gcloud` over a default of `--guards`.
+**What:** the `gcloud` lists of `plugins/guards/policy/claude-permissions.json` and
+`plugins/guards/policy/gcloud.rules`, installed only with `--guards gcloud`. No hook: a user's
+deny and ask rules cannot be relaxed by a repository, so a per-repository exemption would have
+needed one, and the ask leaves each command to the user instead.
+**Why:** an agent can act with the user's own Google Cloud login on live data; most users of the
+team edition do not use Google Cloud, and an agent that deploys there on purpose would ask at
+every command.
+**Binds:** `tools/installer.py` (`GUARD_EXTRAS`), `docs/install.md` §The Google Cloud guard,
+`tests/claude_permissions.py`, `tests/codex_policy.py`, `tests/installer.py`.
+**Detail:** issue #89.
+
 ## A Codex issue chat starts its integrator and waits for the receipt, 2026-11-18
 
 **Decision (the maintainer):** "zorg dat voortaan elke codex issuechat zelf de integrator start

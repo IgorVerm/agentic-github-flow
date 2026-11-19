@@ -64,7 +64,7 @@ were read, are in [sources.md](sources.md).
    configuration, supply chain, error handling and logging, agents and tools), plus the stack
    notes that match the repository. Trace each user input to where it is used; the diff alone
    does not show the sink.
-6. **Report** on the owning issue or pull request, signed `🤖 <agent> (reviewer):`, in the
+6. **Report** on the owning issue or pull request, signed `🤖 <model> (reviewer):`, in the
    format of `checklist.md` §Report, severity first; then the areas confirmed clean, one line
    each; then what was not checked. No secret value, no personal data, environment variables by
    name only. A finding that blocks the merge says so; `checklist.md` §Severity owns what each

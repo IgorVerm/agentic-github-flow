@@ -64,7 +64,7 @@ repository's landing mode), with the user's yes before any push.
    tell the user. Where issue chats run, rename this chat to
    `<title prefix>Requirements · #<parent> · <topic>` as soon as the parent exists (work that
    is one issue without a parent: that issue's number). Bodies
-   start `🤖 <agent> (requirements):`. Labels: each package the ready label (and its area
+   start `🤖 <model> (requirements):`. Labels: each package the ready label (and its area
    label); the parent the ready label with `after #n` for each package,
    so whoever picks it up runs its end-to-end check and closes it once its packages are merged
    and the check passed; other labels as the repository's documents say. An issue that carried

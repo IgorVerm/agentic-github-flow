@@ -3,6 +3,19 @@
 Rulings of the maintainers named in `HANDOFF.md`, newest first, with their words. Detail lives on
 the linked issue.
 
+## Signatures name the model, 2026-11-19
+
+**Decision (the maintainer):** "bijkomend wil ik dat elke github issue niet enkel signed is als
+claude maar als claude opus 5.5 of claude fable 5.2" (in addition, I want every GitHub issue
+signed not just as Claude but as Claude Opus 5.5 or Claude Fable 5.2), "zodat ik weet welk model
+het deed" (so that I know which model did it). **What:** agents sign comments, issues and pull
+request bodies `🤖 <model> (<role>):`, where `<model>` is the client and its model without
+parentheses: `Claude Opus 5.5`, `Claude Fable 5.2`, and for Codex `Codex` with its model (for
+example `Codex GPT-5.5`). The parsers of signed comments accept any such name, so earlier
+signatures (`Claude Code`, `Codex`) stay valid. **Binds:** `rules/core.md` §Work and documents,
+`review-change` (the `--agent` value), `requirements`, `open-issue`, `ship-change`,
+`local-main.md`, `review-security`. **Detail:** issue #95.
+
 ## A Codex issue chat starts its integrator and waits for the receipt, 2026-11-18
 
 **Decision (the maintainer):** "zorg dat voortaan elke codex issuechat zelf de integrator start

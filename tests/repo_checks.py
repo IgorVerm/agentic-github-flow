@@ -11,6 +11,10 @@
   every plugin folder is listed, the repository URL is the same everywhere it is written, and a
   plugin whose files differ from the default branch (origin/main, when fetched) has a new version;
 - copies: the security plugin's gitignore-secrets is byte-identical to templates/gitignore-secrets;
+- installer commands: every option on a line of README.md or docs/*.md that runs install.sh or
+  install.ps1, and every row of an options table (a row starting with a backticked `--option`),
+  is one tools/installer.py accepts, with a known plugin after --with and a known guard after
+  --guards, so a guide never names a stale command (#91);
 - review dates: a DESIGN_DECISIONS.md entry with `**Review by:** YYYY-MM-DD` fails the check once
   that date has passed, so the value it fixes is looked at again (#77).
 The author's name is assembled below, so this file does not count as a mention.
@@ -140,7 +144,7 @@ for plugin in plugins:
     elif name in codex_entries:
         fail('the guards plugin holds Claude hooks only; keep it out of the Codex marketplace')
     repo_urls |= {claude.get('repository'), codex.get('repository'), (entry or {}).get('repository')}
-for rel in ('install.sh', 'install.ps1', 'README.md'):
+for rel in ('install.sh', 'install.ps1', 'README.md', 'docs/install.md'):
     repo_urls |= {u[:-4] for u in re.findall(r'https://github\.com/[\w.-]+/agentic-github-flow\.git',
                                             read(rel))}
 if len(repo_urls - {None}) != 1:
@@ -155,6 +159,28 @@ if base.returncode == 0:
                 json.loads(old.stdout).get('version') == manifests[(plugin, '.claude-plugin')].get('version'):
             fail('%s changed since origin/main but its version did not: installed copies would '
                  'keep the old files' % plugin)
+
+# installer commands in the user documents (#91)
+installer = read('tools/installer.py')
+accepted = set(re.findall(r"add_argument\('(--[\w-]+)'", installer)) - {'--resume-update'}
+known = {'--with': set(re.findall(r"'([\w-]+)': 'agentic-github-flow-", installer)) - {'core', 'guards'},
+         '--guards': set(re.findall(r"'(\w+)'", re.search(r'GUARD_EXTRAS = \(([^)]*)\)',
+                                                         installer).group(1)))}
+OPTION = re.compile(r'(?<![\w-])(--[a-z][\w-]*)(?: ([a-z][\w,-]*))?')
+for rel in ['README.md'] + sorted(f for f in files if f.startswith('docs/') and f.endswith('.md')):
+    for number, line in enumerate(read(rel).splitlines(), 1):
+        if re.search(r'install\.(?:sh|ps1)', line):
+            text = re.split(r'install\.(?:sh|ps1)', line, maxsplit=1)[1]
+        elif re.match(r'\|\s*`--', line):
+            text = line.split('|')[1]
+        else:
+            continue
+        for option, value in OPTION.findall(text):
+            if option not in accepted:
+                fail('%s:%d: the installer has no option %s' % (rel, number, option))
+            elif option in known and value and not set(value.split(',')) <= known[option]:
+                fail('%s:%d: %s %s names what the installer does not know (choose from %s)'
+                     % (rel, number, option, value, ', '.join(sorted(known[option]))))
 
 # copies
 if read('templates/gitignore-secrets') != read('plugins/security/scripts/gitignore-secrets'):

@@ -105,7 +105,8 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
 |---|---|
 | the always-loaded rules | `rules/core.md`, `AGENTS.md` §Rule budget |
 | a skill | its `SKILL.md`, `plugins/core/skills/repo-docs/skill-standard.md`, `tests/skills_format.py` |
-| the installer | `tools/installer.py` (its docstring owns the behaviour), `tests/installer.py` |
+| the installer | `tools/installer.py` (its docstring owns the behaviour), `tests/installer.py`, `docs/install.md` (the installing agent's guide, kept true to the docstring) |
+| the documents for users | `README.md` (the entry), `docs/guide.md` (for colleagues: what it does, what to ask for), `docs/install.md` (for the installing agent) |
 | the guards | `plugins/guards/scripts/*.py` headers, `plugins/guards/policy/*.rules`, `tests/git_guard.py`, `tests/delete_guard.py` (cases in `tests/delete_guard_cases.py`; `tests/delete_guard_differential.py` checks it never asks less than before issue 4), `tests/personal_data_guard.py`, `tests/sandbox_network_guard.py` (with `--guards sandbox` in `tools/installer.py`), `tests/claude_permissions.py`, `tests/codex_policy.py` (part 3: the opt-in `gcloud.rules`) |
 | automatic merging and the unasked push | `plugins/core/scripts/merge_pr.py`, `push_branch.py` and `review_verdict.py` headers, `plugins/core/skills/ship-change/SKILL.md` steps 6 to 8, `plugins/core/skills/review-change/SKILL.md`, `DESIGN_DECISIONS.md`, `tests/merge_pr.py`, `tests/push_branch.py`, `tests/review_verdict.py` |
 | landing modes | `plugins/core/scripts/landing.py` and `promote_main.py` headers, `plugins/core/skills/ship-change/` (`SKILL.md`, `local-main.md`), `tests/landing.py`, `tests/promote_main.py` |

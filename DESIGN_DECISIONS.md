@@ -16,7 +16,7 @@ needed one, and the ask leaves each command to the user instead.
 **Why:** an agent can act with the user's own Google Cloud login on live data; most users of the
 team edition do not use Google Cloud, and an agent that deploys there on purpose would ask at
 every command.
-**Binds:** `tools/installer.py` (`GUARD_EXTRAS`), `README.md` §Google Cloud guard,
+**Binds:** `tools/installer.py` (`GUARD_EXTRAS`), `docs/install.md` §The Google Cloud guard,
 `tests/claude_permissions.py`, `tests/codex_policy.py`, `tests/installer.py`.
 **Detail:** issue #89.
 

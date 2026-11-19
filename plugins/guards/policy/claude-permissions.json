@@ -203,5 +203,26 @@
       "Edit(~/.gitconfig)",
       "Edit(~/.config/git/**)"
     ]
+  },
+  "gcloud": {
+    "description": "Opt-in (--guards gcloud): ask before the Google Cloud command-line programs, and close the gcloud configuration folder, which holds the user's credentials and the Application Default Credentials file, to reads and edits (in Claude Code a Read deny also closes the folder to the Bash sandbox). Issue #89.",
+    "ask": [
+      "Bash(gcloud)",
+      "Bash(gcloud *)",
+      "Bash(gsutil)",
+      "Bash(gsutil *)",
+      "Bash(bq)",
+      "Bash(bq *)",
+      "Bash(cloud-sql-proxy)",
+      "Bash(cloud-sql-proxy *)",
+      "Bash(cloud_sql_proxy)",
+      "Bash(cloud_sql_proxy *)"
+    ],
+    "deny": [
+      "Read(~/.config/gcloud/**)",
+      "Edit(~/.config/gcloud/**)",
+      "Read(~/AppData/Roaming/gcloud/**)",
+      "Edit(~/AppData/Roaming/gcloud/**)"
+    ]
   }
 }

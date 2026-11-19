@@ -82,10 +82,11 @@ options: [install.md, step 2](install.md#2-ask-the-decisions)):
 | Part | What it adds | Want it when |
 |---|---|---|
 | Security | a review checklist, a secret scanner that never prints values, a dependency audit against the OSV database | you change authentication, access rules, secrets, dependencies or a public service's input handling |
-| Web-deploy | a hardening check of a Vercel and Supabase site, with Google sign-in, its mail domain and EU privacy, before it goes live (brings security) | you put such a site in production |
+| Web-deploy | a hardening check of a Vercel and Supabase site (with Google sign-in) or a Google Cloud site (Cloud Run, Cloud SQL, IAP, Secret Manager), its mail domain and EU privacy, before it goes live (brings security) | you put such a site in production |
 | Issue chats | one chat per GitHub issue: when its branch is ready, it starts the chat for the next ready issue, then sees its own pull request through to the merge and archives itself | you have a queue of ready issues and want agents to work through it |
 | Guards | hooks that refuse destructive git commands and ask before destructive deletes and before personal data leaves the machine | always at work, and wherever you want the rules enforced rather than remembered |
 | Sandbox-network guard | for Claude Code's Bash sandbox: turns away network calls that would fail inside it and names the form that runs | you run Claude Code with its sandbox on |
+| Google Cloud guard | asks before every `gcloud`, `gsutil`, `bq` and `cloud-sql-proxy` command an agent proposes and closes your gcloud login folder to it (fully only with Claude Code's sandbox on) | you are signed in to Google Cloud on the machine where agents work |
 
 ## How finished work lands
 

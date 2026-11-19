@@ -47,12 +47,15 @@ Ask these in one message, with your recommendation, and wait for the answers.
 3. **Which opt-in parts?** Explain each in a line (the person's view of them:
    [guide.md, Opt-in parts](guide.md#opt-in-parts)):
    - `--with security`: security review, secret scanner, dependency audit;
-   - `--with web-deploy`: the pre-deploy check of a Vercel and Supabase site (brings security);
+   - `--with web-deploy`: the pre-deploy check of a Vercel and Supabase site or a Google Cloud
+     site on Cloud Run, Cloud SQL, IAP and Secret Manager (brings security);
    - `--with issue-chats`: one chat per GitHub issue, handing over to the next ready issue;
    - `--guards`: hooks that refuse destructive git commands and ask before destructive deletes
      and before personal data leaves the machine. Recommend it, at work certainly;
    - `--guards sandbox`: the guards plus the sandbox-network guard, for Claude Code users who run
-     its Bash sandbox (step 5).
+     its Bash sandbox (step 5);
+   - `--guards gcloud`: the guards plus the Google Cloud guard, for people who are signed in to
+     Google Cloud on this machine (step 5); `--guards sandbox,gcloud` for both.
 4. **Which clients?** Both by default; `--no-claude` or `--no-codex` leaves one alone. A client
    that is not on `PATH`: `--claude-bin <path>` or `--codex-bin <path>`.
 5. **Their work identity** (for `--guards`): the personal-data guard knows the person's
@@ -85,6 +88,7 @@ The options, all optional, combined as the person decided:
 | `--with security,web-deploy,issue-chats` | also install those plugins (any of them); `web-deploy` brings `security` |
 | `--guards` | also install the guards |
 | `--guards sandbox` | the guards plus the opt-in sandbox-network guard (Claude Code) |
+| `--guards gcloud` | the guards plus the opt-in Google Cloud guard (both clients) |
 | `--overlay <git-url-or-path>` | add a company or personal overlay (repeatable) |
 | `--no-claude`, `--no-codex` | leave one client alone |
 | `--claude-bin <path>`, `--codex-bin <path>` | a client that is not on `PATH` |
@@ -131,6 +135,8 @@ always the same version. Tell the person what changed:
   `--update` and `--uninstall`: the installer's docstring.
 - With `--guards sandbox`, also: one `PreToolUse` entry in `~/.claude/settings.json` that runs the
   sandbox-network guard from the clone.
+- With `--guards gcloud`, also: the Google Cloud ask and deny rules merged into
+  `~/.claude/settings.json` like the others, and a third rules file copied into `~/.codex/rules/`.
 - Overlays: one given as a git URL is cloned into `~/.agentic-github-flow/overlays/`; one given
   as a folder is used where it is, so it must stay there (Claude Code imports it by its absolute
   path). Codex gets the overlay's text written out, so after an overlay changes, run
@@ -210,6 +216,62 @@ in `${XDG_CONFIG_HOME:-~/.config}/agentic-github-flow/sandbox-scripts`. An entry
 `rsync *` also lets local copies run outside the sandbox: add only the entries the person means.
 What it refuses and the forms it teaches: the header of
 [`plugins/guards/scripts/pre_tool_sandbox_network.py`](../plugins/guards/scripts/pre_tool_sandbox_network.py).
+
+### The Google Cloud guard (`--guards gcloud`)
+
+An agent on the machine can use the person's Google Cloud login: `gcloud`, `gsutil`, `bq` and
+`cloud-sql-proxy` act with their credentials on live projects and data. The guard makes each of
+those commands wait for the person's approval (Claude Code: an ask rule; Codex: a prompt rule),
+and in Claude Code denies reading and editing the gcloud configuration folder
+(`~/.config/gcloud/`; on Windows `%APPDATA%\gcloud`, not measured there), which holds the login
+and the Application Default Credentials file. With Claude Code's Bash sandbox on
+(`sandbox.enabled`, which this guard does not switch on) the deny also closes the folder to every
+Bash command, so an approved command runs only outside the sandbox, which asks again. Without the
+sandbox the deny covers only Claude's own file tools, not Bash; the installer says so.
+
+It is not complete: rules match a program's name at the start of a command, so a full path
+(`/opt/homebrew/bin/gcloud`), a wrapper (`env`, `bash -c`), a variable in front
+(`CLOUDSDK_CORE_PROJECT=prod gcloud …`) and other tools on the same credentials (Terraform's
+Google provider, `docker push` through gcloud's credential helper, `kubectl`, `firebase`) are
+not asked about; with the sandbox on the credentials stay closed to them inside it, without it a
+command such as `cat` reads them. Codex rules cannot close a folder; a folder moved with
+`CLOUDSDK_CONFIG` or a key file named in `GOOGLE_APPLICATION_CREDENTIALS` is not covered; and a
+database client such as `psql` to a production database looks like one to a local database. The
+written rules still bind there. The rules: the `gcloud` key of
+[`plugins/guards/policy/claude-permissions.json`](../plugins/guards/policy/claude-permissions.json)
+and [`plugins/guards/policy/gcloud.rules`](../plugins/guards/policy/gcloud.rules).
+
+**Setting up gcloud.** Give the person these steps, each with Google's page
+(docs.cloud.google.com, read 2026-11-19), to run in their own terminal (in Claude Code,
+`! <command>`): the logins open a browser, and they are theirs.
+
+1. **Install** the gcloud CLI: *Install the Google Cloud CLI* (`sdk/docs/install-sdk`). macOS
+   and Linux: the archive and `./google-cloud-sdk/install.sh`; Windows:
+   `GoogleCloudSDKInstaller.exe`; then a new terminal.
+2. **Sign in and pick the project:** `gcloud init` signs in and sets a default configuration,
+   including the project; later `gcloud auth login` and `gcloud config set project <project id>`
+   (*Authenticate for the gcloud CLI*, `docs/authentication/gcloud`; *Managing gcloud CLI
+   configurations*, `sdk/docs/configurations`). A configuration per project
+   (`gcloud config configurations create <name>`) keeps a production project from being the
+   default by accident.
+3. **Application Default Credentials**, for code and tools on the machine that call Google (the
+   Cloud SQL Auth Proxy, client libraries): `gcloud auth application-default login` (*Set up ADC
+   for a local development environment*, `docs/authentication/set-up-adc-local-dev-environment`).
+   It writes `application_default_credentials.json` into the gcloud folder. No service account
+   key file.
+4. **Cloud SQL through the Auth Proxy** (*Connect using the Cloud SQL Auth Proxy*,
+   `sql/docs/postgres/connect-auth-proxy`): download the `cloud-sql-proxy` binary for the
+   system, then `./cloud-sql-proxy --port 5432 <instance connection name>` (the name is
+   `<project>:<region>:<instance>`; `gcloud sql instances describe <instance>` shows it), and
+   `psql "host=127.0.0.1 dbname=<db> user=<user>"`. With IAM database authentication add
+   `--auto-iam-authn`; the database user is then the person's full e-mail address (*Log in using
+   IAM database authentication*, `sql/docs/postgres/iam-logins`). The account needs the Cloud SQL
+   Client role (`roles/cloudsql.client`).
+
+With the guard, every one of those commands an agent proposes asks first; the person's own
+terminal is not affected. A proxy to a production database stays in the person's own terminal
+too: an agent's database client connected to it looks like any other, and the guard does not
+see it.
 
 ### Issue chats without a click (`--with issue-chats`)
 

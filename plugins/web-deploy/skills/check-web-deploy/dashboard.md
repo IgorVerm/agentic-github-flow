@@ -5,8 +5,12 @@ the project, fill in the project's names, drop the rest, translate it into the u
 and post it as one signed comment on the owning issue after the findings. Each line says where
 to look and what the correct state is; the user ticks it or writes what they see. An agent never
 opens these dashboards itself. The sources behind each line are the same as in
-[supabase.md](supabase.md), [vercel.md](vercel.md), [mail.md](mail.md), [privacy.md](privacy.md)
-and [google-auth.md](google-auth.md).
+[supabase.md](supabase.md), [vercel.md](vercel.md), [mail.md](mail.md), [privacy.md](privacy.md),
+[google-auth.md](google-auth.md), [cloud-run.md](cloud-run.md), [iap.md](iap.md) and
+[cloud-sql.md](cloud-sql.md); the Google Cloud lines below also rest on Google's *Create,
+edit, or delete budgets*, *Enable Data Access audit logs*, *Cloud SQL organization policies*,
+*Restrict resource locations* and the help article *Privacy compliance and records for Google
+Cloud* (read 2026-11-19).
 
 ## Supabase (Dashboard → project)
 
@@ -69,9 +73,10 @@ and [google-auth.md](google-auth.md).
 - [ ] **Supabase → Project Settings**: the project's region is in the EU or EEA (Frankfurt,
       Ireland, Paris, Stockholm; London and Zurich are outside both), or the privacy notice names
       the region and its transfer safeguard ([privacy.md](privacy.md)).
-- [ ] **Processors**: Supabase, Vercel, the mail provider and any analytics provider are named
-      in the privacy notice and in the record of processing, and each processor has a DPA in
-      force (Supabase's, Vercel's and Resend's are part of their terms); a provider that acts as
+- [ ] **Processors**: Supabase and Vercel (or Google Cloud), the mail provider and any analytics
+      provider are named in the privacy notice and in the record of processing, and each
+      processor has a DPA in force (Supabase's, Vercel's and Resend's are part of their terms;
+      Google Cloud's: §Google Cloud below); a provider that acts as
       its own controller (many embeds) is named as a recipient instead.
 - [ ] **Record of processing** (GDPR Art. 30) exists: the under-250-employees exemption does not
       apply to processing that is not occasional, such as user accounts.
@@ -91,6 +96,43 @@ and [google-auth.md](google-auth.md).
       unless the issue says otherwise.
 - [ ] **Credentials**: unused OAuth clients deleted; the client secret rotated if it ever left
       the two places it belongs (Supabase's provider setting and the local ignored `.env`).
+
+## Google Cloud (when the site runs on Cloud Run)
+
+- [ ] **Project**: it belongs to the organisation's Google Cloud organisation, not to a personal
+      account; at least two people hold the owner role through a group, with 2-step
+      verification enforced in the Workspace admin console.
+- [ ] **Billing → Budgets & alerts**: a budget with e-mail alerts on the project (an alert caps
+      nothing; spend cap budgets exist for some services).
+- [ ] **IAM & Admin → Privacy & Security**: the Cloud Data Processing Addendum is accepted, or the
+      organisation's Google Cloud agreement already incorporates it. Accepting it for Workspace
+      is not documented to cover Google Cloud: confirm it here separately.
+- [ ] **Security → Identity-Aware Proxy**: IAP is on for the service (on the Cloud Run service, or
+      on the load balancer's backend service, not both); the principals with *IAP-secured Web App
+      User* are a group of the organisation or named accounts, never `allUsers` or
+      `allAuthenticatedUsers`; the OAuth client is Google-managed unless the issue names external
+      users.
+- [ ] **Cloud Run → the service**: region as the privacy notice says; authentication required (no
+      public invoker); ingress as [cloud-run.md](cloud-run.md) §Who can reach the service; the
+      service account is the project's own, not the Compute Engine default; the default
+      `run.app` URL disabled when users come through a load balancer.
+- [ ] **Cloud SQL → the instance**: same region as the service; *Connections*: no authorized
+      networks, SSL mode *Allow only SSL connections* or stricter; *Backups*: automated backups and
+      point-in-time recovery on, retention as documented; deletion protection on.
+- [ ] **Secret Manager**: each secret's permissions name only the runtime service account and the
+      administrators; replication in EU regions when the data must stay in the EU.
+- [ ] **IAM & Admin → Audit Logs**: Data Access logs (*Data Read*, *Data Write*) on for Cloud SQL,
+      Identity-Aware Proxy and Secret Manager. They are off by default and cost money: the issue
+      notes the choice.
+- [ ] **IAM & Admin → Organization Policies**: *Restrict Authorized Networks on Cloud SQL
+      instances* enforced, and *Restrict Public IP access on Cloud SQL instances* too when the
+      instance uses private IP only (enforcing it rules out the public IP that
+      [cloud-sql.md](cloud-sql.md) accepts with the connector; both apply only to new settings), *Allowed ingress settings (Cloud Run)* limited to the setting in use, *Domain
+      restricted sharing* set to the organisation's customer ID, and, for an EU promise,
+      *Resource Location Restriction* `in:eu-locations`. Service account keys: the section below.
+- [ ] **The live response**: `curl -sI https://<production URL>` (and the `run.app` URL if it is
+      still enabled) answers with a redirect to Google sign-in or a 403, never the application's
+      page (the user runs it, or an agent runs it against these public URLs only).
 
 ## Google Cloud service accounts (when the code calls Google APIs)
 

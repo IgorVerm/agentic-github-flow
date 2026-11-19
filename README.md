@@ -273,6 +273,41 @@ covered; and a database client such as `psql` to a production database looks lik
 database. The written rules still bind there. The rules: the `gcloud` key of
 `plugins/guards/policy/claude-permissions.json` and `plugins/guards/policy/gcloud.rules`.
 
+#### Setting up gcloud
+
+The steps, each with Google's page (docs.cloud.google.com, read 2026-11-19). Run them yourself in
+your own terminal (in Claude Code, `! <command>`): the logins open a browser, and they are yours.
+
+1. **Install** the gcloud CLI: *Install the Google Cloud CLI* (`sdk/docs/install-sdk`). macOS and
+   Linux: the archive and `./google-cloud-sdk/install.sh`; Windows: `GoogleCloudSDKInstaller.exe`;
+   then a new terminal.
+2. **Sign in and pick the project:** `gcloud init` signs you in and sets a default
+   configuration, including the project; later `gcloud auth login` and
+   `gcloud config set project <project id>` (*Authenticate for the gcloud CLI*,
+   `docs/authentication/gcloud`; *Managing gcloud CLI configurations*, `sdk/docs/configurations`).
+   A configuration per project (`gcloud config configurations create <name>`) keeps a production
+   project from being the default by accident.
+3. **Application Default Credentials**, for code and tools on your machine that call Google
+   (the Cloud SQL Auth Proxy, client libraries): `gcloud auth application-default login`
+   (*Set up ADC for a local development environment*,
+   `docs/authentication/set-up-adc-local-dev-environment`). It writes
+   `application_default_credentials.json` into the gcloud folder. No service account key file.
+4. **Cloud SQL through the Auth Proxy** (*Connect using the Cloud SQL Auth Proxy*,
+   `sql/docs/postgres/connect-auth-proxy`): download the `cloud-sql-proxy` binary for your
+   system, then `./cloud-sql-proxy --port 5432 <instance connection name>` (the name is
+   `<project>:<region>:<instance>`; `gcloud sql instances describe <instance>` shows it), and
+   `psql "host=127.0.0.1 dbname=<db> user=<user>"`. With IAM database authentication add
+   `--auto-iam-authn`; the database user is then your full e-mail address (*Log in using IAM
+   database authentication*, `sql/docs/postgres/iam-logins`). Your account needs the Cloud SQL
+   Client role (`roles/cloudsql.client`).
+
+**With `--guards gcloud`:** every `gcloud`, `gsutil`, `bq` and `cloud-sql-proxy` command an
+agent proposes asks you first, and in Claude Code its sandbox cannot read the gcloud folder, so a
+command you approve runs only outside the sandbox, which asks again. Setting up and connecting
+as above, in your own terminal, is not affected. Keep a proxy to a production database in your
+own terminal too: an agent's database client connected to it looks like any other, and the
+guard does not see it.
+
 ## Issue chats
 
 The issue-chats plugin works a repository's GitHub issues one chat per issue: a chat takes a

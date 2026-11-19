@@ -58,7 +58,8 @@ open question you cannot settle from the code is a finding, not an approval.
 
 ## 5. Post the verdict
 
-`<agent>` is the name you sign comments with (`Claude Code`, `Codex`), without parentheses.
+`<agent>` is the name you sign comments with: your client and model (`Claude Opus 5.5`, `Claude
+Fable 5.2`, `Codex` with its model; the core rules' signature), without parentheses.
 
 - **No finding:** `python3 <plugin>/scripts/review_verdict.py approve <n> --sha <sha> --agent
   "<agent>" --note "<what you checked, review-security yes or no, the Efficient design line,

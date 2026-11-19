@@ -73,7 +73,7 @@ def issue(n, *labels, assigned=False, ready=True, comments=()):
             'assignees': [{'login': 'someone'}] if assigned else [], 'comments': list(comments)}
 
 
-CLAIM = ROBOT + ' Claude Code (issue chat): claimed for chat "#{0} · x" (local_1), branch b, worktree w'
+CLAIM = ROBOT + ' Claude Opus 5.5 (issue chat): claimed for chat "#{0} · x" (local_1), branch b, worktree w'  # #95
 READY = ROBOT + ' Claude Code (issue chat): **Ready to push:** branch `agent/2-x` at `abc1234`; checks green'
 OPENED = ROBOT + ' Claude Code (issue chat): pull request opened: #40'
 LANDED = ROBOT + ' Claude Code (issue chat): Landed on local main at `abc1234`: the fix; checks green'

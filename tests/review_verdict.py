@@ -58,6 +58,13 @@ class Format(unittest.TestCase):
             self.assertEqual(rv.verdict(body), (HEAD, body[len(ROBOT + ' Claude Code (review): '):].strip()))
             self.assertEqual(rv.approved_sha(body), HEAD)
 
+    def test_a_signature_with_the_model_parses(self):
+        # #95: signatures name the model (rules/core.md): `🤖 Claude Opus 5.5 (review):`.
+        for agent in ('Claude Opus 5.5', 'Claude Fable 5.2'):
+            body = rv.approval(agent, HEAD, 'checked')
+            self.assertTrue(body.startswith(ROBOT + ' ' + agent + ' (review): Approved ' + HEAD))
+            self.assertEqual(rv.approved_sha(body), HEAD)
+
     def test_findings_never_approve(self):
         for text in ('1. The loop rescans every row.', 'Approved ' + HEAD,
                      ROBOT + ' Codex (review): Approved ' + HEAD):

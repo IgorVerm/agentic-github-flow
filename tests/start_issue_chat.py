@@ -281,7 +281,7 @@ else:
 
     def claimed(*bodies):
         return {'state': 'OPEN', 'assignees': [{'login': 'someone'}],
-                'comments': [{'body': ROBOT + ' Claude Code (issue chat): ' + b} for b in bodies]}
+                'comments': [{'body': ROBOT + ' Claude Opus 5.5 (issue chat): ' + b} for b in bodies]}  # #95
 
     MINE = 'claimed for chat "#12 · next" (local_aaaabbbb-1111), branch agent/12-x, worktree /w/12-x'
     THEIRS = 'claimed for chat "#12 · other" (local_ccccdddd-2222), branch agent/12-y, worktree /w/12-y'

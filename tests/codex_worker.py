@@ -38,7 +38,8 @@ a = sys.argv[1:]
 mode = os.environ.get('STUB_MODE', 'commit')
 prompt = sys.stdin.read()
 with open(os.environ['STUB_LOG'], 'w') as f:
-    json.dump({'argv': a, 'cwd': os.getcwd(), 'stdin': prompt}, f)
+    json.dump({'argv': a, 'cwd': os.getcwd(), 'stdin': prompt,
+               'tmpdir': os.environ.get('TMPDIR')}, f)
 last = a[a.index('-o') + 1]
 tid = a[a.index('resume') + 1] if 'resume' in a else '01a1f999-0000-7000-8000-000000000001'
 print(json.dumps({'type': 'thread.started', 'thread_id': tid}))
@@ -71,6 +72,21 @@ if mode == 'gitdir':
         f.write('[core]\n\tfsmonitor = touch pwned\n')
 if mode == 'sibling':
     git('update-ref', 'refs/heads/agent/2-y', 'HEAD')
+if mode == 'submodule':
+    os.makedirs('sub')
+    git('-C', 'sub', 'init', '-q')
+    with open('sub/f', 'w') as f:
+        f.write('x')
+    git('-C', 'sub', 'add', 'f')
+    git('-C', 'sub', 'commit', '-q', '-m', 'sub')
+    with open('sub/.git/config', 'a') as f:
+        f.write('[core]\n\tfsmonitor = touch ../pwned-sub\n')
+    git('add', 'sub')
+    git('commit', '-q', '-m', 'add sub')
+if mode == 'delete':
+    ref = subprocess.run(['git', 'symbolic-ref', 'HEAD'], capture_output=True,
+                         text=True).stdout.strip()
+    git('update-ref', '-d', ref)
 if mode == 'rewrite':
     git('reset', '-q', '--hard', 'HEAD~1')
     commit()
@@ -156,6 +172,16 @@ def main():
                 [wt, '--model', 'm', '--prompt-file', os.path.join(ROOT, 'README.md')])
         if not WINDOWS:
             refused('prompt behind a link', [wt, '--model', 'm', '--prompt-file', link])
+            hard = os.path.join(base, 'hard.txt')
+            os.link(prompt, hard)
+            refused('prompt with a second hard link', [wt, '--model', 'm', '--prompt-file', hard])
+            os.remove(hard)
+            private = os.path.join(base, 'bash-edit-diff')
+            os.makedirs(private)
+            with open(os.path.join(private, 'p.txt'), 'w') as f:
+                f.write('x')
+            refused('prompt in a private Claude folder',
+                    [wt, '--model', 'm', '--prompt-file', os.path.join(private, 'p.txt')])
         refused('no codex on PATH', [wt] + good, PATH=os.path.join(base, 'nothing'))
         check('no --codex-bin option', run([wt] + good + ['--codex-bin', stub]).returncode == 2)
         with open(os.path.join(wt, 'stray.txt'), 'w') as f:
@@ -181,6 +207,11 @@ def main():
         check('approval never', 'approval_policy="never"' in configs, str(configs))
         check('workspace-write', 'sandbox_mode="workspace-write"' in configs, str(configs))
         check('no network', 'sandbox_workspace_write.network_access=false' in configs)
+        check('/tmp closed', 'sandbox_workspace_write.exclude_slash_tmp=true' in configs and
+              'sandbox_workspace_write.exclude_tmpdir_env_var=true' in configs, str(configs))
+        check('own TMPDIR in the git folder', call['tmpdir'] == os.path.join(
+            os.path.realpath(git(wt, 'rev-parse', '--absolute-git-dir')), 'codex-tmp'),
+            str(call['tmpdir']))
         roots_entry = [c for c in configs if c.startswith('sandbox_workspace_write.writable_roots=')]
         roots = json.loads(roots_entry[0].split('=', 1)[1]) if roots_entry else []
         common = os.path.realpath(os.path.join(primary, '.git'))
@@ -238,10 +269,21 @@ def main():
               not os.path.exists(os.path.join(wt, 'pwned')))
         os.remove(os.path.join(gitdir, 'config.worktree'))
         failed('other branch moved', 'sibling', 'other_refs_moved',
-               lambda v: v == ['refs/heads/agent/2-y'])
+               lambda v: v and v[0]['ref'] == 'refs/heads/agent/2-y' and
+               v[0]['before'] != v[0]['after'])
         git(primary, 'update-ref', 'refs/heads/agent/2-y', 'main~1')
         report = failed('history rewritten', 'rewrite', 'history_rewritten', lambda v: v is True)
         check('history rewritten: no commits listed', report.get('commits') == [])
+        tip = git(wt, 'rev-parse', 'HEAD')
+        report = failed('submodule added', 'submodule', 'new_submodules', lambda v: v == ['sub'])
+        check('submodule added: its fsmonitor never ran',
+              not os.path.exists(os.path.join(base, 'pwned-sub')) and
+              not os.path.exists(os.path.join(wt, 'pwned-sub')) and report['uncommitted'] == [])
+        git(wt, '-c', 'core.fsmonitor=false', 'update-ref', 'refs/heads/agent/1-x', tip)
+        git(wt, '-c', 'core.fsmonitor=false', 'read-tree', '-u', '--reset', tip)
+        shutil.rmtree(os.path.join(wt, 'sub'))
+        report = failed('branch deleted', 'delete', 'failure', lambda v: v and 'deleted' in v)
+        git(primary, 'update-ref', 'refs/heads/agent/1-x', tip)
         result = run([wt] + good, STUB_MODE='leave')
         report = json.loads(result.stdout or '{}')
         check('left changes reported', report.get('uncommitted') == [' M work.txt'] and

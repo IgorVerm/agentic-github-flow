@@ -20,21 +20,25 @@ It refuses (exit 3) before Codex starts unless:
   Codex may write that branch's ref folder, so a branch directly under `refs/heads/` would open
   every branch, `main` included;
 - the worktree is clean (no change, no untracked file), so whatever Codex leaves is its own;
-- the model and the thread id are plain values, and the prompt file is a regular file (not a
-  link) under the system's temporary folders (`/tmp`, `/private/tmp`, `/var/folders`, the
-  temporary folder of this process): its text goes to OpenAI, so it never reads a key, an
-  `.env` or a file in the home folder.
+- the model and the thread id are plain values, and the prompt file is a plain file of this
+  user (no link, no second hard link) in this process's temporary folder or Claude Code's
+  per-user one (`/tmp/claude-<uid>`, where a sandboxed chat writes), outside Claude Code's
+  private folders there (`bash-edit-diff`, `plugin-tool-staging`): its text goes to OpenAI, so
+  it never reads a key, an `.env` or a file in the home folder.
 
 Then it runs, with <worktree> as the working folder and the prompt on stdin:
 
   codex exec [resume <thread id>] --json -o <last message> -m <model>
              -c approval_policy="never" -c sandbox_mode="workspace-write"
              -c sandbox_workspace_write.network_access=false
+             -c sandbox_workspace_write.exclude_slash_tmp=true
+             -c sandbox_workspace_write.exclude_tmpdir_env_var=true
              -c sandbox_workspace_write.writable_roots=[<git folders>] -
 
 Codex's own sandbox is the boundary. Codex reads the whole disk (`workspace-write` reads
-everything) and writes in the worktree, in `/tmp` and the temporary folder (Codex's defaults,
-which tests and builds need), and, so that it can commit, in these git folders: the worktree's
+everything) and writes in the worktree, in its own temporary folder `<git folder>/codex-tmp`
+(its `TMPDIR`; `/tmp` and the caller's temporary folder are closed to it, since other sessions'
+scripts and prompts live there), and, so that it can commit, in these git folders: the worktree's
 own git folder, the shared `objects`, and the ref and reflog folders of the branch's first name
 part (for `agent/103-x`: `refs/heads/agent`, `logs/refs/heads/agent`, which hold every `agent/*`
 branch). It has no network, so it cannot push. It is never asked for an approval and cannot ask
@@ -46,14 +50,19 @@ Codex could have used to run code here or in the Claude chat with how it was bef
 the worktree's git folder files git reads as configuration or pointers (`commondir`, `gitdir`,
 `config.worktree`, `config`, `HEAD`, `info/`), the worktree's `.git` file, and Claude Code's
 `.claude/` folder and `.mcp.json`, ignored files included. Any difference: no further git, the
-turn counts as failed, and `protected_changed` names the paths. Then it checks that the other
-branches under the same ref folder did not move (`other_refs_moved`) and that the new HEAD
-descends from the old one (`history_rewritten`).
+turn counts as failed, and `protected_changed` names the paths. Every git call runs with
+`core.fsmonitor=false` and `submodule.recurse=false`. A submodule Codex added (a gitlink in the
+index or the new HEAD) fails the turn before `git status` runs (`new_submodules`): its own
+configuration would run commands in a plain `git status` of the Claude chat. Then it checks
+that HEAD still has a commit, that the other branches under the same ref folder did not move
+(`other_refs_moved`, each with its commit before and after) and that the new HEAD descends from
+the old one (`history_rewritten`).
 
 It prints one JSON object on stdout: `status`, `thread_id` (the Codex session id, for `--resume`
 and `codex resume`), `model`, `branch`, `branch_moved`, `head_before`, `head_after`, `commits`
 (Codex's commits, oldest first: `sha` and `subject`), `uncommitted` (`git status --porcelain`
-lines after the run), `protected_changed`, `other_refs_moved`, `history_rewritten`,
+lines after the run), `protected_changed`, `new_submodules`, `other_refs_moved`,
+`history_rewritten`,
 `last_message`, `events` (the JSONL event log). The event log and the last message are kept in
 `${XDG_CACHE_HOME:-~/.cache}/agentic-github-flow/codex-worker/`, outside every folder Codex can
 write, so Codex cannot forge them.
@@ -79,6 +88,9 @@ THREAD_RE = re.compile(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-
 PROMPT_MAX = 1024 * 1024
 GIT_DIR_PROTECTED = ('commondir', 'gitdir', 'config.worktree', 'config', 'HEAD', 'info')
 WORKTREE_PROTECTED = ('.git', '.claude', '.mcp.json')
+# Every git call runs outside every sandbox: no fsmonitor command, no descent into submodules,
+# whose own configuration Codex could have written.
+GIT_SAFE = ['-c', 'core.fsmonitor=false', '-c', 'submodule.recurse=false']
 
 
 def refuse(message):
@@ -87,7 +99,8 @@ def refuse(message):
 
 
 def git(worktree, *args):
-    result = subprocess.run(['git', '-C', worktree] + list(args), capture_output=True, text=True)
+    result = subprocess.run(['git', '-C', worktree] + GIT_SAFE + list(args), capture_output=True,
+                            text=True)
     if result.returncode != 0:
         return None
     return result.stdout.rstrip('\n')
@@ -99,9 +112,16 @@ def toml_string(value):
 
 
 def temp_roots():
-    roots = {'/tmp', '/private/tmp', '/var/folders', '/private/var/folders',
-             tempfile.gettempdir()}
-    return [os.path.realpath(r) for r in roots if os.path.isdir(r)]
+    # This process's temporary folder, and Claude Code's per-user one, where a sandboxed chat
+    # writes ($TMPDIR inside the sandbox differs from the one an excluded call sees).
+    uid = os.getuid() if hasattr(os, 'getuid') else None
+    roots = {tempfile.gettempdir()}
+    if uid is not None:
+        roots |= {'/tmp/claude-%d' % uid, '/private/tmp/claude-%d' % uid}
+    return sorted({os.path.realpath(r) for r in roots if os.path.isdir(r)})
+
+
+PROMPT_DENIED = ('bash-edit-diff', 'plugin-tool-staging')
 
 
 def check_prompt(path):
@@ -109,11 +129,14 @@ def check_prompt(path):
         info = os.lstat(path)
     except OSError as error:
         refuse('cannot read the prompt file: %s' % error)
-    if not stat.S_ISREG(info.st_mode):
-        refuse('the prompt file is not a regular file (a link or a folder)')
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+        refuse('the prompt file is not a plain file (a link, a hard link or a folder)')
+    if hasattr(os, 'getuid') and info.st_uid != os.getuid():
+        refuse('the prompt file belongs to another user')
     real = os.path.realpath(path)
-    if not any(real == r or real.startswith(r + os.sep) for r in temp_roots()):
-        refuse('the prompt file is not under a temporary folder (%s); its text goes to OpenAI'
+    if not any(real.startswith(r + os.sep) for r in temp_roots()) or \
+            any(part in PROMPT_DENIED for part in real.split(os.sep)):
+        refuse('the prompt file is not in your temporary folder (%s); its text goes to OpenAI'
                % ', '.join(temp_roots()))
     if info.st_size > PROMPT_MAX:
         refuse('the prompt file is larger than %d bytes' % PROMPT_MAX)
@@ -207,6 +230,13 @@ def changed_paths(before, after):
     return sorted(p for p in set(before) | set(after) if before.get(p) != after.get(p))
 
 
+def gitlinks(worktree, tree=None):
+    """The submodule entries (mode 160000) of the index, or of a commit."""
+    listing = git(worktree, *(['ls-tree', '-r', tree] if tree else ['ls-files', '--stage'])) or ''
+    return sorted(line.split('\t', 1)[-1] for line in listing.splitlines()
+                  if line.startswith('160000'))
+
+
 def sibling_refs(worktree, branch):
     first = branch.split('/', 1)[0]
     listing = git(worktree, 'for-each-ref', '--format=%(refname) %(objectname)',
@@ -241,6 +271,8 @@ def codex_command(codex, model, resume, roots, last_message):
                 '-c', 'approval_policy="never"',
                 '-c', 'sandbox_mode="workspace-write"',
                 '-c', 'sandbox_workspace_write.network_access=false',
+                '-c', 'sandbox_workspace_write.exclude_slash_tmp=true',
+                '-c', 'sandbox_workspace_write.exclude_tmpdir_env_var=true',
                 '-c', 'sandbox_workspace_write.writable_roots=[%s]'
                 % ', '.join(toml_string(r) for r in roots),
                 '-']
@@ -298,6 +330,10 @@ def main(argv=None):
     roots = writable_roots(git_dir, common, branch)
     protected_before = protected_state(worktree, git_dir)
     siblings_before = sibling_refs(worktree, branch)
+    links_before = gitlinks(worktree)
+    codex_tmp = os.path.join(git_dir, 'codex-tmp')
+    os.makedirs(codex_tmp, exist_ok=True)
+    codex_env = dict(os.environ, TMPDIR=codex_tmp, TMP=codex_tmp, TEMP=codex_tmp)
 
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
     folder = log_folder()
@@ -307,7 +343,7 @@ def main(argv=None):
     command = codex_command(codex, args.model, args.resume, roots, last_message)
     with open(events, 'w', encoding='utf-8') as out:
         result = subprocess.run(command, cwd=worktree, input=prompt, text=True, stdout=out,
-                                stderr=subprocess.PIPE)
+                                stderr=subprocess.PIPE, env=codex_env)
 
     thread_id, completed, failure = read_events(events)
     try:
@@ -320,31 +356,43 @@ def main(argv=None):
               'head_after': None, 'commits': [], 'uncommitted': [],
               'protected_changed': changed_paths(protected_before,
                                                  protected_state(worktree, git_dir)),
-              'other_refs_moved': [], 'history_rewritten': None, 'last_message': last,
+              'other_refs_moved': [], 'history_rewritten': None, 'new_submodules': [],
+              'last_message': last,
               'events': events}
     problems = []
     if report['protected_changed']:
         # Git reads these as configuration: run no git at all after such a change.
         problems.append('Codex changed protected paths; no git was run after the turn')
     else:
-        head_after = git(worktree, 'rev-parse', 'HEAD')
+        head_after = git(worktree, 'rev-parse', '--verify', '--quiet', 'HEAD')
+        links = set(gitlinks(worktree)) | set(gitlinks(worktree, head_after) if head_after else [])
+        report['new_submodules'] = sorted(links - set(links_before))
+    if report['new_submodules']:
+        # A submodule's own configuration runs commands in a plain `git status` (fsmonitor).
+        problems.append('Codex added a submodule; no git status was run, and none may run '
+                        'in this worktree before a person looked at it')
+    elif not report['protected_changed']:
         now_branch = git(worktree, 'symbolic-ref', '--quiet', '--short', 'HEAD')
         report['head_after'] = head_after
         report['branch_moved'] = now_branch != branch
         report['history_rewritten'] = bool(head_after) and head_after != head_before and \
-            subprocess.run(['git', '-C', worktree, 'merge-base', '--is-ancestor', head_before,
-                            head_after], capture_output=True).returncode != 0
+            subprocess.run(['git', '-C', worktree] + GIT_SAFE + ['merge-base', '--is-ancestor',
+                            head_before, head_after], capture_output=True).returncode != 0
         siblings_after = sibling_refs(worktree, branch)
-        report['other_refs_moved'] = sorted(r for r in set(siblings_before) | set(siblings_after)
-                                            if siblings_before.get(r) != siblings_after.get(r))
+        report['other_refs_moved'] = [
+            {'ref': r, 'before': siblings_before.get(r), 'after': siblings_after.get(r)}
+            for r in sorted(set(siblings_before) | set(siblings_after))
+            if siblings_before.get(r) != siblings_after.get(r)]
         if head_after and head_after != head_before and not report['history_rewritten']:
             listing = git(worktree, 'log', '--reverse', '--format=%H%x09%s',
                           '%s..%s' % (head_before, head_after)) or ''
             for line in listing.splitlines():
                 sha, _, subject = line.partition('\t')
                 report['commits'].append({'sha': sha, 'subject': subject})
-        report['uncommitted'] = (git(worktree, 'status', '--porcelain',
+        report['uncommitted'] = (git(worktree, 'status', '--porcelain', '--ignore-submodules=all',
                                      '--untracked-files=all') or '').splitlines()
+        if not head_after:
+            problems.append('the branch has no commit any more (deleted)')
         for key, text in (('branch_moved', 'HEAD left the branch'),
                           ('history_rewritten', 'the new HEAD does not descend from the old'),
                           ('other_refs_moved', 'other branches under the same ref folder moved')):

@@ -20,7 +20,9 @@ codex exec, the app-server client later, as its own issue).
 label the Claude issue chat stays the owner and hands the implementation to Codex through
 `plugins/issue-chats/scripts/codex_worker.py`, which runs `codex exec` in the chat's worktree in
 Codex's `workspace-write` sandbox with no network and approval `never`, writable only the
-worktree and its branch's git folders. The chat records the Codex thread id on the issue and
+worktree, a temporary folder of its own and the git folders of the branches under the chat
+branch's first name part (`agent/*`); after each turn the script checks what Codex could have
+used to run code outside its sandbox. The chat records the Codex thread id on the issue and
 reviews each Codex commit. The person allows that script alone and excludes it from the sandbox
 (`docs/install.md`); the team edition writes no allow rule. The plugin `openai/codex-plugin-cc`
 is not used.

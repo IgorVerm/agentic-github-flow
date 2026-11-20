@@ -312,9 +312,10 @@ while the chat keeps the issue, the questions to the person, the review and the 
 The chat runs Codex through one script, which fixes Codex's sandbox (`workspace-write`, no
 network, approval `never`) and never passes a `--dangerously-*` option. Codex then reads the
 whole disk (send it no work on a machine whose files may not go to OpenAI), and writes the
-worktree, the temporary folders and the git folders of the branches beside the chat's own
-(`agent/*`); after each turn the script fails the turn when Codex changed git's pointer or
-configuration files, `.claude/` or `.mcp.json`, moved another branch or rewrote history. The
+worktree, a temporary folder of its own and the git folders of the branches beside the chat's
+own (`agent/*`); after each turn the script fails the turn when Codex changed git's pointer or
+configuration files, `.claude/` or `.mcp.json`, added a submodule, moved another branch or
+rewrote history. The
 script takes no program to run (`codex` comes from PATH) and reads its prompt only from a
 temporary folder. Codex cannot run inside Claude Code's sandbox (it needs the
 network and writes `~/.codex`), so, on the person's yes, allow that script alone and exclude it

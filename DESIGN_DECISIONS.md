@@ -3,6 +3,37 @@
 Rulings of the maintainers named in `HANDOFF.md`, newest first, with their words. Detail lives on
 the linked issue.
 
+## Codex as the worker of a Claude issue chat, 2026-11-20
+
+**Decision (the maintainer):** the aim: "astra 6.2 is very good but apparently very bad at
+interfacing with humans. Is it possible to let the claude orchestrator also manage codex 6.2
+chats the same way it handles local chats for claude". After the source review and the trial of
+OpenAI's Codex plugin for Claude Code: "Meteen de issue-handover-route" (the issue-handover
+route right away, over a line in `docs/install.md`, an installer opt-in, or nothing). How the
+chat starts Codex: "codex exec direct" (over the plugin). The call outside Claude Code's
+sandbox: "Allow-regel voor dat commando" (an allow rule for that command, over asking each
+time). Commits: "Codex commit, Claude reviewt" (Codex commits, Claude reviews). Which issues:
+"we hebben al labels voor astra" (we already have labels for Astra). Asked against an own client
+on `codex app-server` that relays each approval: "codex exec houden, app-server later" (keep
+codex exec, the app-server client later, as its own issue).
+**What:** the settings row `codex worker` names a label and a Codex model; on an issue with that
+label the Claude issue chat stays the owner and hands the implementation to Codex through
+`plugins/issue-chats/scripts/codex_worker.py`, which runs `codex exec` in the chat's worktree in
+Codex's `workspace-write` sandbox with no network and approval `never`, writable only the
+worktree and its branch's git folders. The chat records the Codex thread id on the issue and
+reviews each Codex commit. The person allows that script alone and excludes it from the sandbox
+(`docs/install.md`); the team edition writes no allow rule. The plugin `openai/codex-plugin-cc`
+is not used.
+**Why:** measured on 2026-11-20: the plugin cannot run inside Claude Code's sandbox; it answers
+every approval request with an error; its app-server threads got write access to the person's
+whole projects folder; its `SessionEnd` hook drops the session's jobs; and its rescue agent may
+delegate unasked in every session. `codex exec` through one script needs no third-party
+dependency and fixes the sandbox per call.
+**Binds:** `plugins/issue-chats/skills/issue-handover/method.md` (§1 settings, §4 *Codex as the
+worker*), `SKILL.md` (the start brief), `plugins/issue-chats/scripts/codex_worker.py`,
+`tests/codex_worker.py`, `docs/install.md`.
+**Detail:** issue #103.
+
 ## Signatures name the model, 2026-11-19
 
 **Decision (the maintainer):** "bijkomend wil ik dat elke github issue niet enkel signed is als

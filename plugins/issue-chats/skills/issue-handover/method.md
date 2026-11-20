@@ -65,6 +65,7 @@ The skills read their values from it; a row left out takes its default:
 | start reading | what every chat reads at its start besides its issue: named sections, the repository's reading map | none |
 | ready extras | what the repository adds to the definition of ready of the `requirements` skill | none |
 | start extras, hand-over extras | repository steps at a chat's start and before it ends | none |
+| codex worker | the label that hands an issue's implementation to Codex and the Codex model, both in backticks (`` `astra`, `gpt-6.2-astra` ``; §4 *Codex as the worker*) | off: the Claude chat does the work itself |
 
 **Chains at once is not a repository setting:** at most five issue chats work at the same time
 in a repository, counted with those already working. A chat whose branch waits for the push,
@@ -375,6 +376,47 @@ weeks. So it ends this way:
   (§6, `archive_session`): a parent stays while a side chat it started is running or fails the
   `--landed` check (`issue-handover`, *Never archive this chat*; `archive-finished-chats` step
   3).
+
+### Codex as the worker
+
+With the settings row `codex worker`, an issue that carries its label is built by Codex. The
+Claude issue chat stays its owner: it claims the issue, asks the user the questions, runs every
+GitHub step, reviews Codex's work and pushes it on the user's word. Codex writes the code and
+commits it on the chat's branch. Why: Codex models do the work well and talk to people badly
+(the user's ruling, `DESIGN_DECISIONS.md`, #103). The chat runs this inside item 2 of the
+lifecycle above, in place of writing the code itself:
+
+1. **Commit first.** The worktree is clean before every Codex turn, so whatever Codex leaves is
+   its own; `codex_worker.py` refuses a dirty worktree.
+2. **Write the prompt** to a file outside the worktree: the issue number and its task, its check
+   and code paths, the repository's `AGENTS.md` to follow, commits by path whose subject ends in
+   `(#<issue>)`, never push, and that Codex cannot ask: a question or a blocker goes into its
+   final message.
+3. **Run one turn:** `python3 <plugin>/scripts/codex_worker.py <worktree> --model <model>
+   --prompt-file <file>`, by the clone path that the person's allow rule names
+   (`docs/install.md`, *Codex as the worker*), in the background when it may outlast the Bash
+   timeout. Its header owns the refusals and Codex's sandbox: `workspace-write` with no network,
+   approval `never`, writable only the worktree and the branch's git folders.
+4. **Record it:** a signed comment on the issue whose text after the signature opens with
+   `codex thread: <thread id>`, with the model and Codex's commits. The thread outlives the
+   chat, so a successor finds it there and resumes it; the person opens it with
+   `codex resume <id>`. The Codex desktop app does not list it, since `codex exec` threads carry
+   the source `exec` (measured 2026-11-20).
+5. **Review each Codex commit** as a reviewer that did not write it (`git show`). A finding goes
+   back to the same thread with `--resume <thread id>` and a new prompt file, or the chat fixes
+   it in a commit of its own. A question in Codex's final message is a question for the user
+   (§4 *Questions for the user*), or one the chat answers itself; the answer goes back with
+   `--resume`.
+6. **Then on as usual:** the checks, `ship-change` steps 1 to 5, the hand-over. The review route
+   of `ship-change` does not change: the chat that ran Codex is not the independent reviewer of
+   the branch.
+
+What the route does not give: Codex's commands are not seen by Claude Code's hooks, only the
+`codex_worker.py` call is; Codex's own rules and hooks apply inside (measured 2026-11-20: its
+git-safety rule refused `git push`, since a prompt rule cannot ask under approval `never`). An
+approval never reaches the user, because Codex asks for none. The worker needs Codex logged in
+(`codex login`) and runs outside Claude Code's sandbox, which keeps Codex from the network and
+from writing its sessions under `~/.codex`.
 
 ## 5. Sharing the repository
 

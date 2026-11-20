@@ -388,7 +388,8 @@ lifecycle above, in place of writing the code itself:
 
 1. **Commit first.** The worktree is clean before every Codex turn, so whatever Codex leaves is
    its own; `codex_worker.py` refuses a dirty worktree.
-2. **Write the prompt** to a file outside the worktree: the issue number and its task, its check
+2. **Write the prompt** to a file in the temporary folder (`$TMPDIR`; the worker refuses any
+   other place, since the text goes to OpenAI): the issue number and its task, its check
    and code paths, the repository's `AGENTS.md` to follow, commits by path whose subject ends in
    `(#<issue>)`, never push, and that Codex cannot ask: a question or a blocker goes into its
    final message.
@@ -396,7 +397,11 @@ lifecycle above, in place of writing the code itself:
    --prompt-file <file>`, by the clone path that the person's allow rule names
    (`docs/install.md`, *Codex as the worker*), in the background when it may outlast the Bash
    timeout. Its header owns the refusals and Codex's sandbox: `workspace-write` with no network,
-   approval `never`, writable only the worktree and the branch's git folders.
+   approval `never`; Codex reads the whole disk and writes the worktree, the temporary folders
+   and the git folders of every branch under the same first name part (`agent/*`). After the
+   turn the worker fails it when Codex changed a git pointer or configuration file, `.claude/`
+   or `.mcp.json`, moved another branch or rewrote this one's history: then stop, look at the
+   worktree yourself and tell the user, before any other git command or hand-over.
 4. **Record it:** a signed comment on the issue whose text after the signature opens with
    `codex thread: <thread id>`, with the model and Codex's commits. The thread outlives the
    chat, so a successor finds it there and resumes it; the person opens it with

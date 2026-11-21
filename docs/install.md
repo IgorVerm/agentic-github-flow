@@ -317,7 +317,9 @@ checkout. Codex reads the whole disk (send it no work on a machine whose files m
 OpenAI) and writes only its clone and a temporary folder of its own. Each turn has a time limit,
 after which the script kills what is left of it. At the end the script exports Codex's commits
 as a git bundle, and the chat imports them inside its own sandbox with `codex_import.py`, which
-refuses submodules and changes to `.claude/`, `.mcp.json` and `CLAUDE.md`. The script takes no
+refuses submodules, hooks and changes to `.claude/`, `.codex/`, `.mcp.json`, `CLAUDE.md` and
+`AGENTS.md`. The clone lives under `~/.cache/agentic-github-flow/codex-worker/`, where the chat's
+sandbox cannot write, and Codex's hooks are off for the worker's turns. The script takes no
 program to run (`codex` comes from PATH), reads its prompt only from a temporary folder and
 refuses Windows. Codex cannot run inside Claude Code's sandbox (it needs the network and writes
 `~/.codex`), so, on the person's yes, allow that script alone and exclude it from the sandbox, in

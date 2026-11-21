@@ -15,12 +15,21 @@ cannot run inside Claude Code's sandbox (measured 2026-11-20). Because the allow
 script run outside that sandbox without a prompt, it takes no program to run: `codex` is the one
 on PATH (changing PATH needs an environment assignment in front, which the rule does not match).
 
-**Codex never writes the chat's repository.** It works in a clone of its own,
-`<git folder>/codex/clone` (the worktree's git folder), made from the chat's HEAD with
-`git clone --shared --no-checkout`, without a remote. On macOS its tracked files are APFS clones
-of the worktree's (copy-on-write; measured on pax_deorum: 16,878 files, 13 GiB, no measurable
-disk, a 59 s re-hash once per clone), elsewhere git checks them out. Codex's objects go into the
-clone; the chat's object store is only its alternate, which it reads.
+**Codex never writes the chat's repository.** It works in a clone of its own, made from the
+chat's HEAD with `git clone --shared --no-checkout`, without a remote. On macOS its tracked files
+are APFS clones of the worktree's (copy-on-write; measured on pax_deorum: 16,878 files, 13 GiB,
+no measurable disk, a 59 s re-hash once per clone), each opened one folder at a time without
+following a link, so a link the chat swaps into the worktree copies nothing it may not read;
+elsewhere git checks them out from the objects. Codex's objects go into the clone; the chat's
+object store is only its alternate, which it reads.
+
+**The chat cannot write the worker's folder either.** The clone, Codex's temporary folder, the
+state, the lock and the export repository live in
+`${XDG_CACHE_HOME:-~/.cache}/agentic-github-flow/codex-worker/clones/<key>` (`<key>` from the
+worktree's git folder), outside the folders Claude Code's sandbox writes, because this script
+runs git there outside every sandbox while it makes the clone (the fourth review of #105). Only
+the finished bundle goes beside the worktree, `<git folder>/codex/codex.bundle`, written without
+following a link. A clone whose worktree's git folder is gone is removed at the next run.
 
 It refuses (exit 3) before Codex starts unless:
 - the system has process groups (not Windows): the kill after the turn needs them;
@@ -28,12 +37,13 @@ It refuses (exit 3) before Codex starts unless:
   commit, and clean (no change, no untracked file), so that the clone holds all of its work;
 - the model and the thread id are plain values, the time limit is 1 to 1440 minutes, a resume
   finds the clone, and the clone was made from this branch;
-- the prompt file is a plain file of this user (no link, no second hard link, opened without
-  following a link and checked on the open file) in this process's temporary folder or Claude
-  Code's per-user one (`/tmp/claude-<uid>`, where a sandboxed chat writes), never `/tmp` itself
-  and outside Claude Code's private folders (`bash-edit-diff`, `plugin-tool-staging`,
-  `cc-daemon-<uid>`): its text goes to OpenAI, so it never reads a key, an `.env` or a file in
-  the home folder.
+- the prompt file is a plain file of this user (no link, no second hard link, no FIFO) in this
+  process's temporary folder or Claude Code's per-user one (`/tmp/claude-<uid>`, where a
+  sandboxed chat writes), never `/tmp` itself and outside Claude Code's private folders
+  (`bash-edit-diff`, `plugin-tool-staging`, `cc-daemon-<uid>`). It is opened from that folder
+  one name at a time without following a link, so a folder swapped for a link while it is opened
+  fails instead of being read: its text goes to OpenAI, so it never reads a key, an `.env` or a
+  file in the home folder.
 
 **A turn** is one `codex exec` (or `codex exec resume <thread id>`) in the clone, the prompt on
 stdin, in a process session of its own, with a time limit (`--time-limit`, default 60 minutes):
@@ -44,14 +54,16 @@ stdin, in a process session of its own, with a time limit (`--time-limit`, defau
              -c sandbox_workspace_write.exclude_slash_tmp=true
              -c sandbox_workspace_write.exclude_tmpdir_env_var=true
              -c sandbox_workspace_write.writable_roots=[<clone>, <clone>/.git, <codex tmp>]
-             -c shell_environment_policy.set.CODEX_WORKER_TURN="<marker>" -
+             -c shell_environment_policy.set.CODEX_WORKER_TURN="<marker>"
+             -c features.hooks=false -
 
 Codex's own sandbox is the boundary. Codex reads the whole disk (`workspace-write` reads
 everything) and writes only the clone and its own temporary folder `<git folder>/codex/tmp`
 (its `TMPDIR`, emptied before each turn; `/tmp` and the caller's temporary folder are closed to
 it). It has no network, so it cannot push. It is never asked for an approval and cannot ask one:
 a question belongs in its final message. Nothing here passes a `--dangerously-*` option or
-another sandbox mode. When `codex` ends, or the time limit kills it, the worker kills what is
+another sandbox mode. Codex's hooks are off for the turn: they run outside its sandbox, with the
+clone, whose `.git/config` Codex writes, as their working folder. When `codex` ends, or the time limit kills it, the worker kills what is
 left of the turn: the process group, then every process of this user whose environment holds the
 turn's marker (which catches a `setsid` double-fork). A process that leaves the group and drops
 its environment survives, but it stays inside Codex's sandbox. The kill is hygiene; the boundary
@@ -67,22 +79,23 @@ or the turn did not complete; 2 usage; 3 refused before Codex started.
 **The export** (`--export`, once, when Codex's work is done) cuts a git bundle of Codex's commits
 on top of the chat's HEAD, at `<git folder>/codex/codex.bundle`, for `codex_import.py`, which
 the Claude chat runs inside its own sandbox. It reads the clone's branch ref as a file, without
-following a link, and runs git only in a fresh bare repository of its own, whose objects come
-from the clone's as an alternate and whose configuration is the worker's (no fsmonitor, no
-commit-graph, no multi-pack index, no submodules). So git never reads a configuration, hook or
-index that Codex wrote. Its report: `status` (`exported`, `nothing` when Codex made no commit,
+following a link or opening a FIFO, and runs git only in a fresh bare repository of its own,
+whose objects come from the clone's as an alternate and whose configuration is the worker's (no
+fsmonitor, no commit-graph, no multi-pack index, no submodules, no hooks, no signatures), each
+call with a time limit of 10 minutes. So git never reads a configuration, hook or index that
+Codex wrote, and a FIFO Codex leaves among its objects cannot hang the export. Its report: `status` (`exported`, `nothing` when Codex made no commit,
 `failed`), `branch`, `base` (the chat's HEAD), `head`, `commits` (`sha`, `subject`, oldest first),
 `bundle`. Exit: 0 exported or nothing; 1 failed (the clone's branch is missing, unreadable or not
 on top of the chat's HEAD); 3 refused.
 
-`--fresh` removes the clone first, for a new start from the chat's HEAD. The worktree's removal
-(`cleanup-merged`) removes the clone with the git folder. One worker at a time per worktree:
-a lock in `<git folder>/codex/lock`.
+`--fresh` removes the clone first, for a new start from the chat's HEAD. One worker at a time
+per worktree: a lock in the worker's folder.
 """
 from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -110,7 +123,10 @@ MARKER = 'CODEX_WORKER_TURN'
 # wrote: the chat's worktree, the fresh clone before Codex starts, and the export repository.
 GIT_SAFE = ['-c', 'core.fsmonitor=false', '-c', 'submodule.recurse=false']
 EXPORT_SAFE = GIT_SAFE + ['-c', 'core.commitGraph=false', '-c', 'core.multiPackIndex=false',
-                          '-c', 'core.hooksPath=' + os.devnull]
+                          '-c', 'core.hooksPath=' + os.devnull, '-c', 'log.showSignature=false']
+EXPORT_SECONDS = 600
+DIR_FLAGS = os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0) | getattr(os, 'O_NOFOLLOW', 0)
+FILE_FLAGS = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0)
 
 
 def refuse(message):
@@ -132,15 +148,24 @@ def toml_string(value):
 
 
 def temp_roots():
-    # This process's temporary folder, and Claude Code's per-user one, where a sandboxed chat
-    # writes ($TMPDIR inside the sandbox differs from the one an excluded call sees). Never all
-    # of /tmp, which holds other users' and Claude Code's private folders.
+    """(spelling, real path) of each folder a prompt file may lie in, longest spelling first.
+
+    This process's temporary folder, and Claude Code's per-user one, where a sandboxed chat
+    writes ($TMPDIR inside the sandbox differs from the one an excluded call sees). Never all
+    of /tmp, which holds other users' and Claude Code's private folders."""
     uid = os.getuid() if hasattr(os, 'getuid') else None
-    roots = {tempfile.gettempdir()}
+    names = {tempfile.gettempdir()}
     if uid is not None:
-        roots |= {'/tmp/claude-%d' % uid, '/private/tmp/claude-%d' % uid}
-    roots = {os.path.realpath(r) for r in roots if os.path.isdir(r)}
-    return sorted(r for r in roots if r not in ('/tmp', '/private/tmp', '/var/tmp', '/'))
+        names |= {'/tmp/claude-%d' % uid, '/private/tmp/claude-%d' % uid}
+    pairs = set()
+    for name in names:
+        if not os.path.isdir(name):
+            continue
+        real = os.path.realpath(name)
+        if real in ('/tmp', '/private/tmp', '/var/tmp', '/'):
+            continue
+        pairs |= {(os.path.abspath(name), real), (real, real)}
+    return sorted(pairs, key=lambda pair: -len(pair[0]))
 
 
 def prompt_denied():
@@ -148,24 +173,40 @@ def prompt_denied():
     return ('bash-edit-diff', 'plugin-tool-staging', 'cc-daemon-%d' % uid)
 
 
-def check_prompt(path):
-    flags = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0)
+def open_below(base, parts, flags=FILE_FLAGS):
+    """A descriptor of base/parts..., opened one name at a time without following a link."""
+    if not parts or any(part in ('', '.', '..', b'', b'.', b'..') for part in parts):
+        raise OSError('not a plain path below %s' % base)
+    fds = []
     try:
-        fd = os.open(path, flags)
+        fds.append(os.open(base, DIR_FLAGS))
+        for part in parts[:-1]:
+            fds.append(os.open(part, DIR_FLAGS, dir_fd=fds[-1]))
+        return os.open(parts[-1], flags, dir_fd=fds[-1])
+    finally:
+        for fd in fds:
+            os.close(fd)
+
+
+def check_prompt(path):
+    absolute = os.path.abspath(path)
+    roots = temp_roots()
+    found = [(real, absolute[len(spelling) + 1:].split(os.sep)) for spelling, real in roots
+             if absolute.startswith(spelling + os.sep)]
+    if not found or any(part in prompt_denied() for part in found[0][1][:-1]):
+        refuse('the prompt file is not in your temporary folder (%s); its text goes to OpenAI'
+               % ', '.join(sorted({real for _, real in roots})))
+    try:
+        fd = open_below(*found[0])
     except OSError as error:
         refuse('cannot open the prompt file without following a link: %s' % error)
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
-            refuse('the prompt file is not a plain file (a link, a hard link or a folder)')
+            refuse('the prompt file is not a plain file (a link, a hard link, a FIFO or a '
+                   'folder)')
         if hasattr(os, 'getuid') and info.st_uid != os.getuid():
             refuse('the prompt file belongs to another user')
-        parent = os.path.realpath(os.path.dirname(os.path.abspath(path)))
-        roots = temp_roots()
-        if not any(parent == r or parent.startswith(r + os.sep) for r in roots) or \
-                any(part in prompt_denied() for part in parent.split(os.sep)):
-            refuse('the prompt file is not in your temporary folder (%s); its text goes to '
-                   'OpenAI' % ', '.join(roots))
         if info.st_size > PROMPT_MAX:
             refuse('the prompt file is larger than %d bytes' % PROMPT_MAX)
         data = b''
@@ -218,22 +259,64 @@ def check_worktree(path):
 
 # --- the clone -------------------------------------------------------------------------------
 
+def cache_folder():
+    base = os.environ.get('XDG_CACHE_HOME') or os.path.join(os.path.expanduser('~'), '.cache')
+    folder = os.path.join(base, 'agentic-github-flow', 'codex-worker')
+    os.makedirs(folder, mode=0o700, exist_ok=True)
+    return folder
+
+
 def paths(git_dir):
-    folder = os.path.join(git_dir, 'codex')
+    # Outside every folder Claude Code's sandbox writes: the chat cannot change the clone while
+    # this script runs git there, nor the export repository. Only the bundle goes beside it.
+    key = hashlib.sha256(os.fsencode(git_dir)).hexdigest()[:16]
+    folder = os.path.join(cache_folder(), 'clones', key)
     return {'folder': folder, 'clone': os.path.join(folder, 'clone'),
             'tmp': os.path.join(folder, 'tmp'), 'state': os.path.join(folder, 'state.json'),
             'export': os.path.join(folder, 'export.git'),
-            'bundle': os.path.join(folder, 'codex.bundle'), 'lock': os.path.join(folder, 'lock')}
+            'made': os.path.join(folder, 'codex.bundle'), 'git_dir': git_dir,
+            'bundle': os.path.join(git_dir, 'codex', 'codex.bundle'),
+            'lock': os.path.join(folder, 'lock')}
+
+
+def take_lock(path):
+    handle = open(path, 'a')
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return None
+    return handle
 
 
 def lock(where):
     os.makedirs(where['folder'], mode=0o700, exist_ok=True)
-    handle = open(where['lock'], 'a')
-    try:
-        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
+    handle = take_lock(where['lock'])
+    if handle is None:
         refuse('another codex_worker run holds %s' % where['lock'])
     return handle
+
+
+def sweep_clones(where):
+    """Remove the worker folders whose worktree's git folder is gone (cleanup-merged ran)."""
+    clones = os.path.dirname(where['folder'])
+    try:
+        names = os.listdir(clones)
+    except OSError:
+        return
+    for name in names:
+        folder = os.path.join(clones, name)
+        if folder == where['folder'] or os.path.islink(folder) or not os.path.isdir(folder):
+            continue
+        git_dir = read_state({'state': os.path.join(folder, 'state.json')}).get('git_dir')
+        if isinstance(git_dir, str) and os.path.isdir(git_dir):
+            continue
+        held = take_lock(os.path.join(folder, 'lock'))
+        if held is not None:
+            try:
+                shutil.rmtree(folder, ignore_errors=True)
+            finally:
+                held.close()
 
 
 def remove(path):
@@ -259,42 +342,89 @@ def write_state(where, state):
         json.dump(state, handle, indent=2)
 
 
-def clonefile_function():
-    """macOS clonefile(2), or None."""
+def fclonefileat_function():
+    """macOS fclonefileat(2): clone an open file into a folder, or None."""
     if sys.platform != 'darwin':
         return None
     try:
         import ctypes
         libc = ctypes.CDLL(None, use_errno=True)
-        function = libc.clonefile
-        function.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint32]
+        function = libc.fclonefileat
+        function.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32]
         return function
     except (OSError, AttributeError):
         return None
 
 
+class Folders:
+    """Descriptors of the folders on one path below a root, opened one name at a time without
+    following a link (made first when `make`), kept while the next path shares them."""
+
+    def __init__(self, root, make=False):
+        self.make = make
+        self.names = []
+        self.fds = [os.open(root, DIR_FLAGS)]
+
+    def open(self, parts):
+        keep = 0
+        while keep < len(self.names) and keep < len(parts) and self.names[keep] == parts[keep]:
+            keep += 1
+        while len(self.names) > keep:
+            self.names.pop()
+            os.close(self.fds.pop())
+        for part in parts[keep:]:
+            if part in (b'', b'.', b'..'):
+                raise OSError('not a plain path')
+            if self.make:
+                try:
+                    os.mkdir(part, 0o755, dir_fd=self.fds[-1])
+                except FileExistsError:
+                    pass
+            self.fds.append(os.open(part, DIR_FLAGS, dir_fd=self.fds[-1]))
+            self.names.append(part)
+        return self.fds[-1]
+
+    def close(self):
+        for fd in self.fds:
+            os.close(fd)
+
+
 def fill_with_clones(worktree, clone):
-    """APFS clones of the worktree's tracked regular files; git checks out the rest."""
-    clonefile = clonefile_function()
-    if clonefile is None:
+    """APFS clones of the worktree's tracked regular files; git checks out the rest.
+
+    Each source is opened one folder at a time without following a link and cloned from the
+    open file, so a folder the chat swaps for a link between the clean check and this copy
+    makes that file fail (git then writes it from the objects) instead of copying what the
+    link points at."""
+    fclonefileat = fclonefileat_function()
+    if fclonefileat is None:
         return 0
     listing = subprocess.run(['git', '-C', worktree] + GIT_SAFE + ['ls-files', '-z', '--stage'],
                              capture_output=True).stdout
     count = 0
-    for entry in listing.split(b'\0'):
-        meta, _, name = entry.partition(b'\t')
-        if not name or meta.split(b' ')[0] not in (b'100644', b'100755'):
-            continue
-        source = os.path.join(os.fsencode(worktree), name)
-        target = os.path.join(os.fsencode(clone), name)
-        try:
-            if not stat.S_ISREG(os.lstat(source).st_mode):
+    sources, targets = Folders(worktree), Folders(clone, make=True)
+    try:
+        for entry in listing.split(b'\0'):
+            meta, _, name = entry.partition(b'\t')
+            if not name or meta.split(b' ')[0] not in (b'100644', b'100755'):
                 continue
-            os.makedirs(os.path.dirname(target), exist_ok=True)
-        except OSError:
-            continue
-        if clonefile(source, target, 0) == 0:
-            count += 1
+            parts = name.split(b'/')
+            try:
+                fd = os.open(parts[-1], FILE_FLAGS, dir_fd=sources.open(parts[:-1]))
+            except OSError:
+                continue
+            try:
+                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                    continue
+                if fclonefileat(fd, targets.open(parts[:-1]), parts[-1], 0) == 0:
+                    count += 1
+            except OSError:
+                continue
+            finally:
+                os.close(fd)
+    finally:
+        sources.close()
+        targets.close()
     return count
 
 
@@ -322,9 +452,7 @@ def make_clone(worktree, branch, head, where):
 # --- the turn --------------------------------------------------------------------------------
 
 def log_folder():
-    base = os.environ.get('XDG_CACHE_HOME') or os.path.join(os.path.expanduser('~'), '.cache')
-    folder = os.path.join(base, 'agentic-github-flow', 'codex-worker')
-    os.makedirs(folder, mode=0o700, exist_ok=True)
+    folder = cache_folder()
     cutoff = time.time() - LOG_DAYS * 86400
     for name in os.listdir(folder):
         path = os.path.join(folder, name)
@@ -349,6 +477,7 @@ def codex_command(codex, model, resume, roots, last_message, marker):
                 '-c', 'sandbox_workspace_write.writable_roots=[%s]'
                 % ', '.join(toml_string(r) for r in roots),
                 '-c', 'shell_environment_policy.set.%s=%s' % (MARKER, toml_string(marker)),
+                '-c', 'features.hooks=false',
                 '-']
     return command
 
@@ -481,6 +610,7 @@ def run_turn(args, prompt, codex, worktree, branch, head, where):
     else:
         cloned = make_clone(worktree, branch, head, where)
         state = {'branch': branch, 'base': head, 'apfs_clones': cloned,
+                 'git_dir': where['git_dir'],
                  'created': datetime.datetime.now(datetime.timezone.utc).isoformat()}
     remove(where['tmp'])
     os.makedirs(where['tmp'], mode=0o700)
@@ -563,17 +693,13 @@ def run_turn(args, prompt, codex, worktree, branch, head, where):
 # --- the export ------------------------------------------------------------------------------
 
 def read_file_nofollow(base, parts, limit):
-    """The bytes of base/parts..., opened component by component without following a link."""
-    flags_dir = os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0) | getattr(os, 'O_NOFOLLOW', 0)
-    fds = []
+    """The bytes of base/parts..., opened one name at a time without following a link; None
+    for anything but a plain file (a FIFO opens without blocking and is refused)."""
     try:
-        fd = os.open(base, flags_dir)
-        fds.append(fd)
-        for part in parts[:-1]:
-            fd = os.open(part, flags_dir, dir_fd=fd)
-            fds.append(fd)
-        fd = os.open(parts[-1], os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0), dir_fd=fd)
-        fds.append(fd)
+        fd = open_below(base, parts)
+    except OSError:
+        return None
+    try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             return None
         data = os.read(fd, limit + 1)
@@ -581,8 +707,35 @@ def read_file_nofollow(base, parts, limit):
     except OSError:
         return None
     finally:
-        for fd in fds:
-            os.close(fd)
+        os.close(fd)
+
+
+def place_bundle(made, git_dir):
+    """Copy the bundle to <git folder>/codex/codex.bundle without following a link."""
+    top = os.open(git_dir, DIR_FLAGS)
+    try:
+        try:
+            os.mkdir('codex', 0o700, dir_fd=top)
+        except FileExistsError:
+            pass
+        folder = os.open('codex', DIR_FLAGS, dir_fd=top)
+    finally:
+        os.close(top)
+    try:
+        for name in ('codex.bundle.new', 'codex.bundle'):
+            try:
+                os.unlink(name, dir_fd=folder)
+            except FileNotFoundError:
+                pass
+        if made is None:
+            return
+        out = os.open('codex.bundle.new', os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                      getattr(os, 'O_NOFOLLOW', 0), 0o600, dir_fd=folder)
+        with open(made, 'rb') as source, os.fdopen(out, 'wb') as target:
+            shutil.copyfileobj(source, target)
+        os.replace('codex.bundle.new', 'codex.bundle', src_dir_fd=folder, dst_dir_fd=folder)
+    finally:
+        os.close(folder)
 
 
 def clone_tip(clone, branch):
@@ -612,7 +765,11 @@ def export(worktree, branch, head, where):
     tip = clone_tip(where['clone'], branch)
     exp = where['export']
     remove(exp)
-    remove(where['bundle'])
+    remove(where['made'])
+    try:
+        place_bundle(None, where['git_dir'])
+    except OSError as error:
+        refuse('cannot clear the old bundle in %s: %s' % (where['git_dir'], error))
     object_format = git(worktree, 'rev-parse', '--show-object-format') or 'sha1'
     if subprocess.run(['git', 'init', '-q', '--bare', '--object-format=' + object_format, exp],
                       capture_output=True).returncode != 0:
@@ -626,8 +783,13 @@ def export(worktree, branch, head, where):
         env.pop(name, None)
 
     def gx(*args, text=True):
-        return subprocess.run(['git', '--git-dir=' + exp] + EXPORT_SAFE + list(args),
-                              capture_output=True, text=text, env=env)
+        try:
+            return subprocess.run(['git', '--git-dir=' + exp] + EXPORT_SAFE + list(args),
+                                  capture_output=True, text=text, env=env,
+                                  stdin=subprocess.DEVNULL, timeout=EXPORT_SECONDS)
+        except subprocess.TimeoutExpired:
+            return subprocess.CompletedProcess(args, 124, '', 'git %s ran past %d s'
+                                               % (args[0], EXPORT_SECONDS))
 
     problems = []
     if tip is None:
@@ -648,12 +810,17 @@ def export(worktree, branch, head, where):
             for line in listing.stdout.splitlines():
                 sha, _, subject = line.partition('\t')
                 report['commits'].append({'sha': sha, 'subject': subject})
-            made = gx('bundle', 'create', '-q', where['bundle'], 'refs/heads/codex', '^' + head)
+            made = gx('bundle', 'create', '-q', where['made'], 'refs/heads/codex', '^' + head)
             if made.returncode != 0:
                 problems.append('git bundle create failed: %s' % made.stderr.strip()[-500:])
             else:
-                report['status'] = 'exported'
-                report['bundle'] = where['bundle']
+                try:
+                    place_bundle(where['made'], where['git_dir'])
+                    report['status'] = 'exported'
+                    report['bundle'] = where['bundle']
+                except OSError as error:
+                    problems.append('cannot place the bundle in %s: %s'
+                                    % (where['git_dir'], error))
     if problems:
         report['failure'] = '; '.join(problems)
     print(json.dumps(report, indent=2, ensure_ascii=False))
@@ -693,6 +860,7 @@ def main(argv=None):
         refuse('this system has no process groups; the kill after the turn needs them')
     where = paths(git_dir)
     held = lock(where)
+    sweep_clones(where)
     try:
         if args.export:
             return export(worktree, branch, head, where)

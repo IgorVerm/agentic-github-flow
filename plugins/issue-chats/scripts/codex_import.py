@@ -16,10 +16,15 @@ worktree:
 - no commit in the range is a merge, so every change shows in a commit's own diff;
 - no commit adds, changes or removes a submodule (a gitlink, mode 160000) or `.gitmodules`
   (a submodule's own configuration runs commands in a plain `git status`), anything under a
-  `.claude` folder, a `.mcp.json`, a `CLAUDE.md` or `CLAUDE.local.md` (Claude Code reads them
-  as settings, hooks, servers or instructions, a nested `CLAUDE.md` while the chat reviews the
-  files beside it), or a file under `core.hooksPath` when that lies in the worktree. Names
-  compare case-insensitively, as on macOS and Windows file systems.
+  `.claude` or `.codex` folder, a `.mcp.json`, a `CLAUDE.md`, `CLAUDE.local.md` or `AGENTS.md`
+  (Claude Code and Codex read them as settings, hooks, servers or instructions: a nested
+  `CLAUDE.md` while the chat reviews the files beside it, an `AGENTS.md` through the
+  `CLAUDE.md` that imports it, a `.codex/config.toml` in every later Codex session of a trusted
+  repository), or anything on the hooks path when `core.hooksPath` lies in the worktree: the
+  path as the configuration writes it and as it resolves through links, anything under either,
+  and each folder above either, so a link added or changed there cannot move the hooks to
+  files the same commits add. Names compare case-insensitively, as on macOS and Windows file
+  systems.
 Only when every check passes does it fast-forward the branch (`git merge --ff-only`). The chat
 then reviews `base..head` once before the push; this script reviews nothing.
 
@@ -38,7 +43,10 @@ import sys
 
 GIT_SAFE = ['-c', 'core.fsmonitor=false', '-c', 'submodule.recurse=false']
 NAMES = {'claude.md': 'Claude Code instructions', 'claude.local.md': 'Claude Code instructions',
+         'agents.md': 'agent instructions (AGENTS.md)',
          '.mcp.json': 'MCP server configuration', '.gitmodules': 'submodule configuration'}
+FOLDERS = {'.claude': 'Claude Code configuration (.claude)',
+           '.codex': 'Codex configuration (.codex)'}
 
 
 def refuse(message):
@@ -61,23 +69,31 @@ def reason_for(path, old_mode, new_mode, hooks):
         return 'a submodule (gitlink)'
     lower = path.lower()
     parts = lower.split('/')
-    if '.claude' in parts[:-1] or parts[-1] == '.claude':
-        return 'Claude Code configuration (.claude)'
+    for part in parts:
+        if part in FOLDERS:
+            return FOLDERS[part]
     if parts[-1] in NAMES:
         return NAMES[parts[-1]]
-    if hooks and (lower == hooks or lower.startswith(hooks + '/')):
-        return 'a git hook (core.hooksPath)'
+    for hook in hooks:
+        if hook == '.' or lower == hook or lower.startswith(hook + '/') or \
+                hook.startswith(lower + '/'):
+            return 'the git hooks path (core.hooksPath %s)' % hook
     return None
 
 
-def hooks_prefix(worktree):
+def hooks_paths(worktree):
+    """core.hooksPath inside the worktree, as written and as resolved (lower case), or []."""
     value = git(worktree, 'config', '--get', 'core.hooksPath')
     if not value:
-        return None
-    path = os.path.realpath(os.path.join(worktree, os.path.expanduser(value)))
-    if path != worktree and not path.startswith(worktree + os.sep):
-        return None
-    return os.path.relpath(path, worktree).replace(os.sep, '/').lower()
+        return []
+    written = os.path.normpath(os.path.join(worktree, os.path.expanduser(value)))
+    found = []
+    for path in (written, os.path.realpath(written)):
+        if path == worktree or path.startswith(worktree + os.sep):
+            relative = os.path.relpath(path, worktree).replace(os.sep, '/').lower()
+            if relative not in found:
+                found.append(relative)
+    return found
 
 
 def changes(worktree, commit):
@@ -145,7 +161,7 @@ def main(argv=None):
         elif git(worktree, 'rev-list', '--min-parents=2', '%s..%s' % (base, tip)):
             problems.append('the range holds a merge commit')
         else:
-            hooks = hooks_prefix(worktree)
+            hooks = hooks_paths(worktree)
             listing = git(worktree, 'log', '--reverse', '--format=%H%x09%s',
                           '%s..%s' % (base, tip)) or ''
             for line in listing.splitlines():

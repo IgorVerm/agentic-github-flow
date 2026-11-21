@@ -403,9 +403,10 @@ by the path that the person's allow rule names (`docs/install.md`, *Codex as the
    `codex exec`: Codex works until it stops, which may be a large task with many commits. The
    first turn makes the job, in a folder of the worker's under `~/.cache` that the chat's
    sandbox cannot write. The worker's header owns the refusals and Codex's sandbox: it writes
-   only the job, has no network and reads the disk except the deny list (`~/.ssh`, `~/.aws`,
-   `~/.netrc`, `~/.gnupg`, `~/.config/gh`, `.env` files, `*.pem`, `*.key`, `*.p12`); approval
-   `never`, the person's Codex configuration and rules ignored, no hooks. The time limit is the
+   only the job, has no network and reads the disk except the deny list (all of `~/.claude`,
+   `~/.ssh`, `~/.aws`, `~/.netrc`, `~/.gnupg`, `~/.config/gh`, `.env` files, `*.pem`, `*.key`,
+   `*.p12`, and the `Read(...)` deny rules of the person's settings, read at each run); approval
+   `never`, the person's Codex configuration and rules ignored, no hooks, no apps or plugins. The time limit is the
    settings row's third value, else 60 minutes; at the limit, or when Codex ends, the worker
    kills what is left of the turn. Of the report the chat reads `status` and Codex's
    `last_message`, nothing else: a few hundred tokens per turn.
@@ -439,8 +440,8 @@ by the path that the person's allow rule names (`docs/install.md`, *Codex as the
 
 What the route does not give: Codex's commands are not seen by Claude Code's hooks, only the
 `codex_worker.py` call is. Inside a worker turn the person's Codex configuration, execpolicy
-rules, MCP servers and hooks do not apply, because each of them can run a command outside
-Codex's sandbox; `~/.codex/AGENTS.md` still loads, and the reasoning effort is the model's
+rules, MCP servers and hooks do not apply, nor do the ChatGPT account's apps (connectors) and
+Codex plugins, because each of them can run a command or a tool outside Codex's sandbox; `~/.codex/AGENTS.md` still loads, and the reasoning effort is the model's
 default. An approval never reaches the user, because Codex asks for none. A process of a turn
 that leaves its process group and drops its environment outlives the kill, inside Codex's
 sandbox, where it writes only its own job. Codex's folder holds no `.git` folder (git works

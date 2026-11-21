@@ -18,8 +18,10 @@ or one Codex planted in its git folder, running outside a sandbox; a process an 
 behind reaching a fresh job; Codex started for a primary checkout, a detached HEAD or a dirty
 worktree, with a model, a thread id or a time limit that is not a plain value, with a prompt
 that is empty, missing or a FIFO; a dangerous option, the person's configuration or rules, a
-hook, the shell snapshot, the network, a wider writable folder or a missing read denial reaching
-`codex`; a GIT_* variable reaching Codex's own process; the job in a folder the chat names; a
+hook, the shell snapshot, apps or plugins, the network, a wider writable folder or a missing
+read denial reaching `codex` (also one of the person's Read deny rules); a Read deny rule the
+profile cannot express, unreadable settings or a worker installed where Codex may not read
+accepted; a GIT_* variable reaching Codex's own process; the job in a folder the chat names; a
 process the turn left behind still running after it; a turn past its time limit not killed or
 not reported; rewritten history exported; the import taking a bundle behind a link, a submodule,
 a `.claude` or `.codex` file, a `.mcp.json`, a nested `CLAUDE.md`, an `AGENTS.md`, a link that
@@ -258,7 +260,8 @@ def main():
 
         def run(args, tool=TOOL, direct=False, **extra):
             command = [sys.executable, tool] + args
-            if tool == TOOL and not direct and sys.platform != 'darwin':
+            if os.path.basename(tool) == 'codex_worker.py' and not direct \
+                    and sys.platform != 'darwin':
                 command = [sys.executable, launcher, tool] + args
             return subprocess.run(command, capture_output=True, text=True,
                                   env=dict(env, **extra))
@@ -290,11 +293,12 @@ def main():
         empty = os.path.join(base, 'empty.txt')
         open(empty, 'w').close()
 
-        def refused(name, args, **extra):
+        def refused(name, args, reason='', **extra):
             if os.path.exists(log):
                 os.remove(log)
             result = run(args, **extra)
-            check(name, result.returncode == 3, 'exit %d: %s' % (result.returncode, result.stderr))
+            check(name, result.returncode == 3 and reason in result.stderr,
+                  'exit %d: %s' % (result.returncode, result.stderr))
             check(name + ' (codex exec not started)', not os.path.exists(log))
 
         good = ['--model', 'gpt-6.2-astra', '--prompt-file', prompt]
@@ -331,6 +335,32 @@ def main():
         os.remove(os.path.join(wt, 'stray.txt'))
         refused('resume without a job', [wt] + good + ['--resume', THREAD])
         refused('export without a job', [wt, '--export'])
+        # The person's Read(...) deny rules are read at each run; one the profile cannot express,
+        # or settings that cannot be read, refuse the run instead of running with less denied.
+        settings = os.path.join(home, '.claude', 'settings.json')
+        os.makedirs(os.path.dirname(settings))
+        for name, text in (('a Read rule relative to the folder',
+                            '{"permissions": {"deny": ["Read(./secrets/**)"]}}'),
+                           ('a Read rule with a wildcard in a folder',
+                            '{"permissions": {"deny": ["Read(~/*/token)"]}}'),
+                           ('settings that are not JSON', '{"permissions": ')):
+            with open(settings, 'w') as f:
+                f.write(text)
+            refused('deny list: %s' % name, [wt] + good, reason='settings.json')
+        os.remove(settings)
+        os.mkfifo(settings)
+        refused('deny list: settings that are a FIFO', [wt] + good, reason='plain settings')
+        os.remove(settings)
+        with open(settings, 'w') as f:
+            json.dump({'permissions': {'deny': ['Read(~/vault/**)', 'Read(**/.npmrc)',
+                                                'Read(//opt/secrets)', 'Edit(~/.gitconfig)',
+                                                'Bash(rm *)']}}, f)
+        # A plugin copy under ~/.claude would be unreadable in Codex's sandbox: refused up front.
+        copy = os.path.join(home, '.claude', 'plugins', 'scripts')
+        shutil.copytree(SCRIPTS, copy)
+        refused('the worker installed under ~/.claude', [wt] + good, reason='outside ~/.claude',
+                tool=os.path.join(copy, 'codex_worker.py'))
+        shutil.rmtree(copy)
 
         jobs = os.path.join(home, '.cache', 'agentic-github-flow', 'codex-worker', 'jobs')
         check('a refused setup leaves no job',
@@ -375,8 +405,10 @@ def main():
         check('approval never', 'approval_policy="never"' in configs, str(configs))
         check('the profile is selected', 'default_permissions="agf_codex_worker"' in configs)
         check('no network', 'permissions.agf_codex_worker.network.enabled=false' in configs)
-        check('Codex\'s hooks and shell snapshot off', 'features.hooks=false' in configs and
-              'features.shell_snapshot=false' in configs, str(configs))
+        for feature in ('hooks', 'shell_snapshot', 'apps', 'plugins',
+                        'skill_mcp_dependency_install'):
+            check('Codex feature %s off' % feature, 'features.%s=false' % feature in configs,
+                  str(configs))
         table = [c for c in configs if c.startswith('permissions.agf_codex_worker.filesystem=')]
         pairs = {}
         if table:
@@ -387,11 +419,17 @@ def main():
               sorted(k for k, v in pairs.items() if v == 'write') == sorted(folders), str(pairs))
         check('the disk is readable, not writable', pairs.get(':root') == 'read', str(pairs))
         denied = sorted(k for k, v in pairs.items() if v == 'deny')
-        for name in ('.ssh', '.aws', '.netrc', '.gnupg', os.path.join('.config', 'gh')):
+        for name in ('.claude', '.ssh', '.aws', '.netrc', '.gnupg', os.path.join('.config', 'gh'),
+                     'vault'):
             check('read denied: ~/%s' % name, os.path.join(os.path.realpath(home), name) in denied,
                   str(denied))
-        for pattern in ('/**/.env', '/**/.env.*', '/**/*.pem', '/**/*.key', '/**/*.p12'):
+        for pattern in ('/**/.env', '/**/.env.*', '/**/*.pem', '/**/*.key', '/**/*.p12',
+                        '/**/.npmrc', '/opt/secrets', '/private/tmp/cc-daemon-%d' % os.getuid(),
+                        '/private/tmp/claude-%d/bash-edit-diff' % os.getuid()):
             check('read denied: %s' % pattern, pattern in denied, str(denied))
+        check('only Read rules join the deny list',
+              not [k for k in denied if 'gitconfig' in k or 'rm' == os.path.basename(k)],
+              str(denied))
         policy = {c.split('.set.', 1)[1].split('=', 1)[0]: json.loads(c.split('=', 1)[1])
                   for c in configs if c.startswith('shell_environment_policy.set.')}
         check('Codex\'s commands reach the git folder through the environment',

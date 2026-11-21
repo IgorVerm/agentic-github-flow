@@ -316,14 +316,21 @@ on. The chat runs Codex through one script, which fixes Codex's sandbox and neve
 - **Writes:** only a job folder of the script's own under
   `~/.cache/agentic-github-flow/codex-worker/`, never the chat's repository. Its files are
   copy-on-write clones of the worktree's and cost no disk.
-- **Reads:** the disk, except `~/.ssh`, `~/.aws`, `~/.netrc`, `~/.gnupg`, `~/.config/gh` and any
-  `.env`, `.env.*`, `*.pem`, `*.key` or `*.p12` file, which is what Claude Code's sandbox should
-  deny the chat as well. Everything else Codex may read can go to OpenAI: send it no work on a
-  machine whose files may not.
+- **Reads:** the disk, except all of `~/.claude`, `~/.ssh`, `~/.aws`, `~/.netrc`, `~/.gnupg`,
+  `~/.config/gh`, Claude Code's folders under `/private/tmp`, and any `.env`, `.env.*`, `*.pem`,
+  `*.key` or `*.p12` file, plus every `Read(...)` deny rule in `~/.claude/settings.json` and the
+  managed settings, read at each run. So Codex reads no less than what Claude Code's sandbox
+  denies the chat. A deny rule must be written as `**/name`, `~/path` or `//path` (an optional
+  trailing `/**`); another form refuses the run, as does a plugin copy under `~/.claude`.
+  Everything else Codex may read can go to OpenAI: send it no work on a machine whose files may
+  not.
 - **No network**, approval `never`, a time limit per turn, after which the script kills what is
   left of it.
 - **The person's Codex configuration does not apply in these turns** (`~/.codex/config.toml`,
   its rules, MCP servers and hooks), because each can run a command outside Codex's sandbox.
+  **Nor do the ChatGPT account's apps (connectors) and Codex plugins:** they are on whenever
+  Codex is logged in with ChatGPT, whatever the configuration, and their tools run outside
+  Codex's sandbox with the account's connections, so the script turns them off for each turn.
 
 The script itself runs outside Claude Code's sandbox (Codex needs the network and writes
 `~/.codex`). It therefore runs no git and opens no file that the chat or Codex wrote: the setup

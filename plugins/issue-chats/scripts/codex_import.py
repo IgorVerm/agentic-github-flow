@@ -18,16 +18,20 @@ worktree:
 - no commit in the range is a merge, so every change shows in a commit's own diff;
 - no commit adds, changes or removes a submodule (a gitlink, mode 160000) or `.gitmodules`
   (a submodule's own configuration runs commands in a plain `git status`), anything under a
-  `.claude` or `.codex` folder, a `.mcp.json`, a `CLAUDE.md`, `CLAUDE.local.md` or `AGENTS.md`
-  (Claude Code and Codex read them as settings, hooks, servers or instructions: a nested
+  `.claude`, `.codex` or `.agents` folder, a `.mcp.json`, a `CLAUDE.md`, `CLAUDE.local.md`,
+  `AGENTS.md` or `AGENTS.override.md` (Claude Code and Codex read them as settings, skills,
+  hooks, servers or instructions: a nested
   `CLAUDE.md` while the chat reviews the files beside it, an `AGENTS.md` through the
   `CLAUDE.md` that imports it, a `.codex/config.toml` in every later Codex session of a trusted
   repository), or anything on the hooks path when `core.hooksPath` lies in the worktree: the
   path as the configuration writes it, at each link on the way and as it resolves, anything
-  under one of them and each folder above one, so a link added or changed there cannot move the hooks to
-  files the same commits add. Names compare case-insensitively, as on macOS and Windows file
-  systems.
-Only when every check passes does it fast-forward the branch (`git merge --ff-only`). The chat
+  under one of them, each folder above one and the folder that holds one (husky's stub in
+  `.husky/_` runs the scripts in `.husky`), so a link added or changed there cannot move the
+  hooks to files the same commits add; nor a hook manager's files (`.husky`,
+  `.pre-commit-config.yaml`, `lefthook.yml`), which the chat's next commit would run. Names
+  compare case-insensitively, as on macOS and Windows file systems.
+Only when every check passes does it fast-forward the branch (`git merge --ff-only`), with the
+hooks path set to nothing, so that no hook runs before the chat has reviewed the commits. The chat
 then reviews `base..head` once before the push; this script reviews nothing.
 
 It prints one JSON object: `status` (`imported`, `nothing`: the bundle's head is already in the
@@ -46,9 +50,17 @@ import sys
 GIT_SAFE = ['-c', 'core.fsmonitor=false', '-c', 'submodule.recurse=false']
 NAMES = {'claude.md': 'Claude Code instructions', 'claude.local.md': 'Claude Code instructions',
          'agents.md': 'agent instructions (AGENTS.md)',
-         '.mcp.json': 'MCP server configuration', '.gitmodules': 'submodule configuration'}
+         'agents.override.md': 'agent instructions (AGENTS.override.md)',
+         '.mcp.json': 'MCP server configuration', '.gitmodules': 'submodule configuration',
+         '.pre-commit-config.yaml': 'git hook configuration (pre-commit)',
+         'lefthook.yml': 'git hook configuration (lefthook)',
+         '.lefthook.yml': 'git hook configuration (lefthook)',
+         'lefthook-local.yml': 'git hook configuration (lefthook)',
+         '.lefthook-local.yml': 'git hook configuration (lefthook)'}
 FOLDERS = {'.claude': 'Claude Code configuration (.claude)',
-           '.codex': 'Codex configuration (.codex)'}
+           '.codex': 'Codex configuration (.codex)',
+           '.agents': 'Codex skills and plugins (.agents)',
+           '.husky': 'git hooks (husky)'}
 
 
 def refuse(message):
@@ -77,8 +89,11 @@ def reason_for(path, old_mode, new_mode, hooks):
     if parts[-1] in NAMES:
         return NAMES[parts[-1]]
     for hook in hooks:
+        # The hooks path, anything under it, each folder above it, and the folder that holds
+        # it: a hook manager's stub there (husky's `.husky/_`) runs the scripts beside it.
+        holder = hook.rsplit('/', 1)[0] if '/' in hook else hook
         if hook == '.' or lower == hook or lower.startswith(hook + '/') or \
-                hook.startswith(lower + '/'):
+                hook.startswith(lower + '/') or lower.startswith(holder + '/'):
             return 'the git hooks path (core.hooksPath %s)' % hook
     return None
 
@@ -176,6 +191,8 @@ def main(argv=None):
     if not branch:
         refuse('HEAD of %s is not on a branch' % path)
     base = git(worktree, 'rev-parse', '--verify', '--quiet', 'HEAD')
+    if not base:
+        refuse('the branch of %s has no commit' % path)
     if git(worktree, 'status', '--porcelain', '--untracked-files=all') != '':
         refuse('%s has uncommitted changes' % path)
     bundle = copy_bundle(argv[1], git_dir)
@@ -215,7 +232,10 @@ def main(argv=None):
             if report['refused']:
                 problems.append('Codex\'s commits change paths only the Claude chat may change')
             else:
-                merged = run(worktree, 'merge', '--ff-only', '-q', tip)
+                # No hook runs: a post-merge or post-checkout hook in the worktree could be one
+                # these commits wrote, and it would run before the chat has reviewed them.
+                merged = run(worktree, '-c', 'core.hooksPath=' + os.devnull, 'merge',
+                             '--ff-only', '-q', tip)
                 if merged.returncode != 0:
                     problems.append('git merge --ff-only failed: %s'
                                     % merged.stderr.strip()[-500:])

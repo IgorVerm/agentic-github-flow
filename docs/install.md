@@ -318,12 +318,15 @@ on. The chat runs Codex through one script, which fixes Codex's sandbox and neve
   copy-on-write clones of the worktree's and cost no disk.
 - **Reads:** the disk, except all of `~/.claude`, `~/.ssh`, `~/.aws`, `~/.netrc`, `~/.gnupg`,
   `~/.config/gh`, Claude Code's folders under `/private/tmp`, and any `.env`, `.env.*`, `*.pem`,
-  `*.key` or `*.p12` file, plus every `Read(...)` deny rule in `~/.claude/settings.json` and the
-  managed settings, read at each run. So Codex reads no less than what Claude Code's sandbox
-  denies the chat. A deny rule must be written as `**/name`, `~/path` or `//path` (an optional
-  trailing `/**`); another form refuses the run, as does a plugin copy under `~/.claude`.
-  Everything else Codex may read can go to OpenAI: send it no work on a machine whose files may
-  not.
+  `*.key` or `*.p12` file, plus, read at each run, every `Read(...)` deny rule and
+  `sandbox.filesystem.denyRead` entry of `~/.claude/settings.json`, the managed settings and the
+  project's `.claude/settings.json` and `settings.local.json`. So Codex reads no less than what
+  those settings make Claude Code's sandbox deny the chat. A deny rule must be written as
+  `**/name`, `~/path` or `//path`, a denyRead entry as `~/path`, `//path` or, in the person's
+  own settings, `/path` (each with an optional trailing `/**`); another form refuses the run, as
+  do `sandbox.credentials`, `permissions.blockReadsOutsideWorkingDirectories` and a plugin copy
+  under `~/.claude`. Everything else Codex may read can go to OpenAI: send it no work on a
+  machine whose files may not.
 - **No network**, approval `never`, a time limit per turn, after which the script kills what is
   left of it.
 - **The person's Codex configuration does not apply in these turns** (`~/.codex/config.toml`,
@@ -336,10 +339,12 @@ The script itself runs outside Claude Code's sandbox (Codex needs the network an
 `~/.codex`). It therefore runs no git and opens no file that the chat or Codex wrote: the setup
 of a job, the reading of the prompt and the export of Codex's commits as a git bundle all run
 inside Codex's sandbox, and the chat imports the bundle inside its own with `codex_import.py`,
-which refuses submodules, hooks and changes to `.claude/`, `.codex/`, `.mcp.json`, `CLAUDE.md`
-and `AGENTS.md`. It takes no program to run (`codex` comes from PATH). Two conditions are the
-person's: Claude Code's sandbox must not make `~/.cache/agentic-github-flow` or the installed
-plugin folder writable, and the rule below is spelled with `-I`, so that Python reads no
+which refuses submodules, hooks and hook managers' files, and changes to `.claude/`,
+`.codex/`, `.agents/`, `.mcp.json`, `CLAUDE.md`, `AGENTS.md` and `AGENTS.override.md`, and runs
+no hook while it fast-forwards. It takes no program to run (`codex` and `python3` come from
+PATH). Three conditions are the person's: Claude Code's sandbox must not make
+`~/.cache/agentic-github-flow`, the installed plugin folder or a folder on PATH before `codex`'s
+and `python3`'s writable, and the rule below is spelled with `-I`, so that Python reads no
 `PYTHONPATH`. On the person's yes, allow that script alone and exclude it from the sandbox, in
 each spelling the agents use, never `codex exec` or `codex sandbox` itself and never
 `codex_import.py` or `codex_job.py`:

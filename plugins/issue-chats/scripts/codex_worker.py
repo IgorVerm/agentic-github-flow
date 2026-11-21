@@ -50,22 +50,26 @@ the read deny list. Its floor is all of `~/.claude` (Claude Code's sandbox denie
 `file-history`, `daemon`, `ide`, `remote/run`, `bridge-spawn` and `seed-admin` folders; Codex
 needs none of it), `~/.ssh`, `~/.aws`, `~/.netrc`, `~/.gnupg`, `~/.config/gh`,
 `/private/tmp/cc-daemon-<uid>`, `/private/tmp/claude-<uid>/bash-edit-diff`, and any `.env`,
-`.env.*`, `*.pem`, `*.key` or `*.p12`. On top of it come the `Read(...)` deny rules of
-`~/.claude/settings.json` and the managed settings, read at each run (files the chat's sandbox
-cannot write), so the list never falls behind what Claude Code's sandbox denies the chat; a rule
-the profile cannot express (anything but `**/name`, `~/path` and `//path`, with an optional
-trailing `/**`) refuses the run. Measured on macOS with `codex sandbox` (2026-11-21): each entry
-refused, `/private/tmp` ones also through `/tmp`, a pattern also inside a writable folder, a
-folder named by `**/name` with its contents, a denied file also through a symlink and for a new
-hard link; this script's folder, Python and `~/.codex` stay readable. The prompt file is read
-under it too, so the chat cannot have a denied file sent to OpenAI.
+`.env.*`, `*.pem`, `*.key` or `*.p12`. On top of it comes, read at each run, what the settings
+deny: the `Read(...)` deny rules and `sandbox.filesystem.denyRead` of `~/.claude/settings.json`
+and the managed settings (files the chat's sandbox cannot write), and of the project's
+`.claude/settings.json` and `settings.local.json` in the worktree, which are the chat's files and
+so are read inside Codex's sandbox. So the list does not fall behind what those settings make
+Claude Code's sandbox deny the chat. What the profile cannot express refuses the run: a rule of
+another form than `**/name`, `~/path` and `//path` (a denyRead entry also `/path`, in the
+person's own settings), an optional trailing `/**` aside; `sandbox.credentials`; and
+`permissions.blockReadsOutsideWorkingDirectories`. Measured on macOS with `codex sandbox`
+(2026-11-21): each entry refused, `/private/tmp` ones also through `/tmp`, a pattern also inside
+a writable folder, a folder named by `**/name` with its contents, a denied file also through a
+symlink and for a new hard link; this script's folder, Python and `~/.codex` stay readable. The
+prompt file is read under it too, so the chat cannot have a denied file sent to OpenAI.
 
 It refuses (exit 3) before Codex starts unless: the system is macOS (the only one the profile
 is measured on) with process groups; the settings' deny rules are readable and expressible;
 this script's folder and Python lie outside the deny list; the model and the thread id are plain
-values and the time limit is 1 to 1440 minutes; a resume finds its job; and the setup accepts
-the worktree (the top of a linked worktree, on a branch with a commit, clean) and the prompt file
-(a plain file of at most 1 MiB, not empty).
+values and the time limit is more than 0 and at most 1440 minutes; a resume finds its job; and
+the setup accepts the worktree (the top of a linked worktree, on a branch with a commit, clean)
+and the prompt file (a plain file of at most 1 MiB, not empty).
 
 **A turn** is one `codex exec` (or `codex exec resume <thread id>`) in `<job>/work`, the prompt
 on stdin after a fixed note on the git setup, in a process session of its own, with a time limit
@@ -144,10 +148,10 @@ USER_SETTINGS = os.path.join('.claude', 'settings.json')
 MANAGED_SETTINGS = '/Library/Application Support/ClaudeCode'
 SETTINGS_MAX = 1024 * 1024
 FEATURES_OFF = ('hooks', 'shell_snapshot', 'apps', 'plugins', 'skill_mcp_dependency_install')
-REPORT_MAX = 2 * 1024 * 1024
+REPORT_MAX = 8 * 1024 * 1024  # a 1 MiB prompt, JSON-escaped
 LOG_DAYS = 30
 MARKER = 'CODEX_WORKER_TURN'
-SECONDS = {'setup': 3600, 'prompt': 30, 'export': 600}
+SECONDS = {'setup': 3600, 'prompt': 30, 'settings': 30, 'export': 600}
 NOTE = '''[Note from the worker that started you]
 You work in %(work)s on branch %(branch)s. It is a git repository, but it has no .git folder:
 git reaches it through the GIT_DIR and GIT_WORK_TREE variables that every command of yours
@@ -172,7 +176,9 @@ def toml_string(value):
 # --- the worker's own folder -------------------------------------------------------------------
 
 def cache_folder():
-    # From the home folder alone: an environment variable could move it to where the chat writes.
+    # From the home folder ($HOME), not XDG_CACHE_HOME, which the chat could point where it
+    # writes. A `HOME=…` prefix keeps the call inside Claude Code's sandbox (measured 2026-11-21:
+    # an env-var prefix does not match `sandbox.excludedCommands`), where Codex cannot start.
     folder = os.path.join(os.path.realpath(os.path.expanduser('~')), '.cache',
                           'agentic-github-flow', 'codex-worker')
     os.makedirs(folder, mode=0o700, exist_ok=True)
@@ -304,11 +310,72 @@ def rule_path(rule, home):
     return path
 
 
+def sandbox_path(path, home, project):
+    """The profile path of a `sandbox.filesystem.denyRead` entry (`~/path`, `//path`, and in the
+    person's own settings `/path`, measured absolute there: this session's sandbox shows
+    `/private/tmp/…` from `allowWrite` as written; an optional trailing `/**`), None for any
+    other form or a wildcard."""
+    body = path[:-3] if path.endswith('/**') else path
+    if body.startswith('~/'):
+        body = os.path.join(home, body[2:])
+    elif body.startswith('//'):
+        body = body[1:]
+    elif project or not body.startswith('/'):
+        return None
+    if any(char in body for char in '*?[]{}') or '..' in body.split('/') or body == '/':
+        return None
+    return body
+
+
+def settings_denials(settings, source, home, project=False):
+    """The deny entries one settings file adds: its Read(...) deny rules and its
+    `sandbox.filesystem.denyRead`. Refuses what the profile cannot hold: a rule of another
+    form, `sandbox.credentials`, `permissions.blockReadsOutsideWorkingDirectories`."""
+    if not isinstance(settings, dict):
+        return []
+    permissions, sandbox = settings.get('permissions') or {}, settings.get('sandbox') or {}
+    if not isinstance(permissions, dict) or not isinstance(sandbox, dict):
+        refuse('%s: permissions or sandbox is not an object' % source)
+    if permissions.get('blockReadsOutsideWorkingDirectories'):
+        refuse('%s: blockReadsOutsideWorkingDirectories cannot be carried into Codex\'s profile'
+               % source)
+    if sandbox.get('credentials'):
+        refuse('%s: sandbox.credentials is not measured with Codex\'s profile' % source)
+    filesystem = sandbox.get('filesystem') or {}
+    rules = permissions.get('deny') or []
+    reads = filesystem.get('denyRead') or [] if isinstance(filesystem, dict) else None
+    if not isinstance(rules, list) or not isinstance(reads, list):
+        refuse('%s: permissions.deny or sandbox.filesystem.denyRead is not a list' % source)
+    found = []
+    for rule in rules:
+        if not isinstance(rule, str) or not (rule == 'Read' or rule.startswith('Read(')):
+            continue
+        entry = rule_path(rule, home) if rule.endswith(')') else None
+        if entry is None:
+            refuse('%s: the deny rule %r has a form Codex\'s profile is not measured with; '
+                   'write it as **/name, ~/path or //path' % (source, rule))
+        found.append(entry)
+    for path in reads:
+        entry = sandbox_path(path, home, project) if isinstance(path, str) else None
+        if entry is None:
+            refuse('%s: denyRead entry %r has a form Codex\'s profile is not measured with; '
+                   'write it as ~/path or //path' % (source, path))
+        found.append(entry)
+    return found
+
+
+def add_denied(entries):
+    for entry in entries:
+        if entry not in DENIED:
+            DENIED.append(entry)
+
+
 def deny_list():
-    """The read deny list: the floor above, and every Read(...) deny rule of the person's
-    settings and the managed settings, read now so that no copy drifts. Refuses a rule the
-    profile cannot express: running with less than Claude Code's sandbox denies is the defect
-    of issue #107."""
+    """The read deny list: the floor above, and what the person's settings and the managed
+    settings deny, read now so that no copy drifts. The project's settings in the worktree are
+    the chat's files, so they are read inside Codex's sandbox (`project_denials`). Refuses what
+    the profile cannot express: running with less than Claude Code's sandbox denies is the
+    defect of issue #107."""
     home = os.path.realpath(os.path.expanduser('~'))
     denied = [os.path.join(home, name) for name in DENY_HOME] + list(DENY_GLOBS)
     if hasattr(os, 'getuid'):
@@ -320,17 +387,7 @@ def deny_list():
         files += sorted(os.path.join(drop_in, name) for name in os.listdir(drop_in)
                         if name.endswith('.json'))
     for path in files:
-        settings = read_settings(path)
-        rules = ((settings or {}).get('permissions') or {}).get('deny') or []
-        if not isinstance(rules, list):
-            refuse('%s: permissions.deny is not a list' % path)
-        for rule in rules:
-            if not isinstance(rule, str) or not (rule == 'Read' or rule.startswith('Read(')):
-                continue
-            entry = rule_path(rule, home) if rule.endswith(')') else None
-            if entry is None:
-                refuse('%s: the deny rule %r has a form Codex\'s profile is not measured with; '
-                       'write it as **/name, ~/path or //path' % (path, rule))
+        for entry in settings_denials(read_settings(path), path, home):
             if entry not in denied:
                 denied.append(entry)
     return denied
@@ -344,6 +401,20 @@ def outside_denied(path):
     real = os.path.realpath(path)
     return not any(real == entry or real.startswith(entry.rstrip('/') + '/')
                    for entry in DENIED if not entry.startswith('/**/'))
+
+
+def project_denials(codex, job, worktree):
+    """Add what the project's `.claude/settings.json` and `settings.local.json` deny. They are
+    read inside Codex's sandbox (codex_job.py `settings`); False when that fails."""
+    code, read = in_sandbox(codex, job, 'settings', worktree)
+    files = read.get('settings')
+    if code != 0 or read.get('status') != 'read' or not isinstance(files, dict):
+        return False
+    home = os.path.realpath(os.path.expanduser('~'))
+    for name in sorted(files):
+        add_denied(settings_denials(files[name], os.path.join(worktree, '.claude', str(name)),
+                                    home, project=True))
+    return True
 
 
 def profile_config(job):
@@ -592,6 +663,10 @@ def run_turn(args, codex, where):
         if args.resume:
             refuse('no job to resume in (%s); start a new thread' % where['folder'])
         name, job = new_job(where)
+    if not project_denials(codex, job, where['worktree']):
+        if name:
+            retire(where['folder'], name)
+        refuse('the project\'s Claude Code settings could not be read inside Codex\'s sandbox')
     code, read = in_sandbox(codex, job, 'prompt', os.path.abspath(args.prompt_file))
     prompt = read.get('prompt')
     if code != 0 or not isinstance(prompt, str) or not prompt.strip():

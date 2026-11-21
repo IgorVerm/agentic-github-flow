@@ -4,6 +4,7 @@
 Usage (by codex_worker.py only, as `codex sandbox … -- python3 -I codex_job.py …`):
        codex_job.py setup <worktree> <job>
        codex_job.py prompt <file>
+       codex_job.py settings <worktree>
        codex_job.py export <job> <base>
 
 `codex_worker.py` runs outside every sandbox, so it runs no git and opens no file that the
@@ -25,6 +26,12 @@ Codex's sandbox protects, `.codex` or `.agents` at the top, or one the deny list
 `.env`) is marked skip-worktree: Codex neither sees it as deleted nor commits its removal.
 
 `prompt` prints a plain file of at most 1 MiB, for the worker to hand to Codex.
+
+`settings` prints what the project's `.claude/settings.json` and `.claude/settings.local.json`
+in <worktree> say about reads (`permissions.deny` Read rules,
+`permissions.blockReadsOutsideWorkingDirectories`, `sandbox.filesystem.denyRead`,
+`sandbox.credentials`), for the worker to add to the deny list. A file that is missing counts as
+empty; one that is not a plain file of at most 1 MiB of JSON is refused.
 
 `export` cuts `<job>/out/codex.bundle`: Codex's commits on its branch on top of <base>.
 
@@ -164,27 +171,73 @@ def setup(worktree, job):
 
 
 def prompt(path):
+    data = read_plain(path, PROMPT_MAX, 'the prompt file')
+    if data is None:
+        raise Refused('cannot read the prompt file: it does not exist')
+    text = data.decode('utf-8', errors='replace')
+    if not text.strip():
+        raise Refused('the prompt file is empty')
+    return {'status': 'read', 'prompt': text}
+
+
+def read_plain(path, limit, what):
+    """The bytes of a plain file of at most limit bytes; None when it does not exist."""
     try:
         fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NONBLOCK', 0))
+    except FileNotFoundError:
+        return None
     except OSError as error:
-        raise Refused('cannot read the prompt file: %s' % error.strerror)
+        raise Refused('cannot read %s: %s' % (what, error.strerror))
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
-            raise Refused('the prompt file is not a plain file')
+            raise Refused('%s is not a plain file' % what)
         data = b''
-        while len(data) <= PROMPT_MAX:
+        while len(data) <= limit:
             block = os.read(fd, 65536)
             if not block:
                 break
             data += block
     finally:
         os.close(fd)
-    if len(data) > PROMPT_MAX:
-        raise Refused('the prompt file is larger than %d bytes' % PROMPT_MAX)
-    text = data.decode('utf-8', errors='replace')
-    if not text.strip():
-        raise Refused('the prompt file is empty')
-    return {'status': 'read', 'prompt': text}
+    if len(data) > limit:
+        raise Refused('%s is larger than %d bytes' % (what, limit))
+    return data
+
+
+def settings(worktree):
+    found = {}
+    for name in ('settings.json', 'settings.local.json'):
+        path = os.path.join(worktree, '.claude', name)
+        data = read_plain(path, PROMPT_MAX, path)
+        if data is None:
+            continue
+        try:
+            whole = json.loads(data.decode('utf-8'))
+        except ValueError:
+            raise Refused('%s is not valid JSON, so its read rules are unknown' % path)
+        if not isinstance(whole, dict):
+            continue
+        permissions, sandbox = whole.get('permissions'), whole.get('sandbox')
+        kept = {}
+        if isinstance(permissions, dict):
+            deny = permissions.get('deny')
+            kept['permissions'] = {
+                'deny': [rule for rule in deny if isinstance(rule, str) and
+                         (rule == 'Read' or rule.startswith('Read('))]
+                if isinstance(deny, list) else deny,
+                'blockReadsOutsideWorkingDirectories':
+                    permissions.get('blockReadsOutsideWorkingDirectories')}
+        elif permissions is not None:
+            kept['permissions'] = permissions
+        if isinstance(sandbox, dict):
+            filesystem = sandbox.get('filesystem')
+            kept['sandbox'] = {'credentials': sandbox.get('credentials'), 'filesystem': {
+                'denyRead': filesystem.get('denyRead')} if isinstance(filesystem, dict)
+                else filesystem}
+        elif sandbox is not None:
+            kept['sandbox'] = sandbox
+        found[name] = kept
+    return {'status': 'read', 'settings': found}
 
 
 def export(job, base):
@@ -212,7 +265,8 @@ def export(job, base):
 
 
 def main(argv):
-    actions = {'setup': (setup, 2), 'prompt': (prompt, 1), 'export': (export, 2)}
+    actions = {'setup': (setup, 2), 'prompt': (prompt, 1), 'settings': (settings, 1),
+               'export': (export, 2)}
     if not argv or argv[0] not in actions or len(argv) - 1 != actions[argv[0]][1]:
         print(__doc__.split('\n\n')[1], file=sys.stderr)
         return 2

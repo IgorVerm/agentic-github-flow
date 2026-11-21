@@ -394,9 +394,9 @@ by the path that the person's allow rule names (`docs/install.md`, *Codex as the
    setup of a job refuses a dirty worktree.
 2. **Write the prompt** to a file: the issue number and its task, its check and code paths, the
    repository's `AGENTS.md` to follow, commits by path whose subject ends in `(#<issue>)`,
-   nothing under `.claude/` or `.codex/`, no `.mcp.json`, `CLAUDE.md`, `AGENTS.md`, submodule or
-   hook (the import refuses them). The worker adds a note of its own on Codex's git setup, never
-   pushing and that Codex cannot ask. The file is read inside Codex's sandbox, under its read
+   nothing under `.claude/`, `.codex/` or `.agents/`, no `.mcp.json`, `CLAUDE.md`, `AGENTS.md`,
+   submodule, hook or hook manager's file (the import refuses them). The worker adds a note of
+   its own on Codex's git setup, never pushing and that Codex cannot ask. The file is read inside Codex's sandbox, under its read
    deny list; its text goes to OpenAI.
 3. **Run a turn:** `<worker> <worktree> --model <model> --prompt-file <file>
    [--time-limit <minutes>]`, in the background, since a turn may run long. One turn is one
@@ -405,9 +405,10 @@ by the path that the person's allow rule names (`docs/install.md`, *Codex as the
    sandbox cannot write. The worker's header owns the refusals and Codex's sandbox: it writes
    only the job, has no network and reads the disk except the deny list (all of `~/.claude`,
    `~/.ssh`, `~/.aws`, `~/.netrc`, `~/.gnupg`, `~/.config/gh`, `.env` files, `*.pem`, `*.key`,
-   `*.p12`, and the `Read(...)` deny rules of the person's settings, read at each run); approval
-   `never`, the person's Codex configuration and rules ignored, no hooks, no apps or plugins. The time limit is the
-   settings row's third value, else 60 minutes; at the limit, or when Codex ends, the worker
+   `*.p12`, and what the user's, the managed and the project's Claude Code settings deny reads
+   of, read at each run); approval `never`, the person's Codex configuration and rules ignored,
+   no hooks, no apps or plugins. The time limit is the settings row's third value, else 60
+   minutes; at the limit, or when Codex ends, the worker
    kills what is left of the turn. Of the report the chat reads `status` and Codex's
    `last_message`, nothing else: a few hundred tokens per turn.
 4. **Record it:** a signed comment on the issue whose text after the signature opens with
@@ -423,9 +424,11 @@ by the path that the person's allow rule names (`docs/install.md`, *Codex as the
    bundle of Codex's commits cut inside Codex's sandbox and reports its path as `bundle`; then,
    inside the chat's own sandbox, `python3 <plugin>/scripts/codex_import.py <worktree> <bundle>`
    fast-forwards the branch. The import refuses (and changes nothing) when the bundle holds a
-   merge, a submodule, `.gitmodules`, a `.claude` or `.codex` file, a `.mcp.json`, a `CLAUDE.md`,
-   `CLAUDE.local.md` or `AGENTS.md`, or a change on a hooks path in the worktree (a link on the
-   way to it or above it too), or does not descend from HEAD. Then the chat makes such a change
+   merge, a submodule, `.gitmodules`, a `.claude`, `.codex` or `.agents` file, a `.mcp.json`, a
+   `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md` or `AGENTS.override.md`, a hook manager's file
+   (`.husky`, `.pre-commit-config.yaml`, `lefthook.yml`), or a change on a hooks path in the
+   worktree (a link on the way to it, above it or beside it too), or does not descend from HEAD.
+   It runs no hook while it fast-forwards. Then the chat makes such a change
    itself, or sends Codex back with `--resume`. Between the first turn and the import the chat
    does not commit on the branch.
 7. **Review once,** as a reviewer that did not write it: `git diff <base>..<head>` from the
@@ -441,17 +444,18 @@ by the path that the person's allow rule names (`docs/install.md`, *Codex as the
 What the route does not give: Codex's commands are not seen by Claude Code's hooks, only the
 `codex_worker.py` call is. Inside a worker turn the person's Codex configuration, execpolicy
 rules, MCP servers and hooks do not apply, nor do the ChatGPT account's apps (connectors) and
-Codex plugins, because each of them can run a command or a tool outside Codex's sandbox; `~/.codex/AGENTS.md` still loads, and the reasoning effort is the model's
-default. An approval never reaches the user, because Codex asks for none. A process of a turn
-that leaves its process group and drops its environment outlives the kill, inside Codex's
-sandbox, where it writes only its own job. Codex's folder holds no `.git` folder (git works
-through `GIT_DIR`), and no tracked file under a top-level `.codex/` or `.agents/` or with a
-name on the deny list: those are marked skip-worktree, so Codex does not commit their removal.
-The worker needs Codex logged in (`codex login`) and runs outside Claude Code's sandbox, which
-keeps Codex from the network and from writing its sessions under `~/.codex`. It runs on macOS
-only, the one system its read deny list is measured on. There a job's files are copy-on-write
-clones, so a repository with gigabytes of tracked files costs no disk per job (measured on
-pax_deorum: 16,891 files, 13 GiB, 64 s, 15.7 MiB).
+Codex plugins, because each of them can run a command or a tool outside Codex's sandbox;
+`~/.codex/AGENTS.md` still loads, and the reasoning effort is the model's default. An approval
+never reaches the user, because Codex asks for none. A process of a turn that leaves its process
+group and drops its environment outlives the kill, inside Codex's sandbox, where it writes only
+its own job. Codex's folder holds no `.git` folder (git works through `GIT_DIR`), and no tracked
+file under a top-level `.codex/` or `.agents/` or with a name on the deny list: those are marked
+skip-worktree, so Codex does not commit their removal. The worker needs Codex logged in
+(`codex login`) and runs outside Claude Code's sandbox, which keeps Codex from the network and
+from writing its sessions under `~/.codex`. It runs on macOS only, the one system its read deny
+list is measured on. There a job's files are copy-on-write clones, so a repository with
+gigabytes of tracked files costs no disk per job (measured on pax_deorum: 16,891 files, 13 GiB,
+64 s, 15.7 MiB).
 
 ## 5. Sharing the repository
 

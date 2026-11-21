@@ -363,6 +363,84 @@ class FrozenMerge(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout)
         self.assertIn('.claude/notes.md', r.stdout)
 
+    # #108: the leftovers of a bare `git merge` that died in the sandbox
+    def main_adds_files(self, claude):
+        writes = [('docs/new.md', 'new\n'), ('tools/run.sh', '#!/bin/sh\n')]
+        if claude:
+            writes.append(('.claude/settings.json', 's2\n'))
+        self.land_on_main('main adds files', writes=writes)
+        if os.name != 'nt':
+            os.chmod(os.path.join(self.repo, 'tools', 'run.sh'), 0o755)
+            self.git(self.repo, 'update-index', '--chmod=+x', 'tools/run.sh')
+            self.git(self.repo, 'commit', '-q', '-m', 'executable')
+            self.git(self.repo, 'push', '-q', 'origin', 'main')
+            self.git(self.wt, 'fetch', '-q', 'origin')
+
+    def leave(self, *pairs):
+        for rel, text in pairs:
+            self.write(self.wt, rel, text)
+
+    def test_identical_leftovers_are_taken_in_on_both_paths(self):
+        for claude in (False, True):
+            with self.subTest(frozen=claude):
+                if claude:
+                    self.tearDown()
+                    self.setUp()
+                self.main_adds_files(claude)
+                self.leave(('docs/new.md', 'new\n'), ('tools/run.sh', '#!/bin/sh\n'))
+                self.assertNotEqual(self.git(self.wt, 'merge', '--no-edit', 'origin/main',
+                                             check=False).returncode, 0)  # git refuses them
+                self.protect()
+                expected = self.merge_tree()
+                code, out = self.tool('origin/main')
+                self.assertEqual(code, 0, out)
+                self.assertEqual(self.head('HEAD^{tree}'), expected)
+                self.assertEqual(self.git(self.wt, 'status', '--porcelain',
+                                          '--untracked-files=all').stdout, '')
+                self.assertEqual(self.read('docs/new.md'), 'new\n')
+                self.protect(False)
+
+    def test_a_leftover_that_differs_is_refused_and_kept(self):
+        for claude in (False, True):
+            with self.subTest(frozen=claude):
+                if claude:
+                    self.tearDown()
+                    self.setUp()
+                self.main_adds_files(claude)
+                self.leave(('docs/new.md', 'MINE\n'), ('tools/run.sh', '#!/bin/sh\n'))
+                before = self.head()
+                self.protect()
+                code, out = self.tool('origin/main')
+                self.assertEqual(code, 1, out)
+                self.assertIn('docs/new.md', out)
+                self.assertNotIn('tools/run.sh', out)
+                self.assertEqual(self.head(), before)
+                self.assertEqual(self.read('docs/new.md'), 'MINE\n')
+                self.assertEqual(self.read('tools/run.sh'), '#!/bin/sh\n')
+                self.assertFalse(os.path.exists(work_proof.git_path(
+                    self.wt, work_proof.FROZEN_MANIFEST)))
+                self.protect(False)
+
+    def test_a_file_where_the_merge_needs_a_folder_is_refused(self):
+        self.main_adds_files(False)
+        self.leave(('docs', 'a file\n'))
+        code, out = self.tool('origin/main')
+        self.assertEqual(code, 1, out)
+        self.assertIn('docs', out)
+        with open(os.path.join(self.wt, 'docs')) as f:
+            self.assertEqual(f.read(), 'a file\n')
+
+    def test_leftovers_come_back_when_the_merge_fails_before_it_begins(self):
+        self.main_adds_files(False)
+        self.leave(('docs/new.md', 'new\n'))
+        # a tracked change git refuses to merge over makes the merge stop before it begins
+        self.write(self.wt, 'README.md', 'local edit\n')
+        self.land_on_main('readme', writes=[('README.md', 'main\n')])
+        code, out = self.tool('origin/main')
+        self.assertEqual(code, 1, out)
+        self.assertEqual(self.read('docs/new.md'), 'new\n')
+        self.assertEqual(self.read('README.md'), 'local edit\n')
+
 
 if __name__ == '__main__':
     unittest.main()

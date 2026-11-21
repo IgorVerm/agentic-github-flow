@@ -24,7 +24,12 @@ started with them ("frozen .claude"):
      frozen earlier, any index entry that hides local changes from git status and that it did
      not freeze itself (skip-worktree or assume-unchanged: the merge would not see those
      changes and could lose them), an operation in progress, a sparse checkout of the user's
-     own, and a primary checkout (land from a worktree).
+     own, a primary checkout (land from a worktree), and an untracked file where the merge
+     adds a path whose content differs from the merge's version (the sparse settings would
+     overwrite it without a word).
+  5. Untracked files byte-identical to the merge's version, the leftovers of a bare `git merge`
+     that died in the sandbox (#108), are taken in on both paths: removed right before the
+     merge, which writes the same bytes, and written back if the merge fails before it begins.
 
 A conflict elsewhere, or a hook that refuses, stops the merge as `git merge` does: resolve,
 stage by path, commit; or `merge_landing.py --abort`, which runs `git merge --abort` with the
@@ -85,6 +90,96 @@ def merge_result(tree, ref):
 def refuse(message):
     print('refused: ' + message, file=sys.stderr)
     return 1
+
+
+def in_the_way(tree, result):
+    """Untracked files where the merge adds a path, outside the protected paths (freeze() judges
+    those): ({path: (mode, blob)} byte-identical to the merge's version, a problem or None).
+    The leftovers of a bare `git merge` that died in the sandbox are such identical files (#108);
+    anything else in the way is someone's work, which the frozen path's sparse settings would
+    overwrite without a word, so it is refused."""
+    added = zlist(git(tree, 'diff', '--name-only', '-z', '--no-renames', '--diff-filter=A',
+                      'HEAD', result).stdout)
+    full = lambda p: os.path.join(tree, *p.split('/'))  # noqa: E731
+    present, clash = [], set()
+    for path in added:
+        if protected(path):
+            continue
+        parts = path.split('/')
+        for depth in range(1, len(parts)):  # a file where the merge needs a folder
+            parent = '/'.join(parts[:depth])
+            if os.path.lexists(full(parent)) and not os.path.isdir(full(parent)):
+                clash.add(parent)
+        if os.path.isdir(full(path)) and not os.path.islink(full(path)):
+            clash.add(path + '/')  # a folder where the merge puts a file
+        elif os.path.lexists(full(path)):
+            present.append(path)
+    if not present and not clash:
+        return {}, None
+    candidates = present + sorted(p for p in clash if not p.endswith('/'))
+    indexed = set()
+    for start in range(0, len(candidates), 500):
+        indexed.update(zlist(git(tree, 'ls-files', '-z', '--',
+                                 *candidates[start:start + 500]).stdout))
+    clash = sorted(p for p in clash if p not in indexed)  # git itself handles a tracked one
+    present = [p for p in present if p not in indexed]
+    wanted = {}
+    for start in range(0, len(present), 500):
+        for record in zlist(git(tree, 'ls-tree', '-z', result, '--',
+                                *present[start:start + 500]).stdout):
+            info, _, path = record.partition('\t')
+            mode, _, blob = info.split()
+            wanted[path] = (mode, blob)
+    plain = [p for p in present if wanted.get(p, ('',))[0] != '120000' and '\n' not in p
+             and not os.path.islink(full(p))]
+    hashed = subprocess.run(['git', '-C', tree, 'hash-object', '--stdin-paths'],
+                            input=''.join(p + '\n' for p in plain), capture_output=True,
+                            text=True) if plain else None
+    ids = dict(zip(plain, hashed.stdout.split())) if hashed and not hashed.returncode else {}
+    same, differ = {}, list(clash)
+    for path in present:
+        mode, blob = wanted.get(path, ('', ''))
+        if mode == '120000' and os.path.islink(full(path)):
+            data = subprocess.run(['git', '-C', tree, 'cat-file', 'blob', blob],
+                                  capture_output=True).stdout
+            equal = os.fsencode(os.readlink(full(path))) == data
+        else:
+            equal = bool(blob) and ids.get(path) == blob
+        if equal:
+            same[path] = (mode, blob)
+        else:
+            differ.append(path)
+    if differ:
+        shown = ', '.join(differ[:10]) + (f' and {len(differ) - 10} more' if len(differ) > 10
+                                          else '')
+        return None, (f'{len(differ)} untracked path(s) stand where the merge writes and differ '
+                      f'from its version: {shown}; move them out of the worktree first (files '
+                      'equal to the merge\'s version are taken in)')
+    return same, None
+
+
+def clear(tree, same):
+    """Remove the identical leftovers right before the merge, which writes the same bytes back;
+    returns undo(), which writes back any the merge did not."""
+    for path in same:
+        os.remove(os.path.join(tree, *path.split('/')))
+
+    def undo():
+        for path, (mode, blob) in same.items():
+            full = os.path.join(tree, *path.split('/'))
+            if os.path.lexists(full):
+                continue
+            data = subprocess.run(['git', '-C', tree, 'cat-file', 'blob', blob],
+                                  capture_output=True).stdout
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            if mode == '120000':
+                os.symlink(os.fsdecode(data), full)
+                continue
+            with open(full, 'wb') as handle:
+                handle.write(data)
+            if mode == '100755':
+                os.chmod(full, os.stat(full).st_mode | 0o111)
+    return undo
 
 
 def freeze(tree, paths):
@@ -247,10 +342,16 @@ def main(argv):
     if problem:
         print(problem, file=sys.stderr)
         return 2
+    same, problem = in_the_way(tree, result)
+    if problem:
+        return refuse(problem)
     paths = sorted(p for p in set(changed) | set(conflicts) if protected(p))
     if not paths:
+        undo_clear = clear(tree, same)
         run = subprocess.run(['git', '-C', tree, 'merge', '--no-edit', *flags, ref],
                              stdin=subprocess.DEVNULL)
+        if run.returncode and not os.path.lexists(git_path(tree, 'MERGE_HEAD')):
+            undo_clear()
         return 0 if run.returncode == 0 else 1
     if [p for p in conflicts if protected(p)]:
         return refuse('the merge conflicts in ' + ', '.join(p for p in conflicts if protected(p))
@@ -268,10 +369,12 @@ def main(argv):
     undo, problem = freeze(tree, paths)
     if problem:
         return refuse(problem)
+    undo_clear = clear(tree, same)
     run = subprocess.run(['git', '-C', tree, *SPARSE, 'merge', '--no-edit', *flags, ref],
                          stdin=subprocess.DEVNULL)
     if run.returncode and not os.path.lexists(git_path(tree, 'MERGE_HEAD')):
         undo()
+        undo_clear()
         print('the merge failed before it began; nothing was frozen', file=sys.stderr)
         return 1
     if run.returncode:

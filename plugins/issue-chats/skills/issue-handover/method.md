@@ -396,8 +396,8 @@ by the path that the person's allow rule names (`docs/install.md`, *Codex as the
    repository's `AGENTS.md` to follow, commits by path whose subject ends in `(#<issue>)`,
    nothing under `.claude/`, `.codex/` or `.agents/`, no `.mcp.json`, `CLAUDE.md`, `AGENTS.md`,
    submodule, hook or hook manager's file (the import refuses them). The worker adds a note of
-   its own on Codex's git setup, never pushing and that Codex cannot ask. The file is read inside Codex's sandbox, under its read
-   deny list; its text goes to OpenAI.
+   its own on Codex's git setup, never pushing and that Codex cannot ask. The file is read
+   inside Codex's sandbox, under its read deny list; its text goes to OpenAI.
 3. **Run a turn:** `<worker> <worktree> --model <model> --prompt-file <file>
    [--time-limit <minutes>]`, in the background, since a turn may run long. One turn is one
    `codex exec`: Codex works until it stops, which may be a large task with many commits. The
@@ -405,10 +405,10 @@ by the path that the person's allow rule names (`docs/install.md`, *Codex as the
    sandbox cannot write. The worker's header owns the refusals and Codex's sandbox: it writes
    only the job, has no network and reads the disk except the deny list (all of `~/.claude`,
    `~/.ssh`, `~/.aws`, `~/.netrc`, `~/.gnupg`, `~/.config/gh`, `.env` files, `*.pem`, `*.key`,
-   `*.p12`, and what the user's, the managed and the project's Claude Code settings deny reads
-   of, read at each run); approval `never`, the person's Codex configuration and rules ignored,
-   no hooks, no apps or plugins. The time limit is the settings row's third value, else 60
-   minutes; at the limit, or when Codex ends, the worker
+   `*.p12`, and what the user's and the managed Claude Code settings and the project settings of
+   the worktree it is given deny reads of, read at each run); approval `never`, the person's
+   Codex configuration and rules ignored, no hooks, no apps or plugins. The time limit is the
+   settings row's third value, else 60 minutes; at the limit, or when Codex ends, the worker
    kills what is left of the turn. Of the report the chat reads `status` and Codex's
    `last_message`, nothing else: a few hundred tokens per turn.
 4. **Record it:** a signed comment on the issue whose text after the signature opens with
@@ -433,9 +433,11 @@ by the path that the person's allow rule names (`docs/install.md`, *Codex as the
    does not commit on the branch.
 7. **Review once,** as a reviewer that did not write it: `git diff <base>..<head>` from the
    import's report. A finding goes back to Codex with `--resume`, followed by a new export and
-   import, or the chat fixes it in a commit of its own. The cost of this review grows with the
-   size of the diff, not with the number of turns, so a large task (a whole building) is split
-   into issues per part, as for Claude work.
+   import, or the chat fixes it in a commit of its own. The review clears by hand what the
+   import cannot refuse but a later hook or push would run: a hook manager's configuration in
+   `package.json` (husky 4, `simple-git-hooks`, `lint-staged`) or `.overcommit.yml`, and scripts
+   these call. The cost of this review grows with the size of the diff, not with the number of
+   turns, so a large task (a whole building) is split into issues per part, as for Claude work.
 8. **Then on as usual:** the checks, `ship-change` steps 1 to 5, the hand-over. The review route
    of `ship-change` does not change: the chat that ran Codex is not the independent reviewer of
    the branch. Once the worktree is removed (`cleanup-merged`), the worker's next run removes

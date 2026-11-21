@@ -320,13 +320,15 @@ on. The chat runs Codex through one script, which fixes Codex's sandbox and neve
   `~/.config/gh`, Claude Code's folders under `/private/tmp`, and any `.env`, `.env.*`, `*.pem`,
   `*.key` or `*.p12` file, plus, read at each run, every `Read(...)` deny rule and
   `sandbox.filesystem.denyRead` entry of `~/.claude/settings.json`, the managed settings and the
-  project's `.claude/settings.json` and `settings.local.json`. So Codex reads no less than what
-  those settings make Claude Code's sandbox deny the chat. A deny rule must be written as
-  `**/name`, `~/path` or `//path`, a denyRead entry as `~/path`, `//path` or, in the person's
-  own settings, `/path` (each with an optional trailing `/**`); another form refuses the run, as
-  do `sandbox.credentials`, `permissions.blockReadsOutsideWorkingDirectories` and a plugin copy
-  under `~/.claude`. Everything else Codex may read can go to OpenAI: send it no work on a
-  machine whose files may not.
+  project's `.claude/settings.json` and `settings.local.json` in the worktree the worker is
+  given. The floor and the person's own settings hold for every run; a project's read limits
+  bind only a run on that project's worktree, not a chat that hands the worker another one. A
+  deny rule must be written as `**/name`, `~/path` or `//path`, a denyRead entry as `~/path`,
+  `//path` or, in the person's own settings, `/path` (each with an optional trailing `/**`);
+  another form refuses the run, as do `sandbox.credentials`,
+  `permissions.blockReadsOutsideWorkingDirectories` and a plugin copy under `~/.claude`.
+  Everything else Codex may read can go to OpenAI: send it no work on a machine whose files may
+  not.
 - **No network**, approval `never`, a time limit per turn, after which the script kills what is
   left of it.
 - **The person's Codex configuration does not apply in these turns** (`~/.codex/config.toml`,

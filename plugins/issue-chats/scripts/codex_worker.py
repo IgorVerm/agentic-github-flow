@@ -53,9 +53,11 @@ needs none of it), `~/.ssh`, `~/.aws`, `~/.netrc`, `~/.gnupg`, `~/.config/gh`,
 `.env.*`, `*.pem`, `*.key` or `*.p12`. On top of it comes, read at each run, what the settings
 deny: the `Read(...)` deny rules and `sandbox.filesystem.denyRead` of `~/.claude/settings.json`
 and the managed settings (files the chat's sandbox cannot write), and of the project's
-`.claude/settings.json` and `settings.local.json` in the worktree, which are the chat's files and
-so are read inside Codex's sandbox. So the list does not fall behind what those settings make
-Claude Code's sandbox deny the chat. What the profile cannot express refuses the run: a rule of
+`.claude/settings.json` and `settings.local.json` in the worktree the worker runs on, which are
+the chat's files and so are read inside Codex's sandbox; the job keeps those it was made under,
+for every later turn and the export. That is the merge condition Igor set on 2026-11-21 (#107):
+the floor and the person's settings hold in every case; a project's read limits bind the
+worktree the worker is given, not a chat that names another worktree. What the profile cannot express refuses the run: a rule of
 another form than `**/name`, `~/path` and `//path` (a denyRead entry also `/path`, in the
 person's own settings), an optional trailing `/**` aside; `sandbox.credentials`; and
 `permissions.blockReadsOutsideWorkingDirectories`. Measured on macOS with `codex sandbox`
@@ -404,17 +406,42 @@ def outside_denied(path):
 
 
 def project_denials(codex, job, worktree):
-    """Add what the project's `.claude/settings.json` and `settings.local.json` deny. They are
-    read inside Codex's sandbox (codex_job.py `settings`); False when that fails."""
+    """What the project's `.claude/settings.json` and `settings.local.json` in <worktree> deny;
+    None when they cannot be read. They are the chat's files, so they are read inside Codex's
+    sandbox (codex_job.py `settings`). Igor's ruling of 2026-11-21 (#107) binds the project
+    settings of the worktree the worker runs on: a chat that names another worktree is not held
+    to its own project's read limits; the floor and the person's settings hold in every case."""
     code, read = in_sandbox(codex, job, 'settings', worktree)
     files = read.get('settings')
     if code != 0 or read.get('status') != 'read' or not isinstance(files, dict):
-        return False
+        return None
     home = os.path.realpath(os.path.expanduser('~'))
+    found = []
     for name in sorted(files):
-        add_denied(settings_denials(files[name], os.path.join(worktree, '.claude', str(name)),
-                                    home, project=True))
-    return True
+        found += settings_denials(files[name], os.path.join(worktree, '.claude', str(name)),
+                                  home, project=True)
+    return found
+
+
+def job_denials(codex, job, where, state, name=None):
+    """Add the project denials the job was made under (kept in its state) and what the project
+    denies now, for every later call on the job, the export included; return them all. A refusal
+    removes a job this run made."""
+    stored = state.get('project_denied')
+    kept = [entry for entry in stored if isinstance(entry, str) and entry.startswith('/')] \
+        if isinstance(stored, list) else []
+    add_denied(kept)
+    try:
+        fresh = project_denials(codex, job, where['worktree'])
+        if fresh is None:
+            refuse('the project\'s Claude Code settings could not be read inside Codex\'s '
+                   'sandbox')
+    except SystemExit:
+        if name:
+            retire(where['folder'], name)
+        raise
+    add_denied(fresh)
+    return kept + [entry for entry in fresh if entry not in kept]
 
 
 def profile_config(job):
@@ -663,10 +690,7 @@ def run_turn(args, codex, where):
         if args.resume:
             refuse('no job to resume in (%s); start a new thread' % where['folder'])
         name, job = new_job(where)
-    if not project_denials(codex, job, where['worktree']):
-        if name:
-            retire(where['folder'], name)
-        refuse('the project\'s Claude Code settings could not be read inside Codex\'s sandbox')
+    project = job_denials(codex, job, where, state, name)
     code, read = in_sandbox(codex, job, 'prompt', os.path.abspath(args.prompt_file))
     prompt = read.get('prompt')
     if code != 0 or not isinstance(prompt, str) or not prompt.strip():
@@ -683,7 +707,8 @@ def run_turn(args, codex, where):
             refuse(text_of(setup, 'failure') or 'the setup of the job failed (exit %d)' % code)
         state = {'job': name, 'branch': branch, 'base': base, 'worktree': where['worktree'],
                  'created': datetime.datetime.now(datetime.timezone.utc).isoformat()}
-        write_state(where, state)
+    state['project_denied'] = project
+    write_state(where, state)
     branch = state.get('branch') if isinstance(state.get('branch'), str) else ''
     prompt = NOTE % {'work': os.path.join(job, 'work'), 'branch': branch} + prompt
 
@@ -770,6 +795,7 @@ def export(codex, where):
     base = state.get('base')
     if job is None or not isinstance(base, str) or not SHA_RE.match(base):
         refuse('no job for %s in %s' % (where['worktree'], where['folder']))
+    job_denials(codex, job, where, state)
     killed = None
     if isinstance(state.get('marker'), str):
         # Hygiene: a process a turn left behind should not change the job while the bundle is cut.

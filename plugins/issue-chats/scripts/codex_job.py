@@ -33,7 +33,10 @@ in <worktree> say about reads (`permissions.deny` Read rules,
 `sandbox.credentials`), for the worker to add to the deny list. A file that is missing counts as
 empty; one that is not a plain file of at most 1 MiB of JSON is refused.
 
-`export` cuts `<job>/out/codex.bundle`: Codex's commits on its branch on top of <base>.
+`export` cuts `<job>/out/codex.bundle`: Codex's commits on its branch on top of <base>, with
+`log.showSignature` and `core.fsmonitor` off, since Codex wrote the git folder's config (a
+signature check runs `gpg.program`). It runs under the job's full deny list, the project's
+denials included.
 
 Each prints one JSON object; exit 0, 1 failed, 3 refused.
 """
@@ -243,6 +246,10 @@ def settings(worktree):
 def export(job, base):
     env = job_env(job)
     env.pop('GIT_WORK_TREE')
+    # Codex wrote this git folder's config: no signature check, which would run gpg.program.
+    env.update(GIT_CONFIG_COUNT='2', GIT_CONFIG_KEY_0='log.showSignature',
+               GIT_CONFIG_VALUE_0='false', GIT_CONFIG_KEY_1='core.fsmonitor',
+               GIT_CONFIG_VALUE_1='false')
     out = os.path.join(job, 'out', BUNDLE)
     if os.path.lexists(out):
         os.remove(out)

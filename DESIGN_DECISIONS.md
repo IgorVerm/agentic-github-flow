@@ -39,8 +39,13 @@ specifiek voor pax het moet via de ontdubbelde worktree kunnen werken 3 akkoord 
 kijken en indien nodig onderzoek doen": a measured read deny list for Codex is a condition to
 merge, a full checkout per issue and a size limit are refused (the job's files are APFS clones:
 pax_deorum, 13 GiB, costs 15.7 MiB), and the architecture was redone so that the class is gone
-instead of one more door closed. Codex commits in its job and Claude reviews after the import,
-so "Codex commit, Claude reviewt" holds.
+instead of one more door closed. On what that read deny list must cover, after three reviews
+each found another source of Claude Code's read limits, the maintainer chose on 2026-11-21
+"(a)+(b)+(c), dan mergen": (a) a fixed floor, (b) the user's and the managed Claude Code
+settings, (c) the project settings of the worktree the worker is given; a project's read limits
+do not bind a chat that hands the worker another worktree, since the worker cannot know the
+chat's project. Codex commits in its job and Claude reviews after the import, so "Codex commit,
+Claude reviewt" holds.
 **Binds:** `plugins/issue-chats/skills/issue-handover/method.md` (§1 settings, §4 *Codex as the
 worker*), `SKILL.md` (the start brief), `plugins/issue-chats/scripts/codex_worker.py`,
 `codex_job.py` and `codex_import.py` beside it, `tests/codex_worker.py`, `docs/install.md`.

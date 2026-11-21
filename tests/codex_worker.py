@@ -164,6 +164,23 @@ if mode == 'leftover':
             os.execve(sys.executable, [sys.executable, '-c', script], {})
         os._exit(0)
     os.wait()
+if mode == 'gpg':
+    # A signed commit and a configuration that checks signatures with a program of Codex's.
+    commit()
+    raw = subprocess.run(['git', 'cat-file', 'commit', 'HEAD'], capture_output=True,
+                         check=True).stdout
+    top, _, body = raw.partition(b'\n\n')
+    signed = top + (b'\ngpgsig -----BEGIN PGP SIGNATURE-----\n \n -----END PGP SIGNATURE-----'
+                    b'\n\n') + body
+    sha = subprocess.run(['git', 'hash-object', '-t', 'commit', '-w', '--stdin'], input=signed,
+                         capture_output=True, check=True).stdout.decode().strip()
+    git('update-ref', 'HEAD', sha)
+    program = os.path.join(flags, 'gpg-program')
+    with open(program, 'w') as f:
+        f.write('#!/bin/sh\necho ran >> %s\n' % os.path.join(flags, 'gpg-ran'))
+    os.chmod(program, 0o755)
+    with open(os.path.join(os.environ['GIT_DIR'], 'config'), 'a') as f:
+        f.write('[log]\n\tshowSignature = true\n[gpg]\n\tprogram = %s\n' % program)
 if mode == 'plant':
     commit()  # first: Codex's own git commands run what it plants, inside its sandbox
     plant(os.path.join(os.environ['GIT_DIR'], 'config'))
@@ -535,9 +552,17 @@ def main():
         check('resume reports the thread', report_of(result).get('thread_id') == THREAD)
         check('resume makes no new setup', 'setup' not in report_of(result))
 
-        # The export and the import.
+        # The export and the import. The export runs under the job's project denials, kept from
+        # when the job was made, even after the project's settings drop them.
+        with open(local, 'w') as f:
+            f.write('{}')
         result = run([wt, '--export'])
         report = report_of(result)
+        exported = [json.loads(line) for line in lines_of(sandbox_log)]
+        exported = [' '.join(c['argv']) for c in exported
+                    if c['argv'][c['argv'].index('--') + 4] == 'export']
+        check('the export runs under the job\'s project denials',
+              exported and '"/**/.secretrc" = "deny"' in exported[-1], str(exported)[-400:])
         bundle = os.path.join(job, 'out', 'codex.bundle')
         check('export exits 0', result.returncode == 0, result.stderr + result.stdout)
         check('export lists both commits', report.get('status') == 'exported' and
@@ -627,6 +652,11 @@ def main():
               not os.path.exists(os.path.join(flags, 'leftover-ran')))
 
         # A configuration Codex plants in its git folder never runs outside a sandbox.
+        result = fresh_turn('gpg')
+        check('a signed commit is exported', result.returncode == 0 and
+              report_of(result).get('status') == 'exported', result.stdout + result.stderr)
+        check('the export ran no gpg.program of Codex\'s',
+              not os.path.exists(os.path.join(flags, 'gpg-ran')))
         result = fresh_turn('plant')
         check('export with a planted configuration works', result.returncode == 0 and
               report_of(result).get('status') == 'exported', result.stdout + result.stderr)

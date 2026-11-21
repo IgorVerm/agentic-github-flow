@@ -3,6 +3,43 @@
 Rulings of the maintainers named in `HANDOFF.md`, newest first, with their words. Detail lives on
 the linked issue.
 
+## Codex as the worker of a Claude issue chat, 2026-11-20
+
+**Decision (the maintainer):** the aim: "astra 6.2 is very good but apparently very bad at
+interfacing with humans. Is it possible to let the claude orchestrator also manage codex 6.2
+chats the same way it handles local chats for claude". After the source review and the trial of
+OpenAI's Codex plugin for Claude Code: "Meteen de issue-handover-route" (the issue-handover
+route right away, over a line in `docs/install.md`, an installer opt-in, or nothing). How the
+chat starts Codex: "codex exec direct" (over the plugin). The call outside Claude Code's
+sandbox: "Allow-regel voor dat commando" (an allow rule for that command, over asking each
+time). Commits: "Codex commit, Claude reviewt" (Codex commits, Claude reviews). Which issues:
+"we hebben al labels voor astra" (we already have labels for Astra). Asked against an own client
+on `codex app-server` that relays each approval: "codex exec houden, app-server later" (keep
+codex exec, the app-server client later, as its own issue).
+**What:** the settings row `codex worker` names a label and a Codex model; on an issue with that
+label the Claude issue chat stays the owner and hands the implementation to Codex through
+`plugins/issue-chats/scripts/codex_worker.py`, which runs `codex exec` in a disposable clone of
+the chat's branch in Codex's `workspace-write` sandbox with no network and approval `never`,
+writable only that clone and a temporary folder of its own, with a time limit per turn. At the
+end the script exports Codex's commits as a git bundle, and the chat imports them inside its own
+sandbox (`codex_import.py`) and reviews them once before the push. The chat records the Codex
+thread id on the issue. The person allows that script alone and excludes it from the sandbox
+(`docs/install.md`); the team edition writes no allow rule. The plugin `openai/codex-plugin-cc`
+is not used.
+**Why:** measured on 2026-11-20: the plugin cannot run inside Claude Code's sandbox; it answers
+every approval request with an error; its app-server threads got write access to the person's
+whole projects folder; its `SessionEnd` hook drops the session's jobs; and its rescue agent may
+delegate unasked in every session. `codex exec` through one script needs no third-party
+dependency and fixes the sandbox per call. The clone replaced Codex working in the chat's own
+worktree after three reviews of #105 each found a way for Codex to get code run outside every
+sandbox through git data the chat later reads outside its sandbox; the maintainer, on the clone
+design (#107): "ok maak de issue aan". Codex commits in its clone and Claude reviews after the
+import, so "Codex commit, Claude reviewt" holds.
+**Binds:** `plugins/issue-chats/skills/issue-handover/method.md` (§1 settings, §4 *Codex as the
+worker*), `SKILL.md` (the start brief), `plugins/issue-chats/scripts/codex_worker.py`,
+`plugins/issue-chats/scripts/codex_import.py`, `tests/codex_worker.py`, `docs/install.md`.
+**Detail:** issues #103, #107.
+
 ## Signatures name the model, 2026-11-19
 
 **Decision (the maintainer):** "bijkomend wil ik dat elke github issue niet enkel signed is als

@@ -303,6 +303,41 @@ is unmeasured on Linux and refused on Windows. The full list of what a chain nee
 `issue-handover` skill's [method.md](../plugins/issue-chats/skills/issue-handover/method.md),
 §7.
 
+### Codex as the worker (issue chats, opt-in per repository)
+
+A repository whose `## Issue chats settings` has the row `codex worker` (a label, a Codex model
+and optionally a time limit per turn) lets a Claude issue chat hand the implementation of an
+issue with that label to Codex, while the chat keeps the issue, the questions to the person, the
+review and the push (method.md §4 *Codex as the worker*). Codex must be installed and logged in
+(`codex login`). The chat runs Codex through one script, which fixes Codex's sandbox
+(`workspace-write`, no network, approval `never`) and never passes a `--dangerously-*` option.
+Codex works in a disposable clone of the chat's branch, never in the chat's own repository; on
+macOS the clone's files are copy-on-write clones and cost no disk, elsewhere a clone costs one
+checkout. Codex reads the whole disk (send it no work on a machine whose files may not go to
+OpenAI) and writes only its clone and a temporary folder of its own. Each turn has a time limit,
+after which the script kills what is left of it. At the end the script exports Codex's commits
+as a git bundle, and the chat imports them inside its own sandbox with `codex_import.py`, which
+refuses submodules, hooks and changes to `.claude/`, `.codex/`, `.mcp.json`, `CLAUDE.md` and
+`AGENTS.md`. The clone lives under `~/.cache/agentic-github-flow/codex-worker/`, where the chat's
+sandbox cannot write, and Codex's hooks are off for the worker's turns. The script takes no
+program to run (`codex` comes from PATH), reads its prompt only from a temporary folder and
+refuses Windows. Codex cannot run inside Claude Code's sandbox (it needs the network and writes
+`~/.codex`), so, on the person's yes, allow that script alone and exclude it from the sandbox, in
+each spelling the agents use, never `codex exec` itself and never `codex_import.py`, which runs
+inside the sandbox:
+
+```json
+"Bash(python3 ~/.agentic-github-flow/plugins/issue-chats/scripts/codex_worker.py *)"
+```
+
+and in `sandbox.excludedCommands`
+`"python3 ~/.agentic-github-flow/plugins/issue-chats/scripts/codex_worker.py *"`. Without them
+each Codex turn asks. Codex's work counts against the person's Codex usage limits. OpenAI's
+Codex plugin for Claude Code (`openai/codex-plugin-cc`) was reviewed and tried for this (#103)
+and is not used: it does not run inside the sandbox either, answers every approval with an
+error, may delegate to Codex unasked in every session, and drops its jobs when the session
+ends.
+
 ### Worktree clones on macOS
 
 Each task gets its own worktree, made by the core plugin's `new_worktree.py`. On macOS (APFS)

@@ -65,6 +65,7 @@ The skills read their values from it; a row left out takes its default:
 | start reading | what every chat reads at its start besides its issue: named sections, the repository's reading map | none |
 | ready extras | what the repository adds to the definition of ready of the `requirements` skill | none |
 | start extras, hand-over extras | repository steps at a chat's start and before it ends | none |
+| codex worker | the label that hands an issue's implementation to Codex, the Codex model and optionally the time limit of a turn in minutes, each in backticks (`` `astra`, `gpt-6.2-astra`, `90` ``; §4 *Codex as the worker*) | off: the Claude chat does the work itself; the time limit 60 |
 
 **Chains at once is not a repository setting:** at most five issue chats work at the same time
 in a repository, counted with those already working. A chat whose branch waits for the push,
@@ -375,6 +376,74 @@ weeks. So it ends this way:
   (§6, `archive_session`): a parent stays while a side chat it started is running or fails the
   `--landed` check (`issue-handover`, *Never archive this chat*; `archive-finished-chats` step
   3).
+
+### Codex as the worker
+
+With the settings row `codex worker`, an issue that carries its label is built by Codex. The
+Claude issue chat stays its owner: it claims the issue, asks the user the questions, runs every
+GitHub step, reviews Codex's work and pushes it on the user's word. Codex writes the code and
+commits it, in a clone of its own; the chat imports the commits. Why: Codex models do the work
+well and talk to people badly (the user's ruling, `DESIGN_DECISIONS.md`, #103). Codex never
+writes the chat's repository, because the chat later runs git there outside every sandbox
+(#107). The chat runs this inside item 2 of the lifecycle above, in place of writing the code
+itself. `<worker>` is `python3 <plugin>/scripts/codex_worker.py`, by the clone path that the
+person's allow rule names (`docs/install.md`, *Codex as the worker*):
+
+1. **Commit first.** The worktree is clean, so the clone holds all of the chat's work; the
+   worker refuses a dirty worktree.
+2. **Write the prompt** to a file in the temporary folder (`$TMPDIR`; the worker refuses any
+   other place, since the text goes to OpenAI): the issue number and its task, its check
+   and code paths, the repository's `AGENTS.md` to follow, commits by path whose subject ends in
+   `(#<issue>)`, never push, nothing under `.claude/` or `.codex/`, no `.mcp.json`, `CLAUDE.md`,
+   `AGENTS.md`, submodule or hook (the import refuses them), and that Codex cannot ask: a
+   question or a blocker goes into its final message.
+3. **Run a turn:** `<worker> <worktree> --model <model> --prompt-file <file>
+   [--time-limit <minutes>]`, in the background, since a turn may run long. One turn is one
+   `codex exec`: Codex works until it stops, which may be a large task with many commits. The
+   first turn makes the clone, in a folder of the worker's under `~/.cache` that the chat's
+   sandbox cannot write. The worker's header owns the refusals and Codex's sandbox:
+   `workspace-write` with no network, approval `never`, no hooks, writable only the clone and
+   its own temporary folder. Codex reads the whole disk. The time limit is the settings
+   row's third value, else 60 minutes; at the limit, or when Codex ends, the worker kills what is
+   left of the turn. Of the report the chat reads `status` and Codex's `last_message`, nothing
+   else: a few hundred tokens per turn.
+4. **Record it:** a signed comment on the issue whose text after the signature opens with
+   `codex thread: <thread id>`, with the model. The thread outlives the chat, so a successor
+   finds it there and resumes it; the person opens it with `codex resume <id>`. The Codex desktop
+   app does not list it, since `codex exec` threads carry the source `exec` (measured
+   2026-11-20).
+5. **Decide the next step** from the last message: another turn in the same clone
+   (`--resume <thread id>` with a new prompt file), a question for the user (§4 *Questions for
+   the user*) or one the chat answers itself, whose answer goes back with `--resume`; or done.
+   `--fresh` starts a new clone from the chat's HEAD, dropping what the old one held.
+6. **Export and import, once, when Codex is done:** `<worker> <worktree> --export` cuts a git
+   bundle of Codex's commits on top of the chat's HEAD; then, inside the sandbox, `python3
+   <plugin>/scripts/codex_import.py <worktree>` fast-forwards the branch. The import refuses
+   (and changes nothing) when the bundle holds a merge, a submodule, `.gitmodules`, a `.claude`
+   or `.codex` file, a `.mcp.json`, a `CLAUDE.md`, `CLAUDE.local.md` or `AGENTS.md`, or a change
+   on a hooks path in the worktree (a link above it too), or does not descend from HEAD. Then the chat makes such a change itself, or sends
+   Codex back with `--resume`. Between the first turn and the import the chat does not commit
+   on the branch: the export refuses a clone that is no longer on top of HEAD.
+7. **Review once,** as a reviewer that did not write it: `git diff <base>..<head>` from the
+   import's report. A finding goes back to Codex with `--resume`, followed by a new export and
+   import, or the chat fixes it in a commit of its own. The cost of this review grows with the
+   size of the diff, not with the number of turns, so a large task (a whole building) is split
+   into issues per part, as for Claude work.
+8. **Then on as usual:** the checks, `ship-change` steps 1 to 5, the hand-over. The review route
+   of `ship-change` does not change: the chat that ran Codex is not the independent reviewer of
+   the branch. Once the worktree is removed (`cleanup-merged`), the worker's next run removes
+   its clone.
+
+What the route does not give: Codex's commands are not seen by Claude Code's hooks, only the
+`codex_worker.py` call is; Codex's own rules apply inside (measured 2026-11-20: its git-safety
+rule refused `git push`, since a prompt rule cannot ask under approval `never`), its hooks do
+not, since they would run outside its sandbox in a clone Codex controls. An
+approval never reaches the user, because Codex asks for none. A process of a turn that leaves
+its process group and drops its environment outlives the kill, inside Codex's sandbox. The
+worker needs Codex logged in (`codex login`) and runs outside Claude Code's sandbox, which keeps
+Codex from the network and from writing its sessions under `~/.codex`; it refuses Windows. On
+macOS the clone's files are copy-on-write clones, so a repository with gigabytes of tracked
+files costs no disk per clone; elsewhere a clone costs one checkout.
 
 ## 5. Sharing the repository
 

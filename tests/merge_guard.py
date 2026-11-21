@@ -17,6 +17,11 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.path.join(HERE, '..', 'plugins', 'guards', 'scripts', 'pre_tool_merge_guard.py')
+# Native Windows has no Claude Code sandbox, so there the hook never refuses (its header), and a
+# Windows path written into a shell command is not what the guard's POSIX parsing reads.
+NO_SANDBOX = os.name == 'nt'
+skip_no_sandbox = unittest.skipIf(NO_SANDBOX, 'native Windows: no sandbox, the guard refuses '
+                                  'nothing')
 
 BLOCK = [
     'git merge main', 'git merge --no-edit main', 'git merge --ff-only main',
@@ -125,6 +130,7 @@ class MergeGuard(unittest.TestCase):
                            capture_output=True, text=True)
         return r.returncode, r.stderr
 
+    @skip_no_sandbox
     def test_block(self):
         for command in BLOCK:
             with self.subTest(command=command):
@@ -140,6 +146,7 @@ class MergeGuard(unittest.TestCase):
                 code, out = self.check(command)
                 self.assertEqual(code, 0, out)
 
+    @skip_no_sandbox
     def test_the_suggested_command_repeats_the_folder_and_no_ff(self):
         code, out = self.check('git -C {wt} merge --no-ff main', cwd=self.other)
         self.assertEqual(code, 2, out)
@@ -147,10 +154,12 @@ class MergeGuard(unittest.TestCase):
         code, out = self.check('git merge main')
         self.assertNotIn(' -C ', out)
 
+    @skip_no_sandbox
     def test_a_merge_from_another_folder_into_the_own_worktree_is_judged_there(self):
         self.assertEqual(self.check('git -C {wt} merge main', cwd=self.other)[0], 2)
         self.assertEqual(self.check('git merge main', cwd=self.other)[0], 0)
 
+    @skip_no_sandbox
     def test_the_hook_reads_the_sandbox_from_the_settings(self):
         on = {'sandbox': {'enabled': True}}
         self.assertEqual(self.hook('git merge main', on)[0], 2)
@@ -165,6 +174,11 @@ class MergeGuard(unittest.TestCase):
         # without CLAUDE_PROJECT_DIR the hook input's cwd names the session's folder
         self.assertEqual(self.hook('git merge main', on, project=False)[0], 2)
 
+    @unittest.skipUnless(NO_SANDBOX, 'only native Windows has no sandbox')
+    def test_native_windows_has_no_sandbox_so_the_hook_passes(self):
+        on = {'sandbox': {'enabled': True}}
+        self.assertEqual(self.hook('git merge main', on)[0], 0)
+
     def test_the_hook_passes_what_it_cannot_read(self):
         on = {'sandbox': {'enabled': True}}
         home = tempfile.mkdtemp(dir=self.dir)
@@ -177,6 +191,7 @@ class MergeGuard(unittest.TestCase):
                                text=True)
             self.assertEqual(r.returncode, 0, text)
 
+    @skip_no_sandbox
     def test_a_refused_merge_changed_nothing(self):
         before = self.git(self.wt, 'rev-parse', 'HEAD').stdout
         self.assertEqual(self.check('git merge main')[0], 2)

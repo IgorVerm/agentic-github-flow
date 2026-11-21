@@ -309,29 +309,40 @@ A repository whose `## Issue chats settings` has the row `codex worker` (a label
 and optionally a time limit per turn) lets a Claude issue chat hand the implementation of an
 issue with that label to Codex, while the chat keeps the issue, the questions to the person, the
 review and the push (method.md §4 *Codex as the worker*). Codex must be installed and logged in
-(`codex login`). The chat runs Codex through one script, which fixes Codex's sandbox
-(`workspace-write`, no network, approval `never`) and never passes a `--dangerously-*` option.
-Codex works in a disposable clone of the chat's branch, never in the chat's own repository; on
-macOS the clone's files are copy-on-write clones and cost no disk, elsewhere a clone costs one
-checkout. Codex reads the whole disk (send it no work on a machine whose files may not go to
-OpenAI) and writes only its clone and a temporary folder of its own. Each turn has a time limit,
-after which the script kills what is left of it. At the end the script exports Codex's commits
-as a git bundle, and the chat imports them inside its own sandbox with `codex_import.py`, which
-refuses submodules, hooks and changes to `.claude/`, `.codex/`, `.mcp.json`, `CLAUDE.md` and
-`AGENTS.md`. The clone lives under `~/.cache/agentic-github-flow/codex-worker/`, where the chat's
-sandbox cannot write, and Codex's hooks are off for the worker's turns. The script takes no
-program to run (`codex` comes from PATH), reads its prompt only from a temporary folder and
-refuses Windows. Codex cannot run inside Claude Code's sandbox (it needs the network and writes
-`~/.codex`), so, on the person's yes, allow that script alone and exclude it from the sandbox, in
-each spelling the agents use, never `codex exec` itself and never `codex_import.py`, which runs
-inside the sandbox:
+(`codex login`); the route runs on macOS only, the one system its read deny list is measured
+on. The chat runs Codex through one script, which fixes Codex's sandbox and never passes a
+`--dangerously-*` option:
+
+- **Writes:** only a job folder of the script's own under
+  `~/.cache/agentic-github-flow/codex-worker/`, never the chat's repository. Its files are
+  copy-on-write clones of the worktree's and cost no disk.
+- **Reads:** the disk, except `~/.ssh`, `~/.aws`, `~/.netrc`, `~/.gnupg`, `~/.config/gh` and any
+  `.env`, `.env.*`, `*.pem`, `*.key` or `*.p12` file, which is what Claude Code's sandbox should
+  deny the chat as well. Everything else Codex may read can go to OpenAI: send it no work on a
+  machine whose files may not.
+- **No network**, approval `never`, a time limit per turn, after which the script kills what is
+  left of it.
+- **The person's Codex configuration does not apply in these turns** (`~/.codex/config.toml`,
+  its rules, MCP servers and hooks), because each can run a command outside Codex's sandbox.
+
+The script itself runs outside Claude Code's sandbox (Codex needs the network and writes
+`~/.codex`). It therefore runs no git and opens no file that the chat or Codex wrote: the setup
+of a job, the reading of the prompt and the export of Codex's commits as a git bundle all run
+inside Codex's sandbox, and the chat imports the bundle inside its own with `codex_import.py`,
+which refuses submodules, hooks and changes to `.claude/`, `.codex/`, `.mcp.json`, `CLAUDE.md`
+and `AGENTS.md`. It takes no program to run (`codex` comes from PATH). Two conditions are the
+person's: Claude Code's sandbox must not make `~/.cache/agentic-github-flow` or the installed
+plugin folder writable, and the rule below is spelled with `-I`, so that Python reads no
+`PYTHONPATH`. On the person's yes, allow that script alone and exclude it from the sandbox, in
+each spelling the agents use, never `codex exec` or `codex sandbox` itself and never
+`codex_import.py` or `codex_job.py`:
 
 ```json
-"Bash(python3 ~/.agentic-github-flow/plugins/issue-chats/scripts/codex_worker.py *)"
+"Bash(python3 -I ~/.agentic-github-flow/plugins/issue-chats/scripts/codex_worker.py *)"
 ```
 
 and in `sandbox.excludedCommands`
-`"python3 ~/.agentic-github-flow/plugins/issue-chats/scripts/codex_worker.py *"`. Without them
+`"python3 -I ~/.agentic-github-flow/plugins/issue-chats/scripts/codex_worker.py *"`. Without them
 each Codex turn asks. Codex's work counts against the person's Codex usage limits. OpenAI's
 Codex plugin for Claude Code (`openai/codex-plugin-cc`) was reviewed and tried for this (#103)
 and is not used: it does not run inside the sandbox either, answers every approval with an

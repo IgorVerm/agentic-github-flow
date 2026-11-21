@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Import Codex's commits into a Claude issue chat's worktree, from the bundle of codex_worker.py.
 
-Usage: python3 codex_import.py <worktree>
+Usage: python3 codex_import.py <worktree> <bundle>
 
-The last step of method.md *Codex as the worker* (issue #107). `codex_worker.py --export` cut
-`<git folder>/codex/codex.bundle`: Codex's commits on top of the chat's HEAD. This script runs
-inside Claude Code's sandbox, like any git command of the chat, and needs no allow rule. It
-refuses (exit 3) unless <worktree> is the top of a git worktree, on a branch, clean, with that
-bundle beside it.
+The last step of method.md *Codex as the worker* (issue #107). `codex_worker.py --export` had
+the bundle cut inside Codex's sandbox and reports its path, in the worker's job folder: Codex's
+commits on top of the commit it started from. This script runs inside Claude Code's sandbox,
+like any git command of the chat, and needs no allow rule. It refuses (exit 3) unless <worktree>
+is the top of a git worktree, on a branch, with no uncommitted change, and <bundle> opens as a
+plain file without following a link. It copies the bundle to `<git folder>/codex/codex.bundle`
+first, because Codex can still write the original, and reads only the copy.
 
 It verifies the bundle (`git bundle verify`), stores its objects (`git bundle unbundle`, which
 moves no ref), and then checks the range HEAD..<bundle head> before anything reaches the
@@ -21,8 +23,8 @@ worktree:
   `CLAUDE.md` while the chat reviews the files beside it, an `AGENTS.md` through the
   `CLAUDE.md` that imports it, a `.codex/config.toml` in every later Codex session of a trusted
   repository), or anything on the hooks path when `core.hooksPath` lies in the worktree: the
-  path as the configuration writes it and as it resolves through links, anything under either,
-  and each folder above either, so a link added or changed there cannot move the hooks to
+  path as the configuration writes it, at each link on the way and as it resolves, anything
+  under one of them and each folder above one, so a link added or changed there cannot move the hooks to
   files the same commits add. Names compare case-insensitively, as on macOS and Windows file
   systems.
 Only when every check passes does it fast-forward the branch (`git merge --ff-only`). The chat
@@ -81,6 +83,20 @@ def reason_for(path, old_mode, new_mode, hooks):
     return None
 
 
+def link_steps(path):
+    """Each path the links on the way to `path` point at, one link at a time."""
+    steps, parts, current = [], path.split(os.sep), os.sep
+    for index, part in enumerate(parts[1:], 1):
+        current = os.path.join(current, part)
+        for _ in range(40):
+            if not os.path.islink(current):
+                break
+            current = os.path.normpath(os.path.join(os.path.dirname(current),
+                                                    os.readlink(current)))
+            steps.append(os.path.normpath(os.path.join(current, *parts[index + 1:])))
+    return steps
+
+
 def hooks_paths(worktree):
     """core.hooksPath inside the worktree, as written and as resolved (lower case), or []."""
     value = git(worktree, 'config', '--get', 'core.hooksPath')
@@ -88,12 +104,42 @@ def hooks_paths(worktree):
         return []
     written = os.path.normpath(os.path.join(worktree, os.path.expanduser(value)))
     found = []
-    for path in (written, os.path.realpath(written)):
+    for path in [written] + link_steps(written) + [os.path.realpath(written)]:
         if path == worktree or path.startswith(worktree + os.sep):
             relative = os.path.relpath(path, worktree).replace(os.sep, '/').lower()
             if relative not in found:
                 found.append(relative)
     return found
+
+
+def copy_bundle(source, git_dir):
+    """Copy the bundle Codex's sandbox wrote into the chat's git folder; return the copy."""
+    flags = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0)
+    try:
+        fd = os.open(source, flags)
+    except OSError:
+        refuse('no bundle at %s (a plain file, no link); run codex_worker.py --export first'
+               % source)
+    folder = os.path.join(git_dir, 'codex')
+    target = os.path.join(folder, 'codex.bundle')
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            refuse('%s is not a plain file' % source)
+        os.makedirs(folder, exist_ok=True)
+        if os.path.lexists(target):
+            os.remove(target)
+        out = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(out, 'wb') as handle:
+            while True:
+                block = os.read(fd, 1024 * 1024)
+                if not block:
+                    break
+                handle.write(block)
+    except OSError as error:
+        refuse('cannot copy the bundle to %s: %s' % (target, error))
+    finally:
+        os.close(fd)
+    return target
 
 
 def changes(worktree, commit):
@@ -115,7 +161,7 @@ def changes(worktree, commit):
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
-    if len(argv) != 1 or argv[0].startswith('-'):
+    if len(argv) != 2 or argv[0].startswith('-') or argv[1].startswith('-'):
         print(__doc__.split('\n\n')[1], file=sys.stderr)
         return 2
     path = argv[0]
@@ -132,19 +178,14 @@ def main(argv=None):
     base = git(worktree, 'rev-parse', '--verify', '--quiet', 'HEAD')
     if git(worktree, 'status', '--porcelain', '--untracked-files=all') != '':
         refuse('%s has uncommitted changes' % path)
-    bundle = os.path.join(git_dir, 'codex', 'codex.bundle')
-    try:
-        if not stat.S_ISREG(os.lstat(bundle).st_mode):
-            refuse('%s is not a plain file' % bundle)
-    except OSError:
-        refuse('no bundle at %s; run codex_worker.py --export first' % bundle)
+    bundle = copy_bundle(argv[1], git_dir)
 
     report = {'status': 'refused', 'branch': branch, 'base': base, 'head': None, 'commits': [],
               'refused': [], 'bundle': bundle}
     problems = []
     heads = (git(worktree, 'bundle', 'list-heads', bundle) or '').splitlines()
-    if len(heads) != 1 or not heads[0].endswith(' refs/heads/codex'):
-        problems.append('the bundle does not hold exactly the ref refs/heads/codex')
+    if len(heads) != 1 or not heads[0].split(' ', 1)[-1].startswith('refs/heads/'):
+        problems.append('the bundle does not hold exactly one branch')
     elif run(worktree, 'bundle', 'verify', '-q', bundle).returncode != 0:
         problems.append('git bundle verify failed: the bundle is damaged or needs commits this '
                         'repository lacks')

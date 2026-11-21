@@ -18,26 +18,32 @@ on `codex app-server` that relays each approval: "codex exec houden, app-server 
 codex exec, the app-server client later, as its own issue).
 **What:** the settings row `codex worker` names a label and a Codex model; on an issue with that
 label the Claude issue chat stays the owner and hands the implementation to Codex through
-`plugins/issue-chats/scripts/codex_worker.py`, which runs `codex exec` in a disposable clone of
-the chat's branch in Codex's `workspace-write` sandbox with no network and approval `never`,
-writable only that clone and a temporary folder of its own, with a time limit per turn. At the
-end the script exports Codex's commits as a git bundle, and the chat imports them inside its own
-sandbox (`codex_import.py`) and reviews them once before the push. The chat records the Codex
-thread id on the issue. The person allows that script alone and excludes it from the sandbox
-(`docs/install.md`); the team edition writes no allow rule. The plugin `openai/codex-plugin-cc`
-is not used.
+`plugins/issue-chats/scripts/codex_worker.py`, which runs `codex exec` in a job folder of its
+own under a permission profile: writable only that job, no network, a read deny list, approval
+`never`, with a time limit per turn. The script runs outside Claude Code's sandbox and therefore
+runs no git and opens no file that the chat or Codex wrote: the setup of a job, the reading of
+the prompt and the export of Codex's commits as a git bundle run inside Codex's sandbox
+(`codex_job.py`), and the chat imports the bundle inside its own (`codex_import.py`) and reviews
+it once before the push. The chat records the Codex thread id on the issue. The person allows
+that script alone and excludes it from the sandbox (`docs/install.md`); the team edition writes
+no allow rule. The plugin `openai/codex-plugin-cc` is not used.
 **Why:** measured on 2026-11-20: the plugin cannot run inside Claude Code's sandbox; it answers
 every approval request with an error; its app-server threads got write access to the person's
 whole projects folder; its `SessionEnd` hook drops the session's jobs; and its rescue agent may
 delegate unasked in every session. `codex exec` through one script needs no third-party
-dependency and fixes the sandbox per call. The clone replaced Codex working in the chat's own
-worktree after three reviews of #105 each found a way for Codex to get code run outside every
-sandbox through git data the chat later reads outside its sandbox; the maintainer, on the clone
-design (#107): "ok maak de issue aan". Codex commits in its clone and Claude reviews after the
-import, so "Codex commit, Claude reviewt" holds.
+dependency and fixes the sandbox per call. Five reviews of #105 each found git run outside every
+sandbox on a repository the chat or Codex could write; Codex's own process does the same on
+every turn (`git status` in its working folder). The maintainer on the clone design (#107): "ok
+maak de issue aan"; and on 2026-11-21, on reads, disk and who continues: "1 ok 2 nee het is
+specifiek voor pax het moet via de ontdubbelde worktree kunnen werken 3 akkoord laat fable
+kijken en indien nodig onderzoek doen": a measured read deny list for Codex is a condition to
+merge, a full checkout per issue and a size limit are refused (the job's files are APFS clones:
+pax_deorum, 13 GiB, costs 15.7 MiB), and the architecture was redone so that the class is gone
+instead of one more door closed. Codex commits in its job and Claude reviews after the import,
+so "Codex commit, Claude reviewt" holds.
 **Binds:** `plugins/issue-chats/skills/issue-handover/method.md` (§1 settings, §4 *Codex as the
 worker*), `SKILL.md` (the start brief), `plugins/issue-chats/scripts/codex_worker.py`,
-`plugins/issue-chats/scripts/codex_import.py`, `tests/codex_worker.py`, `docs/install.md`.
+`codex_job.py` and `codex_import.py` beside it, `tests/codex_worker.py`, `docs/install.md`.
 **Detail:** issues #103, #107.
 
 ## Signatures name the model, 2026-11-19

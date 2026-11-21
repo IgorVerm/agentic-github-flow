@@ -1,0 +1,230 @@
+#!/usr/bin/env python3
+"""The part of the Codex worker that runs inside Codex's sandbox. Never run it yourself.
+
+Usage (by codex_worker.py only, as `codex sandbox … -- python3 -I codex_job.py …`):
+       codex_job.py setup <worktree> <job>
+       codex_job.py prompt <file>
+       codex_job.py export <job> <base>
+
+`codex_worker.py` runs outside every sandbox, so it runs no git and opens no file that the
+Claude chat or Codex wrote (method.md *Codex as the worker*, issue #107). Everything that has to
+read such data runs here instead, under the same permission profile as Codex's own commands: it
+writes only the job's folders, has no network and reads the disk minus the worker's deny list.
+So a filter, hook or fsmonitor that the chat's repository or Codex's git folder names runs with
+no more rights than Codex has, and a path the chat passes is read under that deny list.
+
+A job is a folder of the worker's with `work` (the files Codex edits; it never holds a `.git`),
+`git` (Codex's git folder, reached through GIT_DIR and GIT_WORK_TREE), `tmp` and `out`.
+
+`setup` refuses (exit 3) unless <worktree> is the top of a linked git worktree, on a branch with
+a commit, and clean. It then makes `<job>/git` with the chat's object store as an alternate
+(Codex reads it and cannot write it), the branch at the chat's HEAD, and fills `<job>/work`: on
+macOS each tracked regular file is an APFS clone of the worktree's file (copy-on-write, no disk),
+and git checks out what is left. A tracked file that cannot exist in `work` (under a name
+Codex's sandbox protects, `.codex` or `.agents` at the top, or one the deny list covers, such as
+`.env`) is marked skip-worktree: Codex neither sees it as deleted nor commits its removal.
+
+`prompt` prints a plain file of at most 1 MiB, for the worker to hand to Codex.
+
+`export` cuts `<job>/out/codex.bundle`: Codex's commits on its branch on top of <base>.
+
+Each prints one JSON object; exit 0, 1 failed, 3 refused.
+"""
+from __future__ import annotations
+
+import json
+import os
+import stat
+import subprocess
+import sys
+import time
+
+PROMPT_MAX = 1024 * 1024
+BUNDLE = 'codex.bundle'
+
+
+class Refused(Exception):
+    pass
+
+
+class Failed(Exception):
+    pass
+
+
+def run(args, env=None, data=None):
+    return subprocess.run(['git'] + list(args), capture_output=True, env=env, input=data)
+
+
+def git(*args, env=None, error=Failed):
+    result = run(args, env=env)
+    if result.returncode != 0:
+        raise error('git %s failed: %s' % (' '.join(args[:3]),
+                                           result.stderr.decode('utf-8', 'replace').strip()[-400:]))
+    return result.stdout.decode('utf-8', 'replace').rstrip('\n')
+
+
+def clonefile_function():
+    """macOS clonefile(2), or None."""
+    if sys.platform != 'darwin':
+        return None
+    try:
+        import ctypes
+        function = ctypes.CDLL(None, use_errno=True).clonefile
+        function.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint32]
+        return function
+    except (OSError, AttributeError):
+        return None
+
+
+def job_env(job):
+    env = {name: value for name, value in os.environ.items() if not name.startswith('GIT_')}
+    env.update(GIT_DIR=os.path.join(job, 'git'), GIT_WORK_TREE=os.path.join(job, 'work'))
+    return env
+
+
+def setup(worktree, job):
+    started = time.time()
+    plain = {name: value for name, value in os.environ.items() if not name.startswith('GIT_')}
+
+    def chat(*args):
+        return git('-C', worktree, *args, env=plain, error=Refused)
+
+    if not os.path.isdir(worktree):
+        raise Refused('%s is not a folder' % worktree)
+    top = chat('rev-parse', '--show-toplevel')
+    if os.path.realpath(top) != os.path.realpath(worktree):
+        raise Refused('%s is not the top of a git worktree' % worktree)
+    git_dir = os.path.realpath(chat('rev-parse', '--absolute-git-dir'))
+    common = os.path.realpath(chat('rev-parse', '--path-format=absolute', '--git-common-dir'))
+    if git_dir == common:
+        raise Refused('%s is a primary checkout; Codex works only for a linked worktree'
+                      % worktree)
+    branch = run(['-C', worktree, 'symbolic-ref', '--quiet', '--short', 'HEAD'], env=plain)
+    branch = branch.stdout.decode('utf-8', 'replace').strip()
+    if not branch:
+        raise Refused('HEAD of %s is not on a branch' % worktree)
+    head = run(['-C', worktree, 'rev-parse', '--verify', '--quiet', 'HEAD'], env=plain)
+    head = head.stdout.decode('ascii', 'replace').strip()
+    if not head:
+        raise Refused('branch %s has no commit yet' % branch)
+    if chat('status', '--porcelain', '--untracked-files=all'):
+        raise Refused('%s has uncommitted changes; commit them first, so that Codex starts from '
+                      'all of the work' % worktree)
+    object_format = chat('rev-parse', '--show-object-format')
+
+    env = job_env(job)
+    work = env['GIT_WORK_TREE']
+    git('init', '-q', '--object-format=' + object_format, env=env)
+    with open(os.path.join(env['GIT_DIR'], 'objects', 'info', 'alternates'), 'w') as handle:
+        handle.write(os.path.join(common, 'objects') + '\n')
+    git('update-ref', 'refs/heads/' + branch, head, env=env)
+    git('symbolic-ref', 'HEAD', 'refs/heads/' + branch, env=env)
+    git('read-tree', head, env=env)
+    listing = run(['ls-files', '-z', '--stage'], env=env).stdout
+    names = []
+    cloned = 0
+    clonefile = clonefile_function()
+    made = set()
+    for entry in listing.split(b'\0'):
+        meta, _, name = entry.partition(b'\t')
+        if not name:
+            continue
+        names.append(name)
+        if clonefile is None or meta.split(b' ')[0] not in (b'100644', b'100755'):
+            continue
+        target = os.path.join(os.fsencode(work), name)
+        folder = os.path.dirname(target)
+        if folder not in made:
+            try:
+                os.makedirs(folder, exist_ok=True)
+            except OSError:
+                continue
+            made.add(folder)
+        # 1: CLONE_NOFOLLOW. A file that fails (a link, a denied name, another volume) is left
+        # to git below.
+        if clonefile(os.path.join(os.fsencode(worktree), name), target, 1) == 0:
+            cloned += 1
+    run(['update-index', '-q', '--refresh'], env=env)
+    run(['checkout-index', '-a', '-q'], env=env)
+    # What still is not there cannot exist in Codex's folder: a protected or denied name.
+    withheld = [name for name in names
+                if not os.path.lexists(os.path.join(os.fsencode(work), name))]
+    if withheld:
+        marked = run(['update-index', '--skip-worktree', '-z', '--stdin'], env=env,
+                     data=b'\0'.join(withheld))
+        if marked.returncode != 0:
+            raise Failed('git could not mark the withheld files')
+    status = git('status', '--porcelain', '--untracked-files=all', env=env)
+    if status:
+        raise Failed('the new job is not clean: %s' % status[:300])
+    return {'status': 'ready', 'branch': branch, 'base': head, 'apfs_clones': cloned,
+            'files': len(names),
+            'withheld': [name.decode('utf-8', 'replace') for name in withheld[:50]],
+            'withheld_count': len(withheld), 'seconds': round(time.time() - started, 2)}
+
+
+def prompt(path):
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NONBLOCK', 0))
+    except OSError as error:
+        raise Refused('cannot read the prompt file: %s' % error.strerror)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise Refused('the prompt file is not a plain file')
+        data = b''
+        while len(data) <= PROMPT_MAX:
+            block = os.read(fd, 65536)
+            if not block:
+                break
+            data += block
+    finally:
+        os.close(fd)
+    if len(data) > PROMPT_MAX:
+        raise Refused('the prompt file is larger than %d bytes' % PROMPT_MAX)
+    text = data.decode('utf-8', errors='replace')
+    if not text.strip():
+        raise Refused('the prompt file is empty')
+    return {'status': 'read', 'prompt': text}
+
+
+def export(job, base):
+    env = job_env(job)
+    env.pop('GIT_WORK_TREE')
+    out = os.path.join(job, 'out', BUNDLE)
+    if os.path.lexists(out):
+        os.remove(out)
+    branch = git('symbolic-ref', '--short', 'HEAD', env=env)
+    tip = git('rev-parse', '--verify', 'HEAD', env=env)
+    report = {'status': 'nothing', 'branch': branch, 'base': base, 'head': tip, 'commits': [],
+              'bundle': None}
+    if tip == base:
+        return report
+    if run(['merge-base', '--is-ancestor', base, tip], env=env).returncode != 0:
+        raise Failed('Codex\'s branch is not on top of the commit it started from, %s (Codex '
+                     'rewrote history); start with --fresh' % base)
+    for line in git('log', '--reverse', '--format=%H%x09%s', '%s..%s' % (base, tip),
+                    env=env).splitlines():
+        sha, _, subject = line.partition('\t')
+        report['commits'].append({'sha': sha, 'subject': subject})
+    git('bundle', 'create', '-q', out, 'refs/heads/' + branch, '^' + base, env=env)
+    report.update(status='exported', bundle=out)
+    return report
+
+
+def main(argv):
+    actions = {'setup': (setup, 2), 'prompt': (prompt, 1), 'export': (export, 2)}
+    if not argv or argv[0] not in actions or len(argv) - 1 != actions[argv[0]][1]:
+        print(__doc__.split('\n\n')[1], file=sys.stderr)
+        return 2
+    try:
+        report, code = actions[argv[0]][0](*argv[1:]), 0
+    except Refused as error:
+        report, code = {'status': 'refused', 'failure': str(error)}, 3
+    except (Failed, OSError) as error:
+        report, code = {'status': 'failed', 'failure': str(error)}, 1
+    print(json.dumps(report, ensure_ascii=False))
+    return code
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

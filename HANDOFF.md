@@ -33,10 +33,11 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
     macOS only); Codex uses its own thread tools; elsewhere the chat hands over a brief to paste.
     With the settings row `codex worker` (#103, #107), a Claude issue chat hands the
     implementation of an issue with that label to Codex through `codex_worker.py` (`codex exec`
-    in a disposable clone of the branch, in Codex's `workspace-write` sandbox, no network,
-    approval `never`, a time limit per turn), imports Codex's commits from a git bundle with
-    `codex_import.py` inside its own sandbox and reviews them once; offline tests only for the
-    clone route, not yet in a real issue chain. Its threads are not listed in the Codex desktop
+    in a job folder of the worker's own, under a permission profile: writes only the job, no
+    network, a read deny list, approval `never`, a time limit per turn; the worker runs no git
+    outside a sandbox, `codex_job.py` does the setup and the export inside Codex's), imports
+    Codex's commits from a git bundle with `codex_import.py` inside its own sandbox and reviews
+    them once; macOS only; measured live on a scratch worktree, not yet in a real issue chain. Its threads are not listed in the Codex desktop
     app.
     A hook (`question_label.py`, #75) keeps an issue's question label true in Claude Code: it
     refuses a question the work waits on while the issue lacks the label and removes the label

@@ -28,11 +28,14 @@ started with them ("frozen .claude"):
      not ignored) where the merge adds a path, whose content differs from the merge's version,
      or that stands where the merge needs a folder or holds untracked files where it puts a
      file (the sparse settings would overwrite it without a word).
-  5. Untracked files byte-identical to the merge's version, the leftovers of a bare `git merge`
-     that died in the sandbox (#108), are taken in on both paths: outside .claude/ and
-     .mcp.json removed right before the merge, which writes the same bytes, and written back if
-     the merge fails before it begins; on a protected path kept and frozen, being the merged
-     version already.
+  5. The leftovers of a bare `git merge` that died in the sandbox (#108) are taken in on both
+     paths when they equal the merge's version: untracked files where the merge adds a path,
+     and, after a fast-forward, tracked files it already rewrote or deleted (unstaged). Outside
+     .claude/ and .mcp.json they are put back to HEAD's state right before the merge (removed,
+     or HEAD's version), so the merge writes the same bytes, and written back byte for byte if
+     the merge fails before it begins; on a protected path an untracked one is kept and frozen,
+     being the merged version already. A change staged as the merge's version is left to git;
+     any other change to a path the merge changes is refused.
 
 A conflict elsewhere, or a hook that refuses, stops the merge as `git merge` does: resolve,
 stage by path, commit; or `merge_landing.py --abort`, which runs `git merge --abort` with the
@@ -95,11 +98,19 @@ def refuse(message):
     return 1
 
 
+class GitFailed(Exception):
+    pass
+
+
 def chunked(tree, args, paths):
-    """zlist of `git <args> -- <paths>`, 500 paths per call."""
+    """zlist of `git <args> -- <paths>`, 500 paths per call; GitFailed when git fails, so a
+    failure never reads as "nothing found"."""
     out = []
     for start in range(0, len(paths), 500):
-        out += zlist(git(tree, *args, '--', *paths[start:start + 500]).stdout)
+        run = git(tree, *args, '--', *paths[start:start + 500])
+        if run.returncode:
+            raise GitFailed(f'git {args[0]} failed: ' + run.stderr.strip()[:200])
+        out += zlist(run.stdout)
     return out
 
 
@@ -139,13 +150,29 @@ def identical(tree, result, paths):
     return same
 
 
-def in_the_way(tree, result):
-    """Untracked files where the merge adds a path, outside the protected paths (freeze() judges
-    those): ({path: (mode, blob)} byte-identical to the merge's version, a problem or None).
-    The leftovers of a bare `git merge` that died in the sandbox are such identical files (#108);
-    any other untracked file in the way is someone's work, which the frozen path's sparse
-    settings would overwrite without a word, so it is refused. Tracked and ignored files are
-    git's to handle, as in a plain `git merge`."""
+def tree_entries(tree, treeish, paths):
+    """{path: (mode, blob)} of `paths` in `treeish`."""
+    entries = {}
+    for record in chunked(tree, ('ls-tree', '-z', treeish), paths):
+        info, _, path = record.partition('\t')
+        mode, _, blob = info.split()
+        entries[path] = (mode, blob)
+    return entries
+
+
+def in_the_way(tree, result, changed):
+    """Leftovers in the merge's way outside the protected paths (freeze() judges those):
+    ({path: the state to put on disk right before the merge}, a problem or None). A state is
+    (mode, blob), or None for no file.
+
+    A bare `git merge` that died in the sandbox (#108) leaves two kinds, both equal to the
+    merge's version and both taken in: untracked files where the merge adds a path (state None:
+    removed, the merge writes them), and, when it was a fast-forward, tracked files it already
+    rewrote (` M`) or deleted (` D`) (state: HEAD's version, which the merge then replaces).
+    Any other untracked file in the way is someone's work, which the frozen path's sparse
+    settings would overwrite without a word, and any other change to a path the merge changes
+    is one git would refuse: both are refused. Ignored files, and changes to paths the merge
+    leaves alone, are git's to handle, as in a plain `git merge`."""
     added = zlist(git(tree, 'diff', '--name-only', '-z', '--no-renames', '--diff-filter=A',
                       'HEAD', result).stdout)
     full = lambda p: os.path.join(tree, *p.split('/'))  # noqa: E731
@@ -162,47 +189,118 @@ def in_the_way(tree, result):
             folders.append(path)  # a folder where the merge puts a file
         elif os.path.lexists(full(path)):
             files.append(path)
-    if not files and not parents and not folders:
-        return {}, None
-    loose = set(untracked(tree, files + sorted(parents)))
-    present = [p for p in files if p in loose]
-    differ = sorted(p for p in parents if p in loose) + untracked(tree, folders)
-    same = identical(tree, result, present)
-    differ += [p for p in present if p not in same]
+    clear_to, differ = {}, []
+    if files or parents or folders:
+        loose = set(untracked(tree, files + sorted(parents)))
+        present = [p for p in files if p in loose]
+        differ = sorted(p for p in parents if p in loose) + untracked(tree, folders)
+        same = identical(tree, result, present)
+        differ += [p for p in present if p not in same]
+        clear_to = {p: None for p in same}
+    # tracked paths the merge changes that differ from HEAD: a dead fast-forward's rewrites
+    mine = [p for p in changed if not protected(p) and p not in added]
+    touched = chunked(tree, ('diff', '--name-only', '-z', '--no-renames', 'HEAD'),
+                      mine) if mine else []
+    if touched:
+        staged = set(chunked(tree, ('diff', '--cached', '--name-only', '-z', '--no-renames',
+                                    'HEAD'), touched))
+        head, merged = tree_entries(tree, 'HEAD', touched), tree_entries(tree, result, touched)
+        index = {}
+        for record in chunked(tree, ('ls-files', '-s', '-z'), sorted(staged)) if staged else []:
+            info, _, path = record.partition('\t')
+            index[path] = info.split()[1]
+        on_disk = [p for p in touched if os.path.lexists(full(p))]
+        same = identical(tree, result, on_disk)
+        for path in touched:
+            gone = not os.path.lexists(full(path)) and path not in merged
+            if not (path in same or gone):
+                differ.append(path)
+            elif path in staged:
+                # staged as the merge's version: git's to take, as in a plain `git merge`
+                if index.get(path) != merged.get(path, ('', None))[1]:
+                    differ.append(path)
+            elif path in head:
+                clear_to[path] = head[path]
+            else:
+                differ.append(path)
     if differ:
         shown = ', '.join(differ[:10]) + (f' and {len(differ) - 10} more' if len(differ) > 10
                                           else '')
-        return None, (f'{len(differ)} untracked path(s) stand where the merge writes and differ '
-                      f'from its version: {shown}; move them out of the worktree first (files '
-                      'equal to the merge\'s version are taken in)')
-    return same, None
+        return None, (f'{len(differ)} path(s) where the merge writes differ from HEAD and from '
+                      f'the merge\'s version: {shown}; commit them, or move them out of the '
+                      'worktree first (files equal to the merge\'s version are taken in)')
+    return clear_to, None
 
 
-def clear(tree, same):
-    """Remove the identical leftovers right before the merge, which writes the same bytes back;
-    returns undo(), which writes back any the merge did not."""
+def snapshot(full):
+    """What is on disk at `full`: ('link', target), ('file', bytes, executable) or None."""
+    if os.path.islink(full):
+        return ('link', os.readlink(full))
+    if os.path.isfile(full):
+        with open(full, 'rb') as handle:
+            return ('file', handle.read(), bool(os.stat(full).st_mode & 0o111))
+    return None
+
+
+def put(full, kind, data, executable=False):
+    """Replace what is at `full` with a link to `data`, a file holding `data`, or nothing."""
+    if os.path.lexists(full):
+        os.remove(full)
+    if kind is None:
+        return
+    os.makedirs(os.path.dirname(full), exist_ok=True)
+    if kind == 'link':
+        os.symlink(data, full)
+        return
+    with open(full, 'wb') as handle:
+        handle.write(data)
+    if executable:
+        os.chmod(full, os.stat(full).st_mode | 0o111)
+
+
+def holds(tree, path, state):
+    """True when the disk at `path` is `state` ((mode, blob) or None)."""
+    full = os.path.join(tree, *path.split('/'))
+    if state is None:
+        return not os.path.lexists(full)
+    if not os.path.lexists(full):
+        return False
+    mode, blob = state
+    if mode == '120000' or os.path.islink(full):
+        data = os.fsencode(os.readlink(full)) if os.path.islink(full) else None
+        return mode == '120000' and data is not None and data == subprocess.run(
+            ['git', '-C', tree, 'cat-file', 'blob', blob], capture_output=True).stdout
+    run = git(tree, 'hash-object', '--', path)
+    return not run.returncode and run.stdout.strip() == blob
+
+
+def clear(tree, clear_to):
+    """Put each leftover path in the state the merge starts from (removed, or HEAD's version),
+    right before the merge, which writes the merge's version there; returns undo(), which
+    writes back the leftovers byte for byte where the disk still holds that state."""
+    full = lambda p: os.path.join(tree, *p.split('/'))  # noqa: E731
+    saved = {path: snapshot(full(path)) for path in clear_to}
+
     def undo():
-        for path, (mode, blob) in same.items():
-            full = os.path.join(tree, *path.split('/'))
-            if os.path.lexists(full):
-                continue
-            data = subprocess.run(['git', '-C', tree, 'cat-file', 'blob', blob],
-                                  capture_output=True).stdout
-            os.makedirs(os.path.dirname(full), exist_ok=True)
-            if mode == '120000':
-                os.symlink(os.fsdecode(data), full)
-                continue
-            with open(full, 'wb') as handle:
-                handle.write(data)
-            if mode == '100755':
-                os.chmod(full, os.stat(full).st_mode | 0o111)
+        for path, before in saved.items():
+            if before is not None and holds(tree, path, clear_to[path]):
+                put(full(path), *before)
 
     try:
-        for path in same:
-            os.remove(os.path.join(tree, *path.split('/')))
-    except OSError:
+        for path, state in clear_to.items():
+            if state is None:
+                put(full(path), None, None)
+                continue
+            mode, blob = state
+            data = subprocess.run(['git', '-C', tree, 'cat-file', 'blob', blob],
+                                  capture_output=True, check=True).stdout
+            if mode == '120000':
+                put(full(path), 'link', os.fsdecode(data))
+            else:
+                put(full(path), 'file', data, mode == '100755')
+    except (OSError, subprocess.CalledProcessError) as error:
         undo()
-        raise
+        raise OSError(str(error)) from error
     return undo
 
 
@@ -371,7 +469,11 @@ def main(argv):
     if problem:
         print(problem, file=sys.stderr)
         return 2
-    same, problem = in_the_way(tree, result)
+    try:
+        same, problem = in_the_way(tree, result, changed)
+    except GitFailed as error:
+        print(error, file=sys.stderr)
+        return 2
     if problem:
         return refuse(problem)
     paths = sorted(p for p in set(changed) | set(conflicts) if protected(p))
@@ -398,7 +500,11 @@ def main(argv):
         return refuse('the worktree is a sparse checkout of its own; this tool would overwrite '
                       'its patterns')
     settle(tree)  # a merge finished by hand after a conflict left its deletions recorded
-    undo, problem = freeze(tree, paths, result)
+    try:
+        undo, problem = freeze(tree, paths, result)
+    except GitFailed as error:
+        print(error, file=sys.stderr)
+        return 2
     if problem:
         return refuse(problem)
     try:

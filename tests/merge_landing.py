@@ -500,15 +500,114 @@ class FrozenMerge(unittest.TestCase):
 
     def test_leftovers_come_back_when_the_merge_fails_before_it_begins(self):
         self.main_adds_files(False)
-        self.leave(('docs/new.md', 'new\n'))
-        # a tracked change git refuses to merge over makes the merge stop before it begins
-        self.write(self.wt, 'README.md', 'local edit\n')
         self.land_on_main('readme', writes=[('README.md', 'main\n')])
-        code, out = self.tool('origin/main')
+        self.leave(('docs/new.md', 'new\n'), ('README.md', 'main\n'))  # untracked and ` M`
+        expected = self.merge_tree()
+        # a held index lock makes the merge fail before it begins
+        lock = work_proof.git_path(self.wt, 'index.lock')
+        open(lock, 'w').close()
+        try:
+            code, out = self.tool('origin/main')
+        finally:
+            os.remove(lock)
         self.assertEqual(code, 1, out)
         self.assertEqual(self.read('docs/new.md'), 'new\n')
-        self.assertEqual(self.read('README.md'), 'local edit\n')
+        self.assertEqual(self.read('README.md'), 'main\n')
+        code, out = self.tool('origin/main')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.head('HEAD^{tree}'), expected)
+        self.assertEqual(self.git(self.wt, 'status', '--porcelain', '--untracked-files=all'
+                                  ).stdout, '')
 
+    # #108, second review: a bare merge that was a fast-forward and died leaves tracked files
+    # already rewritten to the ref's version (` M`) or deleted (` D`), not only untracked ones
+    def fresh_task(self):
+        """A task worktree at origin/main with no commits of its own: merging main is a
+        fast-forward."""
+        self.write(self.repo, 'gone.md', 'gone\n')
+        self.commit(self.repo, 'gone.md', 'gone.md')
+        self.git(self.repo, 'push', '-q', 'origin', 'main')
+        self.wt = os.path.join(self.dir, 'repo-worktrees', 'fresh')
+        self.git(self.repo, 'worktree', 'add', '-q', '-b', 'agent/fresh', self.wt, 'origin/main')
+
+    @unittest.skipUnless(CAN_PROTECT, 'a file mode cannot protect a folder here')
+    def test_a_dead_fast_forward_is_taken_in_on_the_frozen_path(self):
+        self.fresh_task()
+        # a changed and a new file in an existing .claude/ folder: a deletion or a new folder
+        # there stops git before it updates anything (measured, git 2.54), leaving no ` M`
+        self.land_on_main('main changes .claude and more',
+                          writes=[('README.md', 'main\n'), ('.claude/settings.json', 's2\n'),
+                                  ('.claude/agents/new.md', 'new\n'),
+                                  ('docs/new.md', 'new\n')],
+                          deletes=['gone.md'])
+        self.protect()
+        bare = self.git(self.wt, 'merge', '--no-edit', 'origin/main', check=False)
+        self.assertNotEqual(bare.returncode, 0, bare.stdout)
+        status = self.git(self.wt, 'status', '--porcelain', '--untracked-files=all').stdout
+        self.assertIn(' M README.md', status)  # the fixture reproduces the dead fast-forward
+        self.assertIn('?? docs/new.md', status)
+        before = self.claude_files()
+        expected = self.merge_tree()
+        code, out = self.tool('origin/main')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.head(), self.head('origin/main'))
+        self.assertEqual(self.head('HEAD^{tree}'), expected)
+        self.assertEqual(self.git(self.wt, 'status', '--porcelain', '--untracked-files=all'
+                                  ).stdout, '')
+        self.assertEqual(self.read('README.md'), 'main\n')
+        self.assertFalse(os.path.lexists(os.path.join(self.wt, 'gone.md')))
+        self.assertEqual(self.claude_files(), before)
+
+    def test_tracked_leftovers_equal_to_the_merge_are_taken_in_on_the_plain_path(self):
+        self.fresh_task()
+        self.land_on_main('main changes files', writes=[('README.md', 'main\n'),
+                                                        ('docs/new.md', 'new\n')],
+                          deletes=['gone.md'])
+        # what a fast-forward that died leaves: rewritten, deleted and new files
+        self.leave(('README.md', 'main\n'), ('docs/new.md', 'new\n'))
+        os.remove(os.path.join(self.wt, 'gone.md'))
+        self.assertNotEqual(self.git(self.wt, 'merge', '--no-edit', 'origin/main',
+                                     check=False).returncode, 0)  # git refuses them
+        code, out = self.tool('origin/main')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.head(), self.head('origin/main'))
+        self.assertEqual(self.git(self.wt, 'status', '--porcelain', '--untracked-files=all'
+                                  ).stdout, '')
+
+    def test_a_tracked_change_that_differs_from_the_merge_is_refused(self):
+        for claude in (False, True):
+            with self.subTest(frozen=claude):
+                if claude:
+                    self.tearDown()
+                    self.setUp()
+                self.fresh_task()
+                if claude:
+                    self.main_changes_claude()
+                self.land_on_main('main changes files', writes=[('README.md', 'main\n'),
+                                                                ('docs/new.md', 'new\n')])
+                self.leave(('README.md', 'MINE\n'), ('docs/new.md', 'new\n'))
+                before = self.head()
+                self.protect()
+                code, out = self.tool('origin/main')
+                self.assertEqual(code, 1, out)
+                self.assertIn('README.md', out)
+                self.assertNotIn('docs/new.md', out)
+                self.assertEqual(self.head(), before)
+                self.assertEqual(self.read('README.md'), 'MINE\n')
+                self.assertEqual(self.read('docs/new.md'), 'new\n')
+                self.assertFalse(os.path.exists(work_proof.git_path(
+                    self.wt, work_proof.FROZEN_MANIFEST)))
+                self.protect(False)
+                # a staged change that differs is refused too
+                self.git(self.wt, 'add', '--', 'README.md')
+                self.assertEqual(self.tool('origin/main')[0], 1)
+                self.assertEqual(self.read('README.md'), 'MINE\n')
+                # one staged as the merge's version is git's to take
+                self.write(self.wt, 'README.md', 'main\n')
+                self.git(self.wt, 'add', '--', 'README.md')
+                code, out = self.tool('origin/main')
+                self.assertEqual(code, 0, out)
+                self.assertEqual(self.head(), self.head('origin/main'))
 
 if __name__ == '__main__':
     unittest.main()

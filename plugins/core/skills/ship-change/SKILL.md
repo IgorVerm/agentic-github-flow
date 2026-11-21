@@ -87,8 +87,8 @@ agents arrive in the next chat. In local-main mode do the same with the local `<
 holds landings not pushed yet. Without a remote, the local `<landing>` alone. Never rebase.
 Conflicts whose combined intent is unclear go to the user. The same tool brings the landing
 branch in during the work, not only here; the guards plugin's merge guard refuses a bare merge
-that would fail, and the tool takes in untracked files a failed bare merge left behind when they
-equal the merge's version (#108).
+that would fail, and the tool takes in what a failed bare merge left behind (untracked files,
+and tracked files a fast-forward already rewrote) when it equals the merge's version (#108).
 
 - A conflict outside `.claude/` stops the merge as usual: resolve, stage by name, commit; to back
   out, `merge_landing.py --abort` (a plain `git merge --abort` fails on frozen paths).

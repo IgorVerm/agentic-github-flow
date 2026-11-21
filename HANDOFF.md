@@ -57,7 +57,8 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
   Merged that way inside the sandbox in two pax_deorum issue chats on 2026-11-21 (#108); their
   landing and cleanup not seen yet (#50). During the work too: the guards plugin's merge guard
   (`pre_tool_merge_guard.py`, #108) refuses a bare `git merge` the sandbox would break, and the
-  tool takes in untracked leftovers of one only when they equal the merge's version.
+  tool takes in the leftovers of one (untracked files, and tracked files a fast-forward already
+  rewrote) only when they equal the merge's version.
 - Automatic merging (#13, narrowed by #26, `DESIGN_DECISIONS.md`): off by default, switched on per
   repository by the row `automatic merge` | `on` in `HANDOFF.md` §Landing settings, next to the
   landing mode (`landing.py` owns it, `--explain` reports it); an overlay cannot switch it on. There

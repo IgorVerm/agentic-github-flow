@@ -285,6 +285,9 @@ def main():
                    STUB_FLAGS=flags, HOME=home, USERPROFILE=home, TMPDIR=base,
                    STUB_GIT_LOG=git_log, STUB_REAL_GIT=shutil.which('git') or 'git')
         env.pop('XDG_CACHE_HOME', None)
+        for name in ('CLAUDE_CONFIG_DIR', 'CLAUDE_CODE_MANAGED_SETTINGS_PATH',
+                     'CLAUDE_CODE_REMOTE_SETTINGS_PATH'):
+            env.pop(name, None)
 
         def run(args, tool=TOOL, direct=False, **extra):
             command = [sys.executable, tool] + args
@@ -408,6 +411,27 @@ def main():
         with open(local, 'w') as f:
             json.dump({'permissions': {'deny': ['Read(**/.secretrc)']},
                        'sandbox': {'filesystem': {'denyRead': ['~/project-vault']}}}, f)
+        # Settings sources the worker does not read refuse the run: a moved configuration
+        # folder, a settings path, server-managed settings, an MDM profile.
+        for name in ('CLAUDE_CONFIG_DIR', 'CLAUDE_CODE_MANAGED_SETTINGS_PATH',
+                     'CLAUDE_CODE_REMOTE_SETTINGS_PATH'):
+            refused('unread settings: $%s' % name, [wt] + good, reason=name,
+                    **{name: os.path.join(base, 'elsewhere')})
+        remote = os.path.join(home, '.claude', 'remote-settings.json')
+        with open(remote, 'w') as f:
+            f.write('{}')
+        refused('unread settings: remote-settings.json', [wt] + good,
+                reason='remote-settings.json')
+        os.remove(remote)
+        probe = subprocess.run(
+            [sys.executable, '-c', 'import importlib.util, sys\n'
+             'spec = importlib.util.spec_from_file_location("w", sys.argv[1])\n'
+             'w = importlib.util.module_from_spec(spec); spec.loader.exec_module(w)\n'
+             'w.MANAGED_PREFERENCES = (sys.argv[2],)\n'
+             'print(sys.argv[2] in w.unread_sources())', TOOL, settings],
+            capture_output=True, text=True, env=env)
+        check('unread settings: an MDM profile', probe.stdout.strip() == 'True',
+              probe.stdout + probe.stderr)
         # A plugin copy under ~/.claude would be unreadable in Codex's sandbox: refused up front.
         copy = os.path.join(home, '.claude', 'plugins', 'scripts')
         shutil.copytree(SCRIPTS, copy)

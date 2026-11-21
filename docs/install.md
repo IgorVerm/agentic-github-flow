@@ -326,8 +326,12 @@ on. The chat runs Codex through one script, which fixes Codex's sandbox and neve
   deny rule must be written as `**/name`, `~/path` or `//path`, a denyRead entry as `~/path`,
   `//path` or, in the person's own settings, `/path` (each with an optional trailing `/**`);
   another form refuses the run, as do `sandbox.credentials`,
-  `permissions.blockReadsOutsideWorkingDirectories` and a plugin copy under `~/.claude`.
-  Everything else Codex may read can go to OpenAI: send it no work on a machine whose files may
+  `permissions.blockReadsOutsideWorkingDirectories`, a plugin copy under `~/.claude`, and a
+  settings source the script does not read: an MDM profile (`com.anthropic.claudecode.plist`
+  under `/Library/Managed Preferences`), server-managed settings
+  (`~/.claude/remote-settings.json`), or `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_MANAGED_SETTINGS_PATH`
+  or `CLAUDE_CODE_REMOTE_SETTINGS_PATH` set. A session started with `--settings <file>` can add
+  read limits the script cannot see. Everything else Codex may read can go to OpenAI: send it no work on a machine whose files may
   not.
 - **No network**, approval `never`, a time limit per turn, after which the script kills what is
   left of it.

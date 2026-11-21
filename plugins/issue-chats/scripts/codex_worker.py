@@ -59,8 +59,12 @@ for every later turn and the export. That is the merge condition Igor set on 202
 the floor and the person's settings hold in every case; a project's read limits bind the
 worktree the worker is given, not a chat that names another worktree. What the profile cannot express refuses the run: a rule of
 another form than `**/name`, `~/path` and `//path` (a denyRead entry also `/path`, in the
-person's own settings), an optional trailing `/**` aside; `sandbox.credentials`; and
-`permissions.blockReadsOutsideWorkingDirectories`. Measured on macOS with `codex sandbox`
+person's own settings), an optional trailing `/**` aside; `sandbox.credentials`;
+`permissions.blockReadsOutsideWorkingDirectories`; and a settings source this script does not
+read: an MDM profile (`/Library/Managed Preferences/…/com.anthropic.claudecode.plist`),
+server-managed settings (`~/.claude/remote-settings.json`), or `CLAUDE_CONFIG_DIR`,
+`CLAUDE_CODE_MANAGED_SETTINGS_PATH` or `CLAUDE_CODE_REMOTE_SETTINGS_PATH` set. A session started
+with `--settings <file>` can add read limits no file tells this script about. Measured on macOS with `codex sandbox`
 (2026-11-21): each entry refused, `/private/tmp` ones also through `/tmp`, a pattern also inside
 a writable folder, a folder named by `**/name` with its contents, a denied file also through a
 symlink and for a new hard link; this script's folder, Python and `~/.codex` stay readable. The
@@ -149,6 +153,14 @@ DENY_TMP = ('/private/tmp/cc-daemon-%d', '/private/tmp/claude-%d/bash-edit-diff'
 USER_SETTINGS = os.path.join('.claude', 'settings.json')
 MANAGED_SETTINGS = '/Library/Application Support/ClaudeCode'
 SETTINGS_MAX = 1024 * 1024
+# Sources of Claude Code settings this script does not read (Claude Code 2.1.322): MDM profiles,
+# server-managed settings, and a moved configuration folder. Any read limit there would be
+# missing from Codex's deny list, so a run refuses when one may be in play (Igor, #107).
+UNREAD_VARIABLES = ('CLAUDE_CONFIG_DIR', 'CLAUDE_CODE_MANAGED_SETTINGS_PATH',
+                    'CLAUDE_CODE_REMOTE_SETTINGS_PATH')
+MANAGED_PREFERENCES = ('/Library/Managed Preferences/%(user)s/com.anthropic.claudecode.plist',
+                       '/Library/Managed Preferences/com.anthropic.claudecode.plist')
+REMOTE_SETTINGS = os.path.join('.claude', 'remote-settings.json')
 FEATURES_OFF = ('hooks', 'shell_snapshot', 'apps', 'plugins', 'skill_mcp_dependency_install')
 REPORT_MAX = 8 * 1024 * 1024  # a 1 MiB prompt, JSON-escaped
 LOG_DAYS = 30
@@ -370,6 +382,21 @@ def add_denied(entries):
     for entry in entries:
         if entry not in DENIED:
             DENIED.append(entry)
+
+
+def unread_sources():
+    """The settings sources in play that this script does not read: refused in main."""
+    found = ['$%s' % name for name in UNREAD_VARIABLES if os.environ.get(name)]
+    try:
+        import pwd
+        user = pwd.getpwuid(os.getuid()).pw_name
+    except (ImportError, KeyError, AttributeError):
+        user = ''
+    home = os.path.realpath(os.path.expanduser('~'))
+    paths = [pattern % {'user': user} for pattern in MANAGED_PREFERENCES]
+    paths.append(os.path.join(home, REMOTE_SETTINGS))
+    found += [path for path in paths if os.path.lexists(path)]
+    return found
 
 
 def deny_list():
@@ -853,6 +880,10 @@ def main(argv=None):
     codex = shutil.which('codex')
     if not codex:
         refuse('no codex command on PATH')
+    unread = unread_sources()
+    if unread:
+        refuse('Claude Code settings this worker does not read may limit reads here (%s); '
+               'Codex\'s deny list could miss them' % ', '.join(unread))
     DENIED[:] = deny_list()
     for program in (JOB_TOOL, sys.executable):
         if not outside_denied(program):

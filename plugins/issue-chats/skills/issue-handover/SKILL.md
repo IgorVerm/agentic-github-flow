@@ -152,6 +152,8 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
    Then: the issue number and why it is next, its check, that this skill and method.md §4 step 1
    govern its start (read, check the claim, the design note when the claim names an overlap or
    the issue is labelled `type:design-first`, housekeeping, the requirements stop), that it
+   brings the landing branch in, during the work as at the landing, only with the core plugin's
+   `merge_landing.py` (`ship-change` step 2), never a bare `git merge`, that it
    pushes only on the user's yes, and that a question for the user that the work waits on goes
    on the issue too, signed, with the question label, also when it is asked in plain text
    (method.md §4, *Questions for the user*).

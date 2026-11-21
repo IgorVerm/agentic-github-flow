@@ -50,7 +50,7 @@ Ask these in one message, with your recommendation, and wait for the answers.
    - `--with web-deploy`: the pre-deploy check of a Vercel and Supabase site or a Google Cloud
      site on Cloud Run, Cloud SQL, IAP and Secret Manager (brings security);
    - `--with issue-chats`: one chat per GitHub issue, handing over to the next ready issue;
-   - `--guards`: hooks that refuse destructive git commands and ask before destructive deletes
+   - `--guards`: hooks that refuse destructive git commands and a bare merge the sandbox would break, and ask before destructive deletes
      and before personal data leaves the machine. Recommend it, at work certainly;
    - `--guards sandbox`: the guards plus the sandbox-network guard, for Claude Code users who run
      its Bash sandbox (step 5);

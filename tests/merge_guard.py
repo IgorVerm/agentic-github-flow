@@ -26,13 +26,16 @@ BLOCK = [
     'env GIT_MERGE_AUTOEDIT=no git merge main', 'timeout 30 git merge main',
     '/usr/bin/git merge main', 'git status && git merge main', 'git merge readme main',
     'git merge',  # the upstream is main
+    'git merge -S main', '(cd {other}) && git merge main', 'echo "$(cd {other})"; git merge main',
+    'cd {other} && (cd {wt} && git merge main)', 'git merge conflict',
+    'git merge adds',
 ]
 ALLOW = [
     'git merge readme', 'git merge --abort', 'git merge --continue', 'git merge no-such-ref',
     'git -C {other} merge main', 'cd {other} && git merge main', 'git merge-base main HEAD',
     'git log --merges main', 'git commit -m "git merge main"', 'echo git merge main',
     'git pull', 'git merge -h', 'cd "$X" && git merge main', 'git --git-dir=x merge main',
-    'git status',
+    'git status', 'git merge -S readme', '(cd {other} && git merge main)', 'cd {wt} && (cd {other}; git merge main)',
 ]
 
 
@@ -55,6 +58,10 @@ class MergeGuard(unittest.TestCase):
         cls.git(repo, 'commit', '-q', '-m', 'start')
         cls.git(repo, 'branch', 'task')
         cls.git(repo, 'branch', 'other')
+        cls.git(repo, 'switch', '-q', '-c', 'conflict')
+        cls.write(repo, '.claude/agents/a.md', 'agent, the other way\n')
+        cls.git(repo, 'commit', '-q', '-am', 'conflicting agent')
+        cls.git(repo, 'switch', '-q', 'main')
         cls.git(repo, 'switch', '-q', '-c', 'readme')
         cls.write(repo, 'README.md', 'readme\n')
         cls.git(repo, 'commit', '-q', '-am', 'readme only')
@@ -68,6 +75,17 @@ class MergeGuard(unittest.TestCase):
         cls.git(repo, 'worktree', 'add', '-q', cls.wt, 'task')
         cls.git(repo, 'worktree', 'add', '-q', cls.other, 'other')
         cls.git(cls.wt, 'branch', '-q', '--set-upstream-to=main')
+        # the task changed the agent too: merging main or `conflict` conflicts in .claude/
+        cls.write(cls.wt, '.claude/agents/a.md', 'agent, the task way\n')
+        cls.git(cls.wt, 'commit', '-q', '-am', 'task changes the agent')
+        cls.git(repo, 'switch', '-q', '-c', 'adds', 'readme')
+        cls.write(repo, '.claude/agents/b.md', 'b\n')
+        cls.git(repo, 'add', '.claude')
+        cls.git(repo, 'commit', '-q', '-m', 'adds an agent, no conflict')
+        cls.git(repo, 'switch', '-q', 'main')
+        conflicted = subprocess.run(['git', 'merge-tree', '--write-tree', 'HEAD', 'conflict'],
+                                    cwd=cls.wt, env=cls.env, capture_output=True)
+        assert conflicted.returncode == 1, 'the fixture must conflict'
 
     @classmethod
     def tearDownClass(cls):
@@ -113,13 +131,21 @@ class MergeGuard(unittest.TestCase):
                 code, out = self.check(command)
                 self.assertEqual(code, 2, out)
                 self.assertIn('merge_landing.py', out)
-                self.assertIn('.claude/agents/a.md', out)
+                self.assertIn('.claude/agents/' + ('b' if 'adds' in command else 'a') + '.md',
+                              out)
 
     def test_allow(self):
         for command in ALLOW:
             with self.subTest(command=command):
                 code, out = self.check(command)
                 self.assertEqual(code, 0, out)
+
+    def test_the_suggested_command_repeats_the_folder_and_no_ff(self):
+        code, out = self.check('git -C {wt} merge --no-ff main', cwd=self.other)
+        self.assertEqual(code, 2, out)
+        self.assertIn(' -C %s --no-ff main' % self.wt, out)
+        code, out = self.check('git merge main')
+        self.assertNotIn(' -C ', out)
 
     def test_a_merge_from_another_folder_into_the_own_worktree_is_judged_there(self):
         self.assertEqual(self.check('git -C {wt} merge main', cwd=self.other)[0], 2)

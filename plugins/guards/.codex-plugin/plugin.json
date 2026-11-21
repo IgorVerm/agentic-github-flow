@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "agentic-github-flow: Guards",
     "shortDescription": "Claude Code hooks that refuse destructive git commands and a bare merge the sandbox would break, and ask before destructive deletes and before personal data leaves the machine.",
-    "longDescription": "A git guard that blocks force-push, hard reset, history rewrites and discarded work in any spelling, a delete guard that asks before recursive or computed deletes of home, system and repository folders, and a personal-data check on outbound tool calls. The installer adds the matching deny list and the Codex rules.",
+    "longDescription": "A git guard that blocks force-push, hard reset, history rewrites and discarded work in any spelling, a merge guard that refuses a bare git merge the Claude Code sandbox would break and names merge_landing.py, a delete guard that asks before recursive or computed deletes of home, system and repository folders, and a personal-data check on outbound tool calls. The installer adds the matching deny list and the Codex rules.",
     "developerName": "MAI-Tech",
     "category": "Coding",
     "websiteURL": "https://mai-tech.be"

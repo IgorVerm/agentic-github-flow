@@ -14,7 +14,8 @@ bare merge before it writes anything when all of these hold:
    (user `$CLAUDE_CONFIG_DIR/settings.json` or `~/.claude/settings.json`, then the project's
    `.claude/settings.json` and `.claude/settings.local.json`, the later one winning), and not
    every part of the call matches an entry of `sandbox.excludedCommands` (matched as the opt-in
-   sandbox-network guard matches them, `pre_tool_sandbox_network.matches`);
+   sandbox-network guard matches them, `pre_tool_sandbox_network.matches`). A sandbox switched
+   on only in managed settings or in a `--settings` file is not seen, and the merge passes;
 2. the merge runs in the session's own worktree: its top level is that of `CLAUDE_PROJECT_DIR`,
    else of the hook input's `cwd`. A plain merge in another worktree (an integration worktree,
    `local-main.md`) is not protected and passes;
@@ -23,14 +24,18 @@ bare merge before it writes anything when all of these hold:
 
 It reads `git merge` in the spellings the git guard's parser reads: `git -C <dir>`, a literal
 `cd <dir>` before it (undone at the `)` of the subshell or `$(...)` it ran in),
-`env`/`timeout`-style wrappers and `sh -c '…'`; a merge without a ref is judged for
-`@{upstream}`. The refusal repeats the merge's `-C` folder and `--no-ff` in the command it
-names. It passes `--abort`, `--continue`, `--quit`, a ref git cannot resolve
-(git then fails on its own), a computed `cd` or `-C`, `--git-dir`/`--work-tree`, and `git pull`,
-whose merge target is known only after its fetch. It never answers "allow" or "ask", so it lets
-nothing run that would not run without it; a fault in it, or a git call that fails or takes
-longer than GIT_TIMEOUT seconds, lets the call pass. Work: one `rev-parse` per folder and one
-`merge-tree` and `diff` per merged ref, which grow with what the ref changed.
+`env`/`timeout`-style wrappers, `{ …; }` groups and `sh -c '…'`; `@{u}` and `main@{0}` are
+refs, and a merge without a ref is judged for `@{upstream}`. A `pushd` or `popd` makes the
+folder unknown. The refusal repeats the merge's `-C` folder and `--no-ff` in the command it
+names, and says that `--ff-only`, `--squash` and `--no-commit` are not honoured. It passes
+`--abort`, `--continue`, `--quit`, a ref git cannot resolve (git then fails on its own), a
+computed `cd` or `-C`, `--git-dir`/`--work-tree`, and `git pull`, whose merge target is known
+only after its fetch. It never answers "allow" or "ask", so it lets nothing run that would not
+run without it; a fault in it, or a git call that fails or takes longer than GIT_TIMEOUT
+seconds, lets the call pass. Work: one `rev-parse` per folder and one `merge-tree` and `diff`
+per merged ref, which grow with what the ref changed; `merge-tree --write-tree` writes the
+merge's objects into the repository's object store, from outside the sandbox (harmless:
+unreferenced objects that `git gc` removes).
 
 Usage as a hook: reads JSON on stdin. For tests:
 `pre_tool_merge_guard.py --check '<command>' [--cwd <dir>] [--project <dir>]` judges as if the
@@ -62,7 +67,10 @@ SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
 MERGE_VALUE_OPTS = {"-m", "-F", "-s", "-X", "--file", "--strategy", "--strategy-option",
                     "--into-name", "--cleanup"}  # -S takes its key id only attached
 STOP = {"--abort", "--continue", "--quit", "--skip"}
+UNHONOURED = ("--ff-only", "--squash", "--no-commit")  # merge_landing.py always commits a merge
 ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+SEPARATORS = set(";&|()\n")
+LEAD = gg.KEYWORDS | {"{", "}"}  # words before a command that are not the command
 
 
 def protected(path: str) -> bool:
@@ -95,8 +103,8 @@ def literal_dir(value: str, directory: str | None) -> str | None:
 
 
 def git_merge(args: list[str], directory: str | None):
-    """(folder, refs, flags to repeat) for `git <args>` when it is a merge to judge, else
-    None."""
+    """(folder, refs, flags to repeat, flags merge_landing.py does not honour) for
+    `git <args>` when it is a merge to judge, else None."""
     i = 0
     while i < len(args) and args[i].startswith("-"):
         opt = args[i]
@@ -125,14 +133,17 @@ def git_merge(args: list[str], directory: str | None):
         if not a.startswith("-"):
             refs.append(a)
         j += 1
-    return directory, refs or ["@{upstream}"], ["--no-ff"] if "--no-ff" in rest else []
+    return (directory, refs or ["@{upstream}"], ["--no-ff"] if "--no-ff" in rest else [],
+            [f for f in UNHONOURED if f in rest])
 
 
 def simple_commands(text: str, directory: str | None):
     """Yield (tokens, folder it runs in) per simple command, as gg.split_commands splits them,
     with each literal `cd` applied to the commands after it and undone at the `)` that closes a
     subshell or `$(...)` it ran in."""
-    lex = shlex.shlex(text, posix=True, punctuation_chars=";&|(){}\n")
+    # `{` and `}` are words here, not separators: `@{u}` and `main@{0}` are one ref, and a
+    # group `{ …; }` is read by its words (LEAD). A group is no subshell, so a `cd` in it stays.
+    lex = shlex.shlex(text, posix=True, punctuation_chars=";&|()\n")
     lex.whitespace = " \t\r"
     lex.whitespace_split = True
     lex.commenters = ""
@@ -142,15 +153,18 @@ def simple_commands(text: str, directory: str | None):
     def flush():
         tokens = list(current)
         current.clear()
-        while tokens and (ASSIGN.match(tokens[0]) or tokens[0] in gg.KEYWORDS):
+        while tokens and (ASSIGN.match(tokens[0]) or tokens[0] in LEAD):
             tokens = tokens[1:]
+        if tokens and gg.base(tokens[0]) in ("pushd", "popd"):
+            state["dir"] = None  # its folder is not followed; what runs after it passes
+            return None
         if tokens and gg.base(tokens[0]) == "cd":
             state["dir"] = literal_dir(tokens[1], state["dir"]) if len(tokens) == 2 else None
             return None
         return (tokens, state["dir"]) if tokens else None
 
     for tok in lex:
-        if tok and set(tok) <= gg.SEPARATORS:
+        if tok and set(tok) <= SEPARATORS:
             found = flush()
             if found:
                 yield found
@@ -167,12 +181,12 @@ def simple_commands(text: str, directory: str | None):
 
 
 def merges(text: str, directory: str | None, depth: int = 0):
-    """Yield (folder, refs, flags) for each `git merge` in a command run from `directory`."""
+    """Yield git_merge's answer for each `git merge` in a command run from `directory`."""
     if depth > 4:
         return
     text = gg.strip_heredocs(text.replace("\\\n", " "))[0]
     for tokens, directory in simple_commands(text, directory):
-        while tokens and (ASSIGN.match(tokens[0]) or tokens[0] in gg.KEYWORDS):
+        while tokens and (ASSIGN.match(tokens[0]) or tokens[0] in LEAD):
             tokens = tokens[1:]
         while tokens and gg.base(tokens[0]) in WRAPPERS:
             tokens = tokens[1:]
@@ -228,7 +242,7 @@ def judge(command: str, cwd: str, project: str | None) -> str | None:
     if own is None:
         return None
     tops: dict[str, str | None] = {}
-    for folder, refs, flags in merges(command, cwd):
+    for folder, refs, flags, unhonoured in merges(command, cwd):
         if folder not in tops:
             tops[folder] = toplevel(folder)
         if tops[folder] != own:
@@ -247,7 +261,9 @@ def judge(command: str, cwd: str, project: str | None) -> str | None:
                         + "".join(" " + f for f in flags) + f" {shlex.quote(ref)}\n"
                         "(the ship-change skill, step 2: it commits the merge and keeps "
                         ".claude/ and .mcp.json on disk as this chat started with them; "
-                        "`merge_landing.py --abort` undoes a stopped one).")
+                        "`merge_landing.py --abort` undoes a stopped one)."
+                        + (f" It does not honour {', '.join(unhonoured)}: it makes and commits "
+                           "a merge." if unhonoured else ""))
     return None
 
 
@@ -304,6 +320,8 @@ def main(argv: list[str]) -> int:
         tool_input = data.get("tool_input") or {}
         command = tool_input.get("command") if isinstance(tool_input, dict) else None
         if not isinstance(command, str):
+            return 0
+        if "merge" not in command:  # the cheap test before any settings file is read
             return 0
         cwd = data.get("cwd") or os.getcwd()
         project = os.environ.get("CLAUDE_PROJECT_DIR") or None

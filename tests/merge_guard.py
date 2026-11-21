@@ -34,6 +34,10 @@ BLOCK = [
     'git merge -S main', '(cd {other}) && git merge main', 'echo "$(cd {other})"; git merge main',
     'cd {other} && (cd {wt} && git merge main)', 'git merge conflict',
     'git merge adds',
+    # `{}` in a ref is part of it, not a group (second review of #109); `{{` is format()'s `{`
+    'git merge @{{u}}', 'git merge @{{upstream}}', 'git merge main@{{0}}',
+    'git merge --no-edit @{{u}}', '{{ git merge main; }}',
+    '{{ cd {other}; cd {wt}; }} && git merge main',
 ]
 ALLOW = [
     'git merge readme', 'git merge --abort', 'git merge --continue', 'git merge no-such-ref',
@@ -41,6 +45,8 @@ ALLOW = [
     'git log --merges main', 'git commit -m "git merge main"', 'echo git merge main',
     'git pull', 'git merge -h', 'cd "$X" && git merge main', 'git --git-dir=x merge main',
     'git status', 'git merge -S readme', '(cd {other} && git merge main)', 'cd {wt} && (cd {other}; git merge main)',
+    'git merge readme@{{0}}', '{{ cd {other}; }} && git merge main',
+    'pushd {other} && git merge main',  # pushd is not followed: the folder is unknown
 ]
 
 
@@ -153,6 +159,13 @@ class MergeGuard(unittest.TestCase):
         self.assertIn(' -C %s --no-ff main' % self.wt, out)
         code, out = self.check('git merge main')
         self.assertNotIn(' -C ', out)
+        self.assertNotIn('does not honour', out)
+
+    @skip_no_sandbox
+    def test_the_refusal_says_which_flags_merge_landing_does_not_honour(self):
+        code, out = self.check('git merge --ff-only --no-commit main')
+        self.assertEqual(code, 2, out)
+        self.assertIn('does not honour --ff-only, --no-commit', out)
 
     @skip_no_sandbox
     def test_a_merge_from_another_folder_into_the_own_worktree_is_judged_there(self):
@@ -163,6 +176,7 @@ class MergeGuard(unittest.TestCase):
     def test_the_hook_reads_the_sandbox_from_the_settings(self):
         on = {'sandbox': {'enabled': True}}
         self.assertEqual(self.hook('git merge main', on)[0], 2)
+        self.assertEqual(self.hook('git merge @{u}', on)[0], 2)
         self.assertEqual(self.hook('git merge readme', on)[0], 0)
         self.assertEqual(self.hook('git merge main', {'sandbox': {'enabled': False}})[0], 0)
         self.assertEqual(self.hook('git merge main', None)[0], 0)

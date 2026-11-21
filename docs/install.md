@@ -305,21 +305,24 @@ is unmeasured on Linux and refused on Windows. The full list of what a chain nee
 
 ### Codex as the worker (issue chats, opt-in per repository)
 
-A repository whose `## Issue chats settings` has the row `codex worker` (a label and a Codex
-model) lets a Claude issue chat hand the implementation of an issue with that label to Codex,
-while the chat keeps the issue, the questions to the person, the review and the push
-(method.md §4 *Codex as the worker*). Codex must be installed and logged in (`codex login`).
-The chat runs Codex through one script, which fixes Codex's sandbox (`workspace-write`, no
-network, approval `never`) and never passes a `--dangerously-*` option. Codex then reads the
-whole disk (send it no work on a machine whose files may not go to OpenAI), and writes the
-worktree, a temporary folder of its own and the git folders of the branches beside the chat's
-own (`agent/*`); after each turn the script fails the turn when Codex changed git's pointer or
-configuration files, `.claude/` or `.mcp.json`, added a submodule, moved another branch or
-rewrote history. The
-script takes no program to run (`codex` comes from PATH) and reads its prompt only from a
-temporary folder. Codex cannot run inside Claude Code's sandbox (it needs the
-network and writes `~/.codex`), so, on the person's yes, allow that script alone and exclude it
-from the sandbox, in each spelling the agents use, never `codex exec` itself:
+A repository whose `## Issue chats settings` has the row `codex worker` (a label, a Codex model
+and optionally a time limit per turn) lets a Claude issue chat hand the implementation of an
+issue with that label to Codex, while the chat keeps the issue, the questions to the person, the
+review and the push (method.md §4 *Codex as the worker*). Codex must be installed and logged in
+(`codex login`). The chat runs Codex through one script, which fixes Codex's sandbox
+(`workspace-write`, no network, approval `never`) and never passes a `--dangerously-*` option.
+Codex works in a disposable clone of the chat's branch, never in the chat's own repository; on
+macOS the clone's files are copy-on-write clones and cost no disk, elsewhere a clone costs one
+checkout. Codex reads the whole disk (send it no work on a machine whose files may not go to
+OpenAI) and writes only its clone and a temporary folder of its own. Each turn has a time limit,
+after which the script kills what is left of it. At the end the script exports Codex's commits
+as a git bundle, and the chat imports them inside its own sandbox with `codex_import.py`, which
+refuses submodules and changes to `.claude/`, `.mcp.json` and `CLAUDE.md`. The script takes no
+program to run (`codex` comes from PATH), reads its prompt only from a temporary folder and
+refuses Windows. Codex cannot run inside Claude Code's sandbox (it needs the network and writes
+`~/.codex`), so, on the person's yes, allow that script alone and exclude it from the sandbox, in
+each spelling the agents use, never `codex exec` itself and never `codex_import.py`, which runs
+inside the sandbox:
 
 ```json
 "Bash(python3 ~/.agentic-github-flow/plugins/issue-chats/scripts/codex_worker.py *)"

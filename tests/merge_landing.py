@@ -617,6 +617,34 @@ class FrozenMerge(unittest.TestCase):
         self.assertEqual(self.read('a/mine.txt'), 'mine\n')
         self.assertEqual(self.read('a/b/x'), 'x\n')
 
+    def test_a_submodule_whose_checkout_lags_is_left_to_git(self):
+        """A merge never moves a submodule's checkout, so after one that moved its pointer the
+        checkout lags HEAD (` M lib`); the next merge that moves it again goes through, as a
+        plain `git merge` does (fifth review of #109)."""
+        lib = os.path.join(self.dir, 'lib')
+        self.git(self.dir, 'init', '-q', '-b', 'main', lib)
+        commits = []
+        for n in (1, 2, 3):
+            self.write(lib, 'v.txt', '%d\n' % n)
+            self.commit(lib, 'c%d' % n, 'v.txt')
+            commits.append(self.git(lib, 'rev-parse', 'HEAD').stdout.strip())
+        allow = ('-c', 'protocol.file.allow=always')
+        self.git(self.repo, *allow, 'submodule', 'add', '-q', lib, 'lib')
+        self.git(os.path.join(self.repo, 'lib'), 'checkout', '-q', commits[1])
+        self.commit(self.repo, 'lib at c2', '.gitmodules', 'lib')
+        self.git(self.repo, 'push', '-q', 'origin', 'main')
+        self.fresh_task()
+        self.git(self.wt, *allow, 'submodule', 'update', '-q', '--init')
+        self.git(os.path.join(self.wt, 'lib'), 'checkout', '-q', commits[0])
+        self.assertIn(' M lib', self.git(self.wt, 'status', '--porcelain').stdout)
+        self.git(os.path.join(self.repo, 'lib'), 'checkout', '-q', commits[2])
+        self.commit(self.repo, 'lib at c3', 'lib')
+        self.git(self.repo, 'push', '-q', 'origin', 'main')
+        self.git(self.wt, 'fetch', '-q', 'origin')
+        code, out = self.tool('origin/main')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.head(), self.head('origin/main'))
+
     def test_tracked_leftovers_equal_to_the_merge_are_taken_in_on_the_plain_path(self):
         self.fresh_task()
         self.land_on_main('main changes files', writes=[('README.md', 'main\n'),

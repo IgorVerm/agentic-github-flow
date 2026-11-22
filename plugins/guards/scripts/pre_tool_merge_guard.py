@@ -27,8 +27,9 @@ It reads `git merge` in the spellings the git guard's parser reads: `git -C <dir
 `env`/`timeout`-style wrappers (with their option values; `env -C <dir>`), `{ …; }` groups
 and `sh -c '…'`; `@{u}` and `main@{0}` are refs, and a merge without a ref is judged for
 `@{upstream}`. A `pushd` or `popd` makes the folder unknown. The refusal repeats the merge's
-`-C` folder and `--no-ff` in the command it names, and says that `--ff-only`, `--squash` and
-`--no-commit` are not honoured. It passes `--abort`, `--continue`, `--quit`, a ref git cannot
+`-C` folder and `--no-ff` in the command it names, and says that `--ff-only`, `--squash`,
+`--no-commit`, `-s`, `-X` and `-m` are not honoured; `-s ours` keeps HEAD's tree and passes.
+It passes `--abort`, `--continue`, `--quit`, a ref git cannot
 resolve (git then fails on its own), a computed `cd` or `-C`, `--git-dir`/`--work-tree`, and
 `git pull`, whose merge target is known only after its fetch. For the same reason a merge in
 the session's worktree that follows a `git fetch`, `git pull` or `git remote update` in the
@@ -70,7 +71,7 @@ WRAPPERS = {"env", "command", "builtin", "exec", "nohup", "time", "timeout", "ni
 SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
 WRAPPER_VALUE_OPTS = {  # the options that take a separate value, per wrapper
     "env": {"-u", "--unset", "-C", "--chdir"}, "timeout": {"-s", "--signal", "-k", "--kill-after"},
-    "nice": {"-n", "--adjustment"}}
+    "nice": {"-n", "--adjustment"}, "stdbuf": {"-i", "-o", "-e"}, "exec": {"-a"}}
 MERGE_VALUE_OPTS = {"-m", "-F", "-s", "-X", "--file", "--strategy", "--strategy-option",
                     "--into-name", "--cleanup"}  # -S takes its key id only attached
 STOP = {"--abort", "--continue", "--quit", "--skip"}
@@ -126,7 +127,7 @@ def git_merge(args: list[str], directory: str | None):
             i += 1
     if i >= len(args) or args[i] != "merge" or directory is None:
         return None
-    rest, refs, j = args[i + 1:], [], 0
+    rest, refs, j, given = args[i + 1:], [], 0, []
     while j < len(rest):
         a = rest[j]
         if a in STOP or a in ("-h", "--help"):
@@ -134,6 +135,14 @@ def git_merge(args: list[str], directory: str | None):
         if a == "--":
             refs.extend(rest[j + 1:])
             break
+        strategy = (rest[j + 1] if a in ("-s", "--strategy") and j + 1 < len(rest)
+                    else a[2:] if a.startswith("-s") and len(a) > 2
+                    else a.partition("=")[2] if a.startswith("--strategy=") else None)
+        if strategy == "ours":
+            return None  # keeps HEAD's tree: nothing under .claude/ changes
+        for flag in ("-s", "-X", "-m"):  # merge_landing.py takes none of them
+            if a.startswith(flag) and flag not in given:
+                given.append(flag)
         if a in MERGE_VALUE_OPTS:
             j += 2
             continue
@@ -141,7 +150,7 @@ def git_merge(args: list[str], directory: str | None):
             refs.append(a)
         j += 1
     return (directory, refs or ["@{upstream}"], ["--no-ff"] if "--no-ff" in rest else [],
-            [f for f in UNHONOURED if f in rest])
+            [f for f in UNHONOURED if f in rest] + given)
 
 
 def simple_commands(text: str, directory: str | None):

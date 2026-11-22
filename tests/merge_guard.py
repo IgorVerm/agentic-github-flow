@@ -43,6 +43,7 @@ BLOCK = [
     'nice -n 5 git merge main', 'timeout -k 5 30 git merge main',
     # a value option of one wrapper is not one of another (fourth review of #109)
     'caffeinate -s git merge main', 'caffeinate -u git merge main',
+    'stdbuf -o L git merge main', 'exec -a x git merge main',  # fifth review of #109
     # from a subfolder: judged from the top level (fourth review of #109)
     'cd src && git merge main', 'git -C src merge adds', 'cd {wt}/src && git merge main',
 ]
@@ -56,6 +57,7 @@ ALLOW = [
     'pushd {other} && git merge main',  # pushd is not followed: the folder is unknown
     'env -C {other} git merge main', 'git merge readme && git fetch',
     'git fetch && git -C {other} merge readme',
+    'git merge -s ours main', 'git merge --strategy=ours main', 'git merge -sours main',
 ]
 # a merge after a fetch in the same call is judged before the fetch runs (third review of #109)
 AFTER_FETCH = [
@@ -206,6 +208,23 @@ class MergeGuard(unittest.TestCase):
         code, out = self.check('git merge --ff-only --no-commit main')
         self.assertEqual(code, 2, out)
         self.assertIn('does not honour --ff-only, --no-commit', out)
+        code, out = self.check('git merge -s ort -X theirs -m "catch up" main')
+        self.assertEqual(code, 2, out)
+        self.assertIn('does not honour -s, -X, -m', out)
+
+    def test_protected_is_the_core_plugins_own(self):
+        """The guard's protected() copies work_proof.protected (the core plugin, which the guards
+        plugin cannot import): they must agree."""
+        sys.path.insert(0, os.path.join(HERE, '..', 'plugins', 'core', 'scripts'))
+        import work_proof
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('merge_guard_hook', HOOK)
+        hook = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(hook)
+        for path in ('.claude/a.md', '.claude', '.claude/', '.mcp.json', '.mcp.jsonx', 'a/.claude/x',
+                     '.claudex/y', 'README.md', '.mcp.json/x', '.CLAUDE/a'):
+            with self.subTest(path=path):
+                self.assertEqual(hook.protected(path), work_proof.protected(path))
 
     @skip_no_sandbox
     def test_a_merge_from_another_folder_into_the_own_worktree_is_judged_there(self):

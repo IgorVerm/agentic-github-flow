@@ -204,11 +204,13 @@ def in_the_way(tree, result, changed):
     # tracked paths the merge changes that differ from HEAD: a dead fast-forward's rewrites
     new_paths = set(added)
     mine = [p for p in changed if not protected(p) and p not in new_paths]
-    touched = chunked(tree, ('diff', '--name-only', '-z', '--no-renames', 'HEAD'),
-                      mine) if mine else []
+    # a submodule's checkout is git's: a merge never moves it, so it lags HEAD after any merge
+    # that moved the pointer, and a plain `git merge` goes through
+    touched = chunked(tree, ('diff', '--name-only', '-z', '--no-renames',
+                             '--ignore-submodules=all', 'HEAD'), mine) if mine else []
     if touched:
         staged = set(chunked(tree, ('diff', '--cached', '--name-only', '-z', '--no-renames',
-                                    'HEAD'), touched))
+                                    '--ignore-submodules=all', 'HEAD'), touched))
         head, merged = tree_entries(tree, 'HEAD', touched), tree_entries(tree, result, touched)
         index = {}
         for record in chunked(tree, ('ls-files', '-s', '-z'), sorted(staged)) if staged else []:

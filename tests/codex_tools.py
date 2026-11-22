@@ -159,11 +159,34 @@ def offline():
     check('a socket the settings do not allow: refused', not served and 'allowUnixSockets' in
           refused[0]['reason'], str(served))
 
+    # A link in place of a job folder is never resolved into the profile.
+    top = tempfile.mkdtemp(prefix='codex-tools-forms-')
+    try:
+        job_dir = os.path.join(top, 'job')
+        os.makedirs(os.path.join(job_dir, 'work'))
+        os.symlink(os.path.expanduser('~'), os.path.join(job_dir, 'out'))
+        forms = ct.job_forms(job_dir)
+        check('job folders: by the job\'s path and the fixed names only',
+              all(os.path.basename(f) in ct.PARTS and os.path.dirname(f) in
+                  (job_dir, os.path.realpath(job_dir)) for f in forms) and
+              not any(os.path.realpath(os.path.expanduser('~')) == f for f in forms), str(forms))
+    finally:
+        shutil.rmtree(top, ignore_errors=True)
+    # A socket of the list is compared as text, the person's entry resolved.
+    served, refused = anchored([tool(name='s', command=[BLENDER, '--background'],
+                                     unix_sockets=['~/./.local/state/spark-ssh/agent.sock'])],
+                               sockets=['~/.local/state/spark-ssh/agent.sock'])
+    check('a socket written another way but the same text after normpath: served', served,
+          str(refused))
+
     # The profile.
     job = HOME + '/.cache/x/job-1'
     folders = [job + '/' + part for part in ('work', 'git', 'tmp', 'out')]
     denied = [HOME + '/.ssh', '/**/.env']
     text = ct.profile(folders, denied)
+    check('profile: a tty only with the pty extension',
+          '(extension "com.apple.sandbox.pty")' in text and
+          '(regex #"^/dev/ttys[0-9]+$"))' not in text.split('require-all')[0])
     lines = text.splitlines()
     allows = [i for i, line in enumerate(lines) if line.startswith('(allow')]
     denies = [i for i, line in enumerate(lines) if line.startswith('(deny file')]
@@ -171,8 +194,9 @@ def offline():
     check('profile: the deny list comes after every allow', denies and max(allows) < min(denies))
     check('profile: writes only the job',
           [line for line in lines if 'file-write*' in line and line.startswith('(allow')] ==
-          ['(allow file-read* file-write* file-ioctl (literal "/dev/ptmx") (regex '
-           '#"^/dev/ttys[0-9]+$"))'] + ['(allow file-write* (subpath "%s"))' % f for f in folders],
+          ['(allow file-read* file-write* file-ioctl (literal "/dev/ptmx"))',
+           '(allow file-read* file-write* file-ioctl'] +
+          ['(allow file-write* (subpath "%s"))' % f for f in folders],
           '\n'.join(line for line in lines if 'file-write*' in line))
     check('profile: no network, no GPU without grants',
           'network-outbound' not in text and 'AGXDeviceUserClient' not in text)
@@ -192,11 +216,13 @@ def offline():
     check('the note names the tool and the call', 'blender' in text and ' call <tool>' in text,
           text)
     broker = ct.Broker('/j', [], [], {'SANDBOX_RUNTIME': '1', 'SRT_SSH_PROXY_COMMAND': 'x',
-                                      'KEEP': 'y'})
+                                      'HOME': '/h', 'LC_ALL': 'C', 'GH_TOKEN': 't',
+                                      'SSH_AUTH_SOCK': '/s', 'OPENAI_API_KEY': 'k'},
+                       {'GIT_DIR': '/j/git'})
     env = broker.tool_env({'env': {'PAX_DATA_DIR': '{tmp}/pax-data'}}, {})
-    check('a tool without network: no proxy variables, {tmp} filled in',
-          'SANDBOX_RUNTIME' not in env and 'SRT_SSH_PROXY_COMMAND' not in env and
-          env['PAX_DATA_DIR'] == '/j/tmp/pax-data' and env['KEEP'] == 'y', str(env))
+    check('a tool keeps only a short list of the person\'s variables, plus the job\'s',
+          sorted(env) == ['GIT_DIR', 'HOME', 'LC_ALL', 'PAX_DATA_DIR'] and
+          env['PAX_DATA_DIR'] == '/j/tmp/pax-data', str(env))
     env = broker.tool_env({'env': {}}, {'h:22': '/s'})
     check('a tool with network: the proxy route', env['SANDBOX_RUNTIME'] == '1' and
           ' connect "$1" "$2"' in env['SRT_SSH_PROXY_COMMAND'] and
@@ -304,7 +330,10 @@ def live():
         home = os.path.realpath(os.path.expanduser('~'))
         env = dict(os.environ, GIT_DIR=os.path.join(job, 'git'),
                    GIT_WORK_TREE=os.path.join(job, 'work'), TMPDIR=os.path.join(job, 'tmp'))
-        broker = ct.Broker(job, [os.path.join(home, '.ssh'), '/**/.env'], specs, env)
+        broker = ct.Broker(job, [os.path.join(home, '.ssh'), '/**/.env'], specs, os.environ,
+                           {'GIT_DIR': os.path.join(job, 'git'),
+                            'GIT_WORK_TREE': os.path.join(job, 'work'),
+                            'TMPDIR': os.path.join(job, 'tmp')})
         broker.start(logs)
         call_env = dict(env, AGF_CODEX_TOOLS_DIR=os.path.join(job, 'out', 'tools'),
                         AGF_CODEX_TOOLS='echo,writer,net,slow')

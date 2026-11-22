@@ -75,6 +75,7 @@ worker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(worker)
 worker.MEASURED += (sys.platform,)
 worker.codex_tools.SANDBOX_EXEC = os.environ['STUB_SANDBOX_EXEC']
+worker.codex_tools.ENV_KEEP += ('STUB_FLAGS',)  # the stand-in's log folder, nothing else
 sys.exit(worker.main(sys.argv[2:]))
 '''
 
@@ -942,7 +943,7 @@ def main():
             return subprocess.run(
                 [sys.executable, tools_launcher, TOOL] + args, capture_output=True, text=True,
                 env=dict(env, STUB_SANDBOX_EXEC=stub_exec, STUB_TOOLS_SCRIPT=os.path.join(
-                    SCRIPTS, 'codex_tools.py'), **extra))
+                    SCRIPTS, 'codex_tools.py'), SECRET_TOKEN='leak', **extra))
         with open(settings) as f:
             person = json.load(f)
         person['permissions']['allow'] = ['Bash(/bin/echo hi *)', 'Bash(/bin/cat:*)']
@@ -1010,6 +1011,17 @@ def main():
         except (OSError, ValueError, KeyError):
             alive = False
         check('tools: the server is gone after the turn', not alive)
+        # A link put in place of one of the job's folders refuses the next turn (and the export).
+        out_folder = os.path.join(job, 'out')
+        os.rename(out_folder, out_folder + '.moved')
+        os.symlink(home, out_folder)
+        result = run_tools([wt] + good + ['--resume', THREAD])
+        check('tools: a link in place of a job folder refuses the turn', result.returncode == 3 and
+              'no longer a folder of the job' in result.stderr, result.stderr)
+        result = run_tools([wt, '--export'])
+        check('tools: ... and the export', result.returncode == 3, result.stderr)
+        os.remove(out_folder)
+        os.rename(out_folder + '.moved', out_folder)
         with open(listed, 'w') as f:
             f.write('{"tools": ')
         git(wt, 'commit', '-q', '-am', 'broken tools (#1)')

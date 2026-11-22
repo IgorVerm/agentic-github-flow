@@ -346,7 +346,11 @@ sandbox and never passes a `--dangerously-*` option:
   project's Claude Code settings covers its command line (no deny or ask rule), and its network
   hosts and sockets only if `sandbox.network.allowedDomains` and `allowUnixSockets` of
   `~/.claude/settings.json` or the managed settings hold them; a project's settings never widen
-  these. So a project grants Codex nothing its sandboxed Claude chats may not run themselves.
+  these. So a project grants Codex no command and no network its sandboxed Claude chats may not
+  use themselves; the `gpu` grant is the exception (Claude Code's sandbox has no GPU), and the
+  command rule binds an honest chat only, since a chat can write the project settings of a
+  worktree it makes: against a hostile chat the bound is the tool's sandbox, the person's deny
+  rules and the person's network grants.
   The format: `codex_tools.py`'s header; how a chat uses it: method.md §4.
 - **The person's Codex configuration does not apply in these turns** (`~/.codex/config.toml`,
   its rules, MCP servers and hooks), because each can run a command outside Codex's sandbox.

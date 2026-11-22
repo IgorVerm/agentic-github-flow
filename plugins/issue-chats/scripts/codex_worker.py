@@ -149,7 +149,7 @@ stays, and so does one whose worktree still exists. Loose log files that older v
 the worker's folder go after 30 days. `--sweep` takes nothing else, starts no `codex`, reads no
 settings and runs no git. Its report: `status` (`swept`, `failed` with `failure`), `removed`
 (each with its `worktree`, None when no run recorded one, and its number of log files, `logs`:
-three per turn), `kept`, `busy` (a gone worktree's folder that a run holds), `old_logs`. Every
+three per turn, and one `tool-<name>.txt` per listed tool), `kept`, `busy` (a gone worktree's folder that a run holds), `old_logs`. Every
 run records its worktree in `state.json` when it takes the lock, so a live worktree's folder is
 never taken for a gone one. A worktree whose path is missing for a while (an unmounted volume)
 loses its jobs and logs at a sweep in that time. Exit: 0 swept; 1 failed; 2 usage; 3 refused.
@@ -575,6 +575,9 @@ def tool_anchors(home):
     managed settings: their Bash allow rules, their Bash ask and deny rules (an ask counts as a
     deny: no one can be asked), and their sandbox's allowed domains and unix sockets."""
     rules, network = {'allow': [], 'deny': []}, {'domains': [], 'sockets': []}
+    managed = {'allow': [], 'domains': []}
+    only = {'rules': False, 'domains': False}
+    person = os.path.join(home, USER_SETTINGS)
     for path in settings_files(home):
         settings = read_settings(path)
         if not isinstance(settings, dict):
@@ -583,11 +586,26 @@ def tool_anchors(home):
         net = sandbox.get('network') or {} if isinstance(sandbox, dict) else {}
         if not isinstance(permissions, dict) or not isinstance(net, dict):
             refuse('%s: permissions or sandbox.network is not an object' % path)
-        rules['allow'] += codex_tools.bash_patterns(strings(permissions.get('allow')))
+        allow = codex_tools.bash_patterns(strings(permissions.get('allow')))
+        rules['allow'] += allow
         rules['deny'] += codex_tools.bash_patterns(strings(permissions.get('ask')) +
                                                    strings(permissions.get('deny')))
         network['domains'] += strings(net.get('allowedDomains'))
         network['sockets'] += strings(net.get('allowUnixSockets'))
+        if path != person:
+            # Managed settings may let only their own rules or domains count (Claude Code's
+            # allowManagedPermissionRulesOnly and allowManagedDomainsOnly): then so here.
+            managed['allow'] += allow
+            managed['domains'] += strings(net.get('allowedDomains'))
+            only['rules'] |= bool(settings.get('allowManagedPermissionRulesOnly') or
+                                  permissions.get('allowManagedPermissionRulesOnly'))
+            only['domains'] |= bool(net.get('allowManagedDomainsOnly') or
+                                    settings.get('allowManagedDomainsOnly'))
+    if only['domains']:
+        network['domains'] = managed['domains']
+    if only['rules']:
+        rules['allow'] = managed['allow']
+    rules['managed_only'] = only['rules']
     return rules, network
 
 
@@ -604,7 +622,8 @@ def turn_tools(codex, job, worktree):
     home = os.path.realpath(os.path.expanduser('~'))
     rules, network = tool_anchors(home)
     project = read.get('rules') if isinstance(read.get('rules'), dict) else {}
-    allow = rules['allow'] + codex_tools.bash_patterns(strings(project.get('allow')))
+    allow = rules['allow'] + ([] if rules['managed_only'] else
+                              codex_tools.bash_patterns(strings(project.get('allow'))))
     deny = rules['deny'] + codex_tools.bash_patterns(strings(project.get('ask')) +
                                                      strings(project.get('deny')))
     return codex_tools.check_tools(read['list'], {'allow': allow, 'deny': deny}, network,
@@ -904,6 +923,17 @@ def current_job(where, state):
     if isinstance(name, str) and JOB_RE.match(name):
         job = os.path.join(where['folder'], name)
         if os.path.isdir(job) and not os.path.islink(job):
+            for folder in job_folders(job):
+                # Codex and the tools write these four folders: a link put in place of one (or
+                # anything but a folder) refuses the job, since a profile would name its target.
+                # lstat only: nothing in them is opened.
+                try:
+                    info = os.lstat(folder)
+                except OSError:
+                    info = None
+                if info is None or not stat.S_ISDIR(info.st_mode):
+                    refuse('%s is no longer a folder of the job (a link or a file put in its '
+                           'place); start again with --fresh' % folder)
             return job
     return None
 
@@ -974,9 +1004,10 @@ def run_turn(args, codex, where):
     timed_out = False
     # The tools' servers: each in a sandbox of its own, with the job's variables and the marker,
     # so that the kill below also finds what a tool left behind.
-    broker = codex_tools.Broker(job, DENIED, served, dict(
-        clean_environment(job), GIT_DIR=os.path.join(job, 'git'),
-        GIT_WORK_TREE=os.path.join(job, 'work'), **{MARKER: marker}))
+    tmp = os.path.join(job, 'tmp')
+    broker = codex_tools.Broker(job, DENIED, served, os.environ, {
+        'GIT_DIR': os.path.join(job, 'git'), 'GIT_WORK_TREE': os.path.join(job, 'work'),
+        'TMPDIR': tmp, 'TMP': tmp, 'TEMP': tmp, MARKER: marker})
     # Files, not pipes, for stdin, stdout and stderr: a process that outlives codex and keeps a
     # pipe open would make this script wait for it.
     try:

@@ -38,8 +38,16 @@ tool never reaches further than a Claude chat's route for the same command:
   ask rule; checked when the turn starts (the command's start) and again for every call;
 - each `network` host and `unix_sockets` path is in `sandbox.network.allowedDomains` (the host,
   or the host and port, no wildcard) and `sandbox.network.allowUnixSockets` of the person's or the
-  managed settings: files the chat's sandbox cannot write. A project's settings may narrow and
-  never widen them (Igor, 2026-11-22, on #116).
+  managed settings: files the chat's sandbox cannot write. A project's network settings are not
+  read (Igor, 2026-11-22, on #116: a project never widens them). Where the managed settings set
+  `allowManagedPermissionRulesOnly` or `allowManagedDomainsOnly`, only their rules or domains
+  count, as in Claude Code.
+
+What the anchors bind: the command rule binds an honest chat; a hostile chat can name a worktree
+whose project settings it wrote, so against it the bound is the tool's sandbox, the person's deny
+and ask rules, and the network grants, which only the person's settings give. The `gpu` grant
+has no anchor: Claude Code's sandbox gives no GPU, so a listed `gpu` tool reaches the Metal
+device, its compiler service and LaunchServices' lookup, which a sandboxed Claude chat cannot.
 
     {"tools": [{"name": "blender",
                 "command": ["/Applications/Blender.app/Contents/MacOS/Blender", "--background"],
@@ -57,7 +65,9 @@ runs as Codex has it: the sandbox, not the script, is the boundary); `env` value
 person's real one anyway; `PATH`, `GIT_*`, `TMPDIR`, `DYLD_*`, `PYTHON*` and the route's names
 are refused); `time_limit_minutes` (default 30, at most 240) limits one call. Every tool also gets
 what Codex's commands get: `GIT_DIR`, `GIT_WORK_TREE` and `TMPDIR` of the job, and the turn's
-marker. A rule is matched against the shell-quoted command line, so a program whose path holds a
+marker; of the person's environment only `ENV_KEEP` and `LC_*` (no token, key or
+`SSH_AUTH_SOCK`). The job's four folders enter the profile by the job's path and the fixed names,
+never resolved below the job, and the worker refuses a job where one is not a folder. A rule is matched against the shell-quoted command line, so a program whose path holds a
 space needs a rule that quotes it (`Bash('/a b/tool' *)`).
 
 **What runs Codex's code.** A tool runs what Codex wrote whenever its arguments name it (Blender
@@ -74,6 +84,9 @@ The worker outside every sandbox opens none of these files (method.md *Codex as 
 #107): it starts the servers with fixed arguments and kills them, by the turn's marker, when the
 turn ends. A tool not in the list has no server, so its call is refused; a call whose command line
 the anchors do not allow is refused by the server (exit 126). Codex's own sandbox stays as it was.
+A tool's process that leaves its group and drops its environment outlives the turn inside its
+sandbox, with its grants (the GPU, its unix sockets; its forwarder ends with the turn): the kill
+is hygiene, as for Codex's own leftovers.
 """
 from __future__ import annotations
 
@@ -105,6 +118,11 @@ ENV_RE = re.compile(r'^[A-Z_][A-Z0-9_]{0,63}$')
 ENV_RESERVED = re.compile(r'^(GIT_.*|TMPDIR|TMP|TEMP|PATH|DYLD_.*|SANDBOX_RUNTIME|SRT_.*|AGF_.*|'
                           r'CODEX_WORKER_TURN|PYTHON.*)$')
 GRANTS = ('gpu',)
+PARTS = ('work', 'git', 'tmp', 'out')
+FORWARDS_MAX = 16  # live connections per network grant
+# What a tool keeps of the person's environment: no tokens or keys (Codex's own commands drop
+# *KEY* and *TOKEN* too), no SSH_AUTH_SOCK; the job's variables and the list's `env` come on top.
+ENV_KEEP = ('HOME', 'USER', 'LOGNAME', 'SHELL', 'TERM', 'PATH', 'LANG', '__CF_USER_TEXT_ENCODING')
 LIMIT_DEFAULT, LIMIT_MAX = 30, 240
 TOOLS_MAX, ARGS_MAX, ARG_MAX = 32, 256, 4096
 POLL = 0.2
@@ -149,7 +167,9 @@ BASE = r'''(version 1)
   (local-name "com.apple.cfprefsd.agent"))
 (allow user-preference-read)
 (allow pseudo-tty)
-(allow file-read* file-write* file-ioctl (literal "/dev/ptmx") (regex #"^/dev/ttys[0-9]+$"))
+(allow file-read* file-write* file-ioctl (literal "/dev/ptmx"))
+(allow file-read* file-write* file-ioctl
+  (require-all (regex #"^/dev/ttys[0-9]+$") (extension "com.apple.sandbox.pty")))
 (allow file-read* file-write-data file-ioctl
   (literal "/dev/null") (literal "/dev/zero") (literal "/dev/tty") (literal "/dev/dtracehelper"))
 (allow file-read* file-write-data (subpath "/dev/fd"))
@@ -219,12 +239,19 @@ def deny_reads(denied):
     return '\n'.join(lines) + '\n'
 
 
+def job_forms(job):
+    """The job's four folders, by the job's path and its real path joined with the fixed names.
+    Never a real path below the job: Codex and every tool write those folders, so a link put in
+    place of one would otherwise make its target writable for the next turn's tools."""
+    return [os.path.join(top, part) for top in both_forms(job) for part in PARTS]
+
+
 def profile(job_folders, denied, grants=(), sockets=()):
-    """The seatbelt profile of one tool: BASE, the job's folders writable, the grants, the unix
-    sockets it may connect to, then the deny list."""
+    """The seatbelt profile of one tool: BASE, the job's folders writable (as given, unresolved),
+    the grants, the unix sockets it may connect to, then the deny list."""
     text = BASE
-    text += ''.join('(allow file-write* (subpath %s))\n' % sb_string(path)
-                    for folder in job_folders for path in both_forms(folder))
+    text += ''.join('(allow file-write* (subpath %s))\n' % sb_string(folder)
+                    for folder in job_folders)
     if 'gpu' in grants:
         text += GPU % re.escape(cache_dir() or '/nonexistent')
     if sockets:
@@ -292,7 +319,10 @@ def check_tools(listed, rules, network, home):
         return [], [{'name': None, 'reason': '%s holds no list "tools" of at most %d tools'
                      % (LIST_PATH, TOOLS_MAX)}]
     domains = {str(entry).lower() for entry in network.get('domains', []) if isinstance(entry, str)}
-    sockets = {os.path.realpath(expand(entry, home)) for entry in network.get('sockets', [])
+    # The person's entries, by their text with ~ expanded, to their real path. The list's entries
+    # are the chat's: compared as text, never resolved here (no link of the chat's is followed).
+    sockets = {os.path.normpath(expand(entry, home)): os.path.realpath(expand(entry, home))
+               for entry in network.get('sockets', [])
                if isinstance(entry, str) and (entry.startswith('/') or entry.startswith('~/'))}
     seen = set()
     for tool in tools:
@@ -314,7 +344,7 @@ def check_tools(listed, rules, network, home):
                               'person\'s or the managed settings' % entry)
         if reason is None:
             for entry in tool.get('unix_sockets', []):
-                if os.path.realpath(expand(entry, home)) not in sockets:
+                if os.path.normpath(expand(entry, home)) not in sockets:
                     reason = ('unix socket %s is not in sandbox.network.allowUnixSockets of the '
                               'person\'s or the managed settings' % entry)
         if reason is not None:
@@ -325,7 +355,8 @@ def check_tools(listed, rules, network, home):
             'name': name, 'command': list(tool['command']), 'allow': allow, 'deny': deny,
             'grants': sorted(set(tool.get('grants', []))),
             'network': list(tool.get('network', [])),
-            'unix_sockets': [os.path.realpath(expand(e, home)) for e in tool.get('unix_sockets', [])],
+            'unix_sockets': [sockets[os.path.normpath(expand(e, home))]
+                             for e in tool.get('unix_sockets', [])],
             'env': dict(tool.get('env', {})),
             'time_limit_minutes': tool.get('time_limit_minutes', LIMIT_DEFAULT),
             'description': tool.get('description', '')})
@@ -390,17 +421,22 @@ class Broker:
     """The tools of one turn, run by codex_worker.py outside every sandbox. It starts one server
     per tool with fixed arguments and opens no file of the job's."""
 
-    def __init__(self, job, denied, specs, base_env, python=None):
+    def __init__(self, job, denied, specs, environ, fixed, python=None):
+        """environ: the person's environment, of which a tool keeps only ENV_KEEP and LC_*;
+        fixed: the job's variables and the turn's marker, which every tool gets."""
         self.job, self.denied, self.specs = job, list(denied), specs
-        self.base_env = dict(base_env)
+        self.base_env = {name: value for name, value in environ.items()
+                         if name in ENV_KEEP or name.startswith('LC_')}
+        self.base_env.update(fixed)
         self.python = python or sys.executable
         self.servers, self.listeners, self.pipes = [], [], []
         self.ended = {}  # name: exit code of a server that ended before the turn did
         self.folder = None
         self.stopping = threading.Event()
+        self.lock = threading.Lock()
 
     def folders(self):
-        return [os.path.join(self.job, part) for part in ('work', 'git', 'tmp', 'out')]
+        return job_forms(self.job)
 
     def tool_env(self, spec, net):
         values = {'work': os.path.join(self.job, 'work'), 'tmp': os.path.join(self.job, 'tmp'),
@@ -442,10 +478,16 @@ class Broker:
                 except OSError:
                     return
                 try:
-                    self.pipes.append(subprocess.Popen(
-                        [NC, host, str(port)], stdin=connection.fileno(),
-                        stdout=connection.fileno(), stderr=subprocess.DEVNULL,
-                        start_new_session=True, env=self.base_env))
+                    with self.lock:
+                        # Checked under the lock that stop() takes: no nc starts after it.
+                        if self.stopping.is_set():
+                            return
+                        self.pipes = [p for p in self.pipes if p.poll() is None]
+                        if len(self.pipes) < FORWARDS_MAX:
+                            self.pipes.append(subprocess.Popen(
+                                [NC, host, str(port)], stdin=connection.fileno(),
+                                stdout=connection.fileno(), stderr=subprocess.DEVNULL,
+                                start_new_session=True, env=self.base_env))
                 except OSError:
                     pass
                 finally:
@@ -476,11 +518,15 @@ class Broker:
     def stop(self):
         """Kill the servers, their tools' groups and the forwarders. A tool's own group is left to
         the worker's kill by the turn's marker, which every tool carries in its environment."""
-        self.stopping.set()
+        with self.lock:
+            self.stopping.set()
+            pipes = list(self.pipes)
+        for listener in self.listeners:
+            listener.close()
         for name, process in self.servers:
             if process.poll() is not None:
                 self.ended[name] = process.returncode
-        for process in [p for _, p in self.servers] + self.pipes:
+        for process in [p for _, p in self.servers] + pipes:
             try:
                 os.killpg(process.pid, signal.SIGKILL)
             except OSError:
@@ -489,8 +535,6 @@ class Broker:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 pass
-        for listener in self.listeners:
-            listener.close()
         if self.folder:
             shutil.rmtree(self.folder, ignore_errors=True)
 

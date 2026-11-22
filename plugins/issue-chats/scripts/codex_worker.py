@@ -994,20 +994,20 @@ def run_turn(args, codex, where):
     with open(prompt_path, 'w', encoding='utf-8') as handle:
         handle.write(prompt)
 
-    extra = {}
-    if served:
-        extra = {'AGF_CODEX_TOOLS_DIR': os.path.join(job, 'out', 'tools'),
-                 'AGF_CODEX_TOOLS': ','.join(spec['name'] for spec in served)}
-    command = codex_command(codex, args.model, args.effort, args.resume, job, last_message,
-                            marker, extra)
-    limit = args.time_limit * 60
-    timed_out = False
     # The tools' servers: each in a sandbox of its own, with the job's variables and the marker,
     # so that the kill below also finds what a tool left behind.
     tmp = os.path.join(job, 'tmp')
     broker = codex_tools.Broker(job, DENIED, served, os.environ, {
         'GIT_DIR': os.path.join(job, 'git'), 'GIT_WORK_TREE': os.path.join(job, 'work'),
         'TMPDIR': tmp, 'TMP': tmp, 'TEMP': tmp, MARKER: marker})
+    extra = {}
+    if served:
+        extra = {'AGF_CODEX_TOOLS_DIR': broker.tools_dir,
+                 'AGF_CODEX_TOOLS': ','.join(spec['name'] for spec in served)}
+    command = codex_command(codex, args.model, args.effort, args.resume, job, last_message,
+                            marker, extra)
+    limit = args.time_limit * 60
+    timed_out = False
     # Files, not pipes, for stdin, stdout and stderr: a process that outlives codex and keeps a
     # pipe open would make this script wait for it.
     try:

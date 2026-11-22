@@ -452,23 +452,11 @@ by the path that the person's allow rule names (`docs/install.md`, *Codex as the
    the branch. Once the worktree is removed (`cleanup-merged`), `<worker> --sweep` removes its
    jobs and their logs; it starts no Codex (the worker's header has what it removes and keeps).
 
-**The project's tools** (#116). Codex's sandbox cannot run what a model maker needs (Blender
-dies on its first Metal call there) and has no network. A project that wants Codex to run such
-commands lists them in `.agents/codex-tools.json`, read from the worktree the worker is given
-(each a name, the fixed
-start of a command line, and optionally the grant `gpu`, network `host:port` entries, unix
-sockets, variables and a time limit; `codex_tools.py`'s header owns the format). For a turn the
-worker serves each listed tool from a sandbox of its own, which writes only the job and reaches
-nothing beyond the tool's grants, and the note to Codex says how to call it. A tool is served
-only when Claude Code's own settings allow the same command line (a `Bash(...)` allow rule, and
-no deny or ask rule, of the person's, the managed or the project's settings) and allow its
-network hosts and sockets (`sandbox.network.allowedDomains` and `allowUnixSockets` of the
-person's or the managed settings, never the project's): so Codex reaches no further than a
-sandboxed Claude chat may with the same command. The list is the project's, not the chat's to
-extend for one issue: a change to it is a change to the repository, reviewed as one. The report's
-`tools` names the tools `served`, those `refused` with the reason, and any whose server
-`ended_early`; a refused tool the issue needs is a question for the user, not a reason to run
-the command for Codex.
+**The project's tools** (#116): commands Codex's sandbox cannot run, which a project lists in
+`.agents/codex-tools.json`; the worker serves each from a sandbox of its own, only where Claude
+Code's own settings allow the same command (`codex_tools.py`'s header; setup: `docs/install.md`).
+The list is changed as the repository is, not for one issue. A tool the report's `tools` shows
+`refused` that the issue needs is a question for the user, not a command to run for Codex.
 
 What the route does not give: Codex's commands are not seen by Claude Code's hooks, only the
 `codex_worker.py` call is; neither are the tools' runs. Inside a worker turn the person's Codex configuration, execpolicy

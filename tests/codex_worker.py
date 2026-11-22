@@ -37,6 +37,7 @@ running, Codex not told its tools, a tool's server outside its own sandbox profi
 running after the turn, or a tool list that is not JSON accepted (a stand-in for `sandbox-exec`;
 `tests/codex_tools.py` runs the real one). On Windows only the refusals run. Offline.
 """
+import glob
 import json
 import os
 import shutil
@@ -1005,7 +1006,8 @@ def main():
               os.path.join(os.path.realpath(home), 'vault') in text and
               'network-outbound' not in text, str(profiles) + text[-300:])
         try:
-            server = json.load(open(os.path.join(job, 'out', 'tools', 'echo', 'ready')))['pid']
+            ready = glob.glob(os.path.join(job, 'out', 'tools', '*', 'echo', 'ready'))
+            server = json.load(open(ready[0]))['pid']
             os.kill(server, 0)
             alive = True
         except (OSError, ValueError, KeyError):

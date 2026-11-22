@@ -2,7 +2,7 @@
 """The project's tools for a Codex job: each served from a sandbox of its own (issue #116).
 
 Usage (inside Codex's sandbox, by Codex):  python3 -I codex_tools.py call <tool> [argument ...]
-       (by codex_worker.py only)           codex_tools.py serve <job> <tool spec>
+       (by codex_worker.py only)           codex_tools.py serve <job> <turn> <tool spec>
        (by ssh, as its ProxyCommand)       codex_tools.py connect <host> <port>
 
 Codex's own sandbox cannot run what a model maker needs: Blender dies on its first Metal call
@@ -53,9 +53,9 @@ device, its compiler service and LaunchServices' lookup, which a sandboxed Claud
                 "command": ["/Applications/Blender.app/Contents/MacOS/Blender", "--background"],
                 "grants": ["gpu"], "time_limit_minutes": 30,
                 "description": "Blender headless: --python <builder> [-- args]"},
-               {"name": "spark-shot", "command": ["tools/qa/spark_shot.sh"],
-                "network": ["gx10-561a.local:22"],
-                "unix_sockets": ["~/.local/state/spark-ssh/agent.sock"],
+               {"name": "remote-shot", "command": ["tools/qa/remote_shot.sh"],
+                "network": ["gpu-box.local:22"],
+                "unix_sockets": ["~/.local/state/gpu-box-ssh/agent.sock"],
                 "env": {"PAX_DATA_DIR": "{tmp}/pax-data"}}]}
 
 `name` is lowercase letters, digits and `-`; `command` the fixed start of the command line,
@@ -75,11 +75,14 @@ runs a builder; a project script runs as Codex left it). The bound is the tool's
 writes only the job, reads the disk except the deny list, and reaches nothing else but its grants.
 
 **The route of a call.** `call` (in Codex's sandbox) writes a request into
-`<job>/out/tools/<tool>/` and waits; `serve` (one per tool, in the tool's sandbox, started by the
-worker for the turn) reads it, checks the command line against the anchors again, runs the tool in
-`<job>/work` (or the caller's folder below it) with output to `<id>.log`, and writes `<id>.done`.
-Calls to one tool run one after another. A call waits up to 30 s for its server to start, and
-stops waiting (exit 124) when no result comes within the tool's limit and 2 minutes.
+`<job>/out/tools/<turn>/<tool>/` (a folder per turn, so nothing of an earlier turn is read or
+run) and waits; `serve` (one per tool, in the tool's sandbox, started by the worker for the turn)
+reads it, checks the command line against the anchors again, runs the tool in `<job>/work` (or
+the caller's folder below it) with output to `<id>.log`, and writes `<id>.done`; the call prints
+the log and removes its files. Calls to one tool run one after another. A call waits up to 30 s
+for its server to start, stops waiting (exit 125) when the server's `ready` file has not been
+touched for 20 s (it touches it every 2 s while it lives), and stops waiting (exit 124) when no
+result comes within the tool's limit and 2 minutes.
 The worker outside every sandbox opens none of these files (method.md *Codex as the worker*, issue
 #107): it starts the servers with fixed arguments and kills them, by the turn's marker, when the
 turn ends. A tool not in the list has no server, so its call is refused; a call whose command line
@@ -119,7 +122,7 @@ ENV_RESERVED = re.compile(r'^(GIT_.*|TMPDIR|TMP|TEMP|PATH|DYLD_.*|SANDBOX_RUNTIM
                           r'CODEX_WORKER_TURN|PYTHON.*)$')
 GRANTS = ('gpu',)
 PARTS = ('work', 'git', 'tmp', 'out')
-FORWARDS_MAX = 16  # live connections per network grant
+FORWARDS_MAX = 16  # live connections of a turn, over all its network grants
 # What a tool keeps of the person's environment: no tokens or keys (Codex's own commands drop
 # *KEY* and *TOKEN* too), no SSH_AUTH_SOCK; the job's variables and the list's `env` come on top.
 ENV_KEEP = ('HOME', 'USER', 'LOGNAME', 'SHELL', 'TERM', 'PATH', 'LANG', '__CF_USER_TEXT_ENCODING')
@@ -130,6 +133,9 @@ REFUSED = 126
 TIMED_OUT = 124
 READY_SECONDS = 30   # how long a call waits for its tool's server to start
 GRACE_SECONDS = 120  # past the tool's limit, a call stops waiting for its result
+BEAT_SECONDS = 2     # a server touches its ready file this often
+STALE_SECONDS = 20   # a ready file untouched this long: the server is gone
+GONE = 125
 
 # The base of every tool's sandbox: deny by default, then what a process needs to start and run
 # Python, a shell, git, ssh and rsync and read files; modelled on Codex's own seatbelt policy
@@ -195,7 +201,10 @@ GPU = r'''(allow iokit-open-user-client
 
 def cache_dir():
     """The user's Darwin cache folder (confstr _CS_DARWIN_USER_CACHE_DIR, 65538), real path;
-    None when there is none. Python's os.confstr does not know the name."""
+    None when there is none (as on every system but macOS). Python's os.confstr does not know
+    the name."""
+    if sys.platform != 'darwin':
+        return None
     try:
         import ctypes
         libc = ctypes.CDLL(None, use_errno=True)
@@ -276,11 +285,15 @@ def bash_patterns(rules):
     return found
 
 
+def normal(pattern):
+    """The legacy `prefix:*` is Claude Code's `prefix *`: the prefix as a whole word."""
+    return pattern[:-2] + ' *' if pattern.endswith(':*') else pattern
+
+
 def pattern_regex(pattern):
-    """Claude Code's Bash rule as a regex over the command line: `*` any text, a legacy
-    `prefix:*` the prefix and anything after it, a trailing ` *` also the bare command."""
-    if pattern.endswith(':*'):
-        return re.compile(re.escape(pattern[:-2]) + '.*', re.S)
+    """Claude Code's Bash rule as a regex over the command line: `*` any text, a trailing ` *`
+    (or the legacy `:*`) also the bare command."""
+    pattern = normal(pattern)
     body = ''.join('.*' if char == '*' else re.escape(char) for char in pattern)
     if pattern.endswith(' *'):
         body = ''.join('.*' if char == '*' else re.escape(char) for char in pattern[:-2])
@@ -293,7 +306,7 @@ def matches(pattern, line):
 
 
 def literal_start(pattern):
-    head = pattern[:-2] if pattern.endswith(':*') else pattern.split('*', 1)[0]
+    head = normal(pattern).split('*', 1)[0]
     return head.rstrip()
 
 
@@ -349,6 +362,8 @@ def check_tools(listed, rules, network, home):
                               'person\'s or the managed settings' % entry)
         if reason is not None:
             refused.append({'name': name if isinstance(name, str) else None, 'reason': reason})
+            if isinstance(name, str):
+                seen.add(name)  # a second tool of that name is refused too
             continue
         seen.add(name)
         served.append({
@@ -423,8 +438,11 @@ class Broker:
 
     def __init__(self, job, denied, specs, environ, fixed, python=None):
         """environ: the person's environment, of which a tool keeps only ENV_KEEP and LC_*;
-        fixed: the job's variables and the turn's marker, which every tool gets."""
+        fixed: the job's variables and the turn's marker, which every tool gets.
+        tools_dir: the folder of this turn's calls, for Codex's AGF_CODEX_TOOLS_DIR."""
         self.job, self.denied, self.specs = job, list(denied), specs
+        self.turn = secrets.token_hex(16)
+        self.tools_dir = os.path.join(job, 'out', 'tools', self.turn)
         self.base_env = {name: value for name, value in environ.items()
                          if name in ENV_KEEP or name.startswith('LC_')}
         self.base_env.update(fixed)
@@ -507,7 +525,7 @@ class Broker:
             try:
                 self.servers.append((spec['name'], subprocess.Popen(
                     [SANDBOX_EXEC, '-p', text, self.python, '-I', os.path.abspath(__file__),
-                     'serve', self.job, json.dumps(spec)],
+                     'serve', self.job, self.turn, json.dumps(spec)],
                     cwd=os.path.join(self.job, 'work'), env=self.tool_env(spec, net),
                     stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)))
             except OSError as error:
@@ -545,7 +563,8 @@ def note(specs, python):
         return ''
     lines = ['Tools: this project lets you run these commands, each in a sandbox of its own that '
              'writes only this job\'s folders. Run one with',
-             '  %s -I %s call <tool> [arguments ...]' % (python, os.path.abspath(__file__)),
+             '  %s -I %s call <tool> [arguments ...]' % (shlex.quote(python),
+                                                         shlex.quote(os.path.abspath(__file__))),
              'in place of the command itself, passing only the arguments that follow the '
              'command shown for the tool (it already holds them); the call prints the tool\'s '
              'output and exits with its code. It waits for the tool, so give the call a timeout at least as long as '
@@ -574,7 +593,9 @@ def read_request(path):
             isinstance(arg, str) and len(arg) <= ARG_MAX and '\0' not in arg for arg in args):
         raise ValueError('args is not a list of at most %d strings' % ARGS_MAX)
     cwd = request.get('cwd')
-    return args, cwd if isinstance(cwd, str) else None
+    if not (isinstance(cwd, str) and cwd.startswith('/') and len(cwd) <= 4096 and '\0' not in cwd):
+        cwd = None  # then the tool runs in <job>/work
+    return args, cwd
 
 
 def write_done(folder, ident, result):
@@ -643,16 +664,31 @@ def run_call(spec, job, folder, ident):
         os.close(log)
 
 
-def serve(job, spec_text):
+def serve(job, turn, spec_text):
     spec = json.loads(spec_text)
-    folder = os.path.join(job, 'out', 'tools', spec['name'])
-    os.makedirs(folder, exist_ok=True)
-    if os.path.islink(folder) or not os.path.isdir(folder):
-        print('codex_tools: %s is not a folder' % folder, file=sys.stderr)
+    if not ID_RE.match(turn):
+        print('codex_tools: the turn %r is not an id' % turn, file=sys.stderr)
         return 1
+    top = os.path.join(job, 'out', 'tools')
+    folder = os.path.join(top, turn, spec['name'])
+    os.makedirs(folder, exist_ok=True)
+    for path in (top, os.path.dirname(folder), folder):
+        if os.path.islink(path) or not os.path.isdir(path):
+            print('codex_tools: %s is not a folder' % path, file=sys.stderr)
+            return 1
+    ready = os.path.join(folder, 'ready')
     write_done(folder, 'ready', {'pid': os.getpid(), 'command': spec['command'],
                                  'time_limit_minutes': spec['time_limit_minutes']})
-    os.replace(os.path.join(folder, 'ready.done'), os.path.join(folder, 'ready'))
+    os.replace(os.path.join(folder, 'ready.done'), ready)
+
+    def beat():  # while this server lives, a call can tell it from one that is gone
+        while True:
+            time.sleep(BEAT_SECONDS)
+            try:
+                os.utime(ready)
+            except OSError:
+                pass
+    threading.Thread(target=beat, daemon=True).start()
     while True:
         try:
             names = sorted(os.listdir(folder))
@@ -663,7 +699,7 @@ def serve(job, spec_text):
             if name.endswith('.req') and ID_RE.match(ident):
                 try:
                     result = run_call(spec, job, folder, ident)
-                except OSError as error:
+                except (OSError, ValueError, TypeError) as error:
                     result = {'exit': REFUSED, 'refused': str(error)}
                 try:
                     write_done(folder, ident, result)
@@ -710,6 +746,10 @@ def call(name, args):
     while True:
         finished = os.path.exists(done_path)
         try:
+            gone = time.time() - os.stat(ready).st_mtime > STALE_SECONDS
+        except OSError:
+            gone = True
+        try:
             with open(log_path, 'rb') as handle:
                 handle.seek(offset)
                 chunk = handle.read()
@@ -722,6 +762,10 @@ def call(name, args):
             pass
         if finished:
             break
+        if gone:
+            print('codex_tools: the server of %s is gone; the worker\'s log tool-%s.txt beside '
+                  'the turn\'s events says why' % (name, name), file=sys.stderr)
+            return GONE
         if deadline is not None and time.time() > deadline:
             print('codex_tools: no result from %s within its limit; stopped waiting' % name,
                   file=sys.stderr)
@@ -734,6 +778,11 @@ def call(name, args):
         result = {}
     if not isinstance(result, dict):
         result = {}
+    for suffix in ('.run', '.log', '.done'):  # the folder keeps only calls still waiting
+        try:
+            os.remove(os.path.join(folder, ident + suffix))
+        except OSError:
+            pass
     if result.get('timed_out'):
         print('codex_tools: %s ran past its time limit and was killed' % name, file=sys.stderr)
     return result['exit'] if isinstance(result.get('exit'), int) else 1
@@ -776,8 +825,8 @@ def connect(host, port):
 def main(argv):
     if len(argv) >= 2 and argv[0] == 'call':
         return call(argv[1], argv[2:])
-    if len(argv) == 3 and argv[0] == 'serve':
-        return serve(argv[1], argv[2])
+    if len(argv) == 4 and argv[0] == 'serve':
+        return serve(argv[1], argv[2], argv[3])
     if len(argv) == 3 and argv[0] == 'connect':
         return connect(argv[1], argv[2])
     print(__doc__.split('\n\n')[1], file=sys.stderr)

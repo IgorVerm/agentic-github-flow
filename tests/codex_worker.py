@@ -28,7 +28,8 @@ a `.claude` or `.codex` file, a `.mcp.json`, a nested `CLAUDE.md`, an `AGENTS.md
 moves the hooks path (also in the middle of a chain of links), a merge, or a bundle whose head
 does not descend from HEAD; a job folder whose worktree is gone left behind, with its logs, at
 the next run or by `--sweep`; `--sweep` starting codex or git, following a link out of a job, or
-removing a live or a locked job; a system the read deny list is not measured on accepted. On Windows only the refusals run. Offline.
+removing a live or a locked job, also after a refused `--fresh`; a system the read deny list is
+not measured on accepted. On Windows only the refusals run. Offline.
 """
 import json
 import os
@@ -863,10 +864,22 @@ def main():
               not os.path.lexists(locked_key) and
               report_of(result).get('removed') == [{'worktree': locked_wt, 'logs': 1}],
               result.stdout + result.stderr)
+        # A --fresh that is refused after it retired the job leaves the worktree recorded, so a
+        # sweep keeps its folder and its logs while the worktree exists.
+        import hashlib
+        wt_key = os.path.join(jobs, hashlib.sha256(os.fsencode(wt)).hexdigest()[:16])
+        wt_logs = sorted(os.listdir(os.path.join(wt_key, 'logs')))
+        refused('a refused --fresh', [wt, '--model', 'm', '--prompt-file', empty, '--fresh'])
+        result = run(['--sweep'])
+        check('a sweep after a refused --fresh keeps the live worktree\'s folder and logs',
+              result.returncode == 0 and wt_logs and os.path.isdir(os.path.join(wt_key, 'logs'))
+              and sorted(os.listdir(os.path.join(wt_key, 'logs'))) == wt_logs and
+              report_of(result).get('removed') == [], result.stdout + str(wt_logs))
         os.remove(new_log)
         shutil.rmtree(live_key)
         check('--sweep takes no worktree', run(['--sweep', wt]).returncode == 2)
         check('--sweep takes no model', run(['--sweep', '--model', 'm']).returncode == 2)
+        check('--sweep takes no empty model', run(['--sweep', '--model', '']).returncode == 2)
         check('--sweep takes no time limit', run(['--sweep', '--time-limit', '5']).returncode == 2)
         check('a turn needs a worktree', run(good).returncode == 2)
     finally:

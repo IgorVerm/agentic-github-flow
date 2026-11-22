@@ -122,9 +122,12 @@ its `state.json`, its lock and its logs. The logs go with it, decided in #111 on
 the issue's comments and the Codex thread keep what is worth keeping after it. A key folder that a run holds (its lock)
 stays, and so does one whose worktree still exists. Loose log files that older versions left in
 the worker's folder go after 30 days. `--sweep` takes nothing else, starts no `codex`, reads no
-settings and runs no git. Its report: `status` (`swept`), `removed` (each with its `worktree`,
-None when no run recorded one, and its number of `logs`), `kept`, `busy` (a gone worktree's
-folder that a run holds), `old_logs`. Exit: 0 swept; 2 usage; 3 refused.
+settings and runs no git. Its report: `status` (`swept`, `failed` with `failure`), `removed`
+(each with its `worktree`, None when no run recorded one, and its number of log files, `logs`:
+three per turn), `kept`, `busy` (a gone worktree's folder that a run holds), `old_logs`. Every
+run records its worktree in `state.json` when it takes the lock, so a live worktree's folder is
+never taken for a gone one. A worktree whose path is missing for a while (an unmounted volume)
+loses its jobs and logs at a sweep in that time. Exit: 0 swept; 1 failed; 2 usage; 3 refused.
 
 Why the sweep keeps the rule above, outside every sandbox: it opens no file the chat or Codex
 wrote. It reads only `jobs/<key>/state.json`, which only this script writes: Codex's profile
@@ -246,10 +249,26 @@ def take_lock(path):
 
 
 def lock(where):
-    os.makedirs(where['folder'], mode=0o700, exist_ok=True)
-    handle = take_lock(where['lock'])
-    if handle is None:
-        refuse('another codex_worker run holds %s' % where['lock'])
+    """Take the worktree's lock and record the worktree in its state, so that a sweep never
+    takes a live worktree's folder for a gone one. A sweep that removes the folder between its
+    making and the lock (its worktree looked gone) is met by making it again."""
+    for _ in range(3):
+        os.makedirs(where['folder'], mode=0o700, exist_ok=True)
+        try:
+            handle = take_lock(where['lock'])
+        except FileNotFoundError:
+            continue
+        if handle is None:
+            refuse('another codex_worker run holds %s' % where['lock'])
+        if os.path.exists(where['lock']):
+            break
+        handle.close()
+    else:
+        refuse('a sweep kept removing %s' % where['folder'])
+    state = read_state(where)
+    if state.get('worktree') != where['worktree']:
+        state['worktree'] = where['worktree']
+        write_state(where, state)
     return handle
 
 
@@ -802,7 +821,7 @@ def run_turn(args, codex, where):
     state = read_state(where)
     if args.fresh and state.get('job'):
         retire(where['folder'], state['job'])
-        state = {}
+        state = {'worktree': where['worktree']}
         write_state(where, state)
     job = current_job(where, state)
     setup = name = None
@@ -953,17 +972,20 @@ def main(argv=None):
     parser.add_argument('--sweep', action='store_true')
     args = parser.parse_args(argv)
     if args.sweep:
-        if args.worktree is not None or args.model or args.prompt_file or args.resume \
-                or args.fresh or args.export or args.time_limit is not None:
+        if args.fresh or args.export or any(value is not None for value in (
+                args.worktree, args.model, args.prompt_file, args.resume, args.time_limit)):
             parser.error('--sweep takes nothing else')
         # No codex, no settings, no git: only the worker's own folder (the header's sweep).
         if fcntl is None:
             refuse('this system has no file locks, so a running job cannot be told apart')
         if not getattr(shutil.rmtree, 'avoids_symlink_attacks', False):
             refuse('this Python cannot remove a folder without following links')
-        report = dict(status='swept', **sweep_jobs())
+        try:
+            report = dict(status='swept', **sweep_jobs())
+        except OSError as error:
+            report = {'status': 'failed', 'failure': '%s: %s' % (error.strerror, error.filename)}
         print(json.dumps(report, indent=2, ensure_ascii=False))
-        return 0
+        return 0 if report['status'] == 'swept' else 1
     if args.worktree is None:
         parser.error('the worktree is required, except with --sweep')
     if args.time_limit is None:

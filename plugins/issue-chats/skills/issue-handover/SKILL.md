@@ -196,8 +196,8 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
       in the turn of their word. A refusal for anything else (a red check, a review requesting
       changes) is more work of item 2.
    3. **After the merge:** the `cleanup-merged` skill for this chat's worktree, run from the
-      primary checkout, and with the settings row `codex worker` then `codex_worker.py --sweep`
-      (method.md §4 *Codex as the worker* step 8), then a signed comment on the issue whose
+      primary checkout, and with the settings row `codex worker` then the worker's `--sweep`,
+      spelled as the allow rule names it (method.md §4 *Codex as the worker* step 8), then a signed comment on the issue whose
       text after the signature opens with `merged: #<number> at <merge commit>`, with what
       cleanup removed and kept.
    4. **Archive:** end your own live work (above), rerun the worktree check (`ok` once the

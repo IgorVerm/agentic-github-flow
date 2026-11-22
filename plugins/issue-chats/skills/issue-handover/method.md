@@ -65,7 +65,7 @@ The skills read their values from it; a row left out takes its default:
 | start reading | what every chat reads at its start besides its issue: named sections, the repository's reading map | none |
 | ready extras | what the repository adds to the definition of ready of the `requirements` skill | none |
 | start extras, hand-over extras | repository steps at a chat's start and before it ends | none |
-| codex worker | the label that hands an issue's implementation to Codex, the Codex model and optionally the time limit of a turn in minutes, each in backticks (`` `astra`, `gpt-6.2-astra`, `90` ``; §4 *Codex as the worker*) | off: the Claude chat does the work itself; the time limit 60 |
+| codex worker | the label that hands an issue's implementation to Codex, the Codex model, optionally the time limit of a turn in minutes and optionally the reasoning effort (`minimal`, `low`, `medium`, `high` or `xhigh`), each in backticks (`` `astra`, `gpt-6.2-astra`, `90`, `xhigh` ``; §4 *Codex as the worker*) | off: the Claude chat does the work itself; the time limit 60; no effort: the model's own |
 
 **Chains at once is not a repository setting:** at most five issue chats work at the same time
 in a repository, counted with those already working. A chat whose branch waits for the push,
@@ -399,7 +399,7 @@ by the path that the person's allow rule names (`docs/install.md`, *Codex as the
    its own on Codex's git setup, never pushing and that Codex cannot ask. The file is read
    inside Codex's sandbox, under its read deny list; its text goes to OpenAI.
 3. **Run a turn:** `<worker> <worktree> --model <model> --prompt-file <file>
-   [--time-limit <minutes>]`, in the background, since a turn may run long. One turn is one
+   [--time-limit <minutes>] [--effort <effort>]`, in the background, since a turn may run long. One turn is one
    `codex exec`: Codex works until it stops, which may be a large task with many commits. The
    first turn makes the job, in a folder of the worker's under `~/.cache` that the chat's
    sandbox cannot write. The worker's header owns the refusals and Codex's sandbox: it writes
@@ -408,7 +408,9 @@ by the path that the person's allow rule names (`docs/install.md`, *Codex as the
    `*.p12`, and what the user's and the managed Claude Code settings and the project settings of
    the worktree it is given deny reads of, read at each run); approval `never`, the person's
    Codex configuration and rules ignored, no hooks, no apps or plugins. The time limit is the
-   settings row's third value, else 60 minutes; at the limit, or when Codex ends, the worker
+   settings row's third value, else 60 minutes. The effort is its fourth value, passed on every
+   turn, a resume too; without it a turn runs at the model's default effort, since the person's
+   Codex configuration is ignored; at the limit, or when Codex ends, the worker
    kills what is left of the turn. Of the report the chat reads `status` and Codex's
    `last_message`, nothing else: a few hundred tokens per turn.
 4. **Record it:** a signed comment on the issue whose text after the signature opens with

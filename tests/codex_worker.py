@@ -16,7 +16,8 @@ Each case exposes one way the route could go wrong: the worker itself running gi
 own git finding a repository in its working folder; a filter the chat planted in its repository,
 or one Codex planted in its git folder, running outside a sandbox; a process an old job left
 behind reaching a fresh job; Codex started for a primary checkout, a detached HEAD or a dirty
-worktree, with a model, a thread id or a time limit that is not a plain value, with a prompt
+worktree, with a model, a thread id or a time limit that is not a plain value, with an effort
+outside Codex's closed list (or the effort missing from a new turn or a resume), with a prompt
 that is empty, missing or a FIFO; a dangerous option, the person's configuration or rules, a
 hook, the shell snapshot, apps or plugins, the network, a wider writable folder or a missing
 read denial reaching `codex` (also one of the person's Read deny rules); a Read deny rule the
@@ -339,6 +340,18 @@ def main():
         refused('thread id not an id', [wt] + good + ['--resume', 'last'])
         refused('time limit zero', [wt] + good + ['--time-limit', '0'])
         refused('time limit over a day', [wt] + good + ['--time-limit', '1441'])
+
+        # The effort is a closed list of plain values: anything else is a usage error (exit 2).
+        def usage(name, args):
+            if os.path.exists(log):
+                os.remove(log)
+            result = run(args)
+            check(name, result.returncode == 2, 'exit %d: %s' % (result.returncode, result.stderr))
+            check(name + ' (codex exec not started)', not os.path.exists(log))
+        for value in ('max', 'XHIGH', '', 'high ', 'xhigh"',
+                      '--dangerously-bypass-approvals-and-sandbox'):
+            usage('effort %r refused' % value, [wt] + good + ['--effort=' + value])
+        usage('effort with the export refused', [wt, '--export', '--effort', 'high'])
         check('no --codex-bin option', run([wt] + good + ['--codex-bin', 'x']).returncode == 2)
         check('--export takes no model', run([wt, '--export'] + good).returncode == 2)
         check('--fresh with --resume is usage', run([wt] + good + ['--fresh', '--resume', THREAD])
@@ -455,7 +468,8 @@ def main():
         for path in (git_log, sandbox_log):
             if os.path.exists(path):
                 os.remove(path)
-        result = run([wt] + good, GIT_DIR=os.path.join(primary, '.git'), GIT_WORK_TREE=primary)
+        result = run([wt] + good + ['--effort', 'xhigh'], GIT_DIR=os.path.join(primary, '.git'),
+                     GIT_WORK_TREE=primary)
         check('commit run exits 0', result.returncode == 0, result.stderr + result.stdout)
         report = report_of(result)
         call = json.load(open(log))
@@ -480,6 +494,10 @@ def main():
             check('option %s' % option, option in argv, str(argv))
         configs = [argv[i + 1] for i, v in enumerate(argv) if v == '-c']
         check('approval never', 'approval_policy="never"' in configs, str(configs))
+        check('the effort reaches a new turn',
+              [c for c in configs if c.startswith('model_reasoning_effort')] ==
+              ['model_reasoning_effort="xhigh"'], str(configs))
+        check('report effort', report.get('effort') == 'xhigh', str(report))
         check('the profile is selected', 'default_permissions="agf_codex_worker"' in configs)
         check('no network', 'permissions.agf_codex_worker.network.enabled=false' in configs)
         for feature in ('hooks', 'shell_snapshot', 'apps', 'plugins',
@@ -550,7 +568,7 @@ def main():
               actions == ['settings', 'prompt', 'setup'], str(actions))
         for called in sandboxed:
             inner = [called['argv'][i + 1] for i, v in enumerate(called['argv']) if v == '-c']
-            expected = list(configs[1:4])
+            expected = list(configs[2:5])
             if called['argv'][called['argv'].index('--') + 4] == 'settings':
                 # Read before the project's rules are known: the profile without them.
                 for entry in (', "/**/.secretrc" = "deny"',
@@ -565,10 +583,15 @@ def main():
                   called['argv'][called['argv'].index('--') + 2] == '-I', str(called))
 
         # A resume in the same job.
-        result = run([wt] + good + ['--resume', THREAD])
+        result = run([wt] + good + ['--resume', THREAD, '--effort', 'high'])
         call = json.load(open(log))
         argv = call['argv']
         check('resume exits 0', result.returncode == 0, result.stderr)
+        configs = [argv[i + 1] for i, v in enumerate(argv) if v == '-c']
+        check('the effort reaches a resume',
+              [c for c in configs if c.startswith('model_reasoning_effort')] ==
+              ['model_reasoning_effort="high"'] and report_of(result).get('effort') == 'high',
+              str(configs))
         check('resume passes the thread', argv[:3] == ['exec', 'resume', THREAD], str(argv))
         check('resume keeps the profile and the job',
               'default_permissions="agf_codex_worker"' in argv and
@@ -624,6 +647,10 @@ def main():
         result = run([wt] + good + ['--fresh'], STUB_MODE='retry')
         check('an error event before turn.completed is no failure', result.returncode == 0,
               result.stdout)
+        argv = json.load(open(log))['argv']
+        check('no effort without --effort: the model\'s own',
+              not [v for v in argv if 'reasoning_effort' in v] and
+              'effort' in report_of(result) and report_of(result)['effort'] is None, str(argv))
         check('--fresh makes a new job and removes the old one',
               report_of(result).get('job') not in (None, job) and not os.path.exists(job),
               result.stdout)

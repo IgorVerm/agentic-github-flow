@@ -101,9 +101,7 @@ bash, zsh and sh:
 
 | Form | Verdict | Condition |
 |---|---|---|
-| A here-document body with a quoted delimiter | pass | the body is not read by a shell, an interpreter or ssh |
-| A here-document body with an unquoted delimiter | pass for braces | its command substitutions are judged as commands |
-| A here-string | pass | |
+| A here-document body or a here-string | pass for braces | the body is not read by a shell, an interpreter or ssh; the further conditions are in the held-back analysis |
 | Braces in single or double quotes, `${var}`, `@{u}`, `HEAD@{1}`, `{}`, `{x}` | pass (already today) | a brace inside a `${x:-…}` default stays refused |
 | Brace expansion in a command that is not git or gh | pass | the command word holds no brace and is no wrapper naming git; no assignment, loop, function or alias; not piped with git |
 | Anything in the call that runs text as code (a shell, `xargs`, `ssh`, `eval`, an interpreter on stdin) | refuse | as today |
@@ -113,7 +111,7 @@ bash, zsh and sh:
   and 99 passed test cases unchanged, keeps all 22 hostile forms refused and closes both
   bypasses.
 - It stays a deny: a prompt stalls an unattended chat, and Codex has no "ask".
-- Order: after #33, whose comment stripping one of the two fixes needs.
+- Order: after #33.
 - Residual risk, as today: braces that arrive through a file or a variable, and interpreter
   code that is only pattern-matched.
 

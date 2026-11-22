@@ -2,7 +2,8 @@
 """Run Codex as the worker of a Claude issue chat, in a job folder of its own.
 
 Usage: python3 -I codex_worker.py <worktree> --model <model> --prompt-file <file>
-                                  [--resume <thread id>] [--time-limit <minutes>] [--fresh]
+                                  [--effort <effort>] [--resume <thread id>]
+                                  [--time-limit <minutes>] [--fresh]
        python3 -I codex_worker.py <worktree> --export
        python3 -I codex_worker.py --sweep
 
@@ -80,10 +81,20 @@ and the prompt file (a plain file of at most 1 MiB, not empty).
 
 **A turn** is one `codex exec` (or `codex exec resume <thread id>`) in `<job>/work`, the prompt
 on stdin after a fixed note on the git setup, in a process session of its own, with a time limit
-(`--time-limit`, default 60 minutes):
+(`--time-limit`, default 60 minutes). `--effort` sets Codex's reasoning effort for the turn, one
+of `minimal`, `low`, `medium`, `high`, `xhigh` and `max` (any other value exits 2): since the
+person's configuration is ignored, without it a turn runs at the model's own default (issue
+#112; `low` for gpt-6.2-astra in Codex's model catalog, which lists `low` to `max` and `ultra`
+for it, not `minimal`). `ultra` ("automatic task delegation") is left out until its sub-agents
+are measured under the profile. The effort is passed on every turn it is given, a resume too: a
+resume does not keep the effort of the turn before it (measured 2026-11-22 with
+0.171.0-alpha.13 and gpt-6.2-astra: `turn_context.effort` in Codex's session file under
+`~/.codex/sessions` read `xhigh`, then null on a resume without it, then `xhigh`, then `max` on
+resumes with it; `--json` events do not carry it):
 
   codex exec [resume <thread id>] --json -o <last message> -m <model>
              --skip-git-repo-check --ignore-user-config --ignore-rules
+             [-c model_reasoning_effort="<effort>"]
              -c approval_policy="never" -c default_permissions="agf_codex_worker"
              -c permissions.agf_codex_worker.filesystem={…}
              -c permissions.agf_codex_worker.network.enabled=false
@@ -96,7 +107,8 @@ message. When `codex` ends, or the time limit kills it, the worker kills what is
 turn: the process group, then every process of this user whose environment holds the turn's
 marker (which catches a `setsid` double-fork). A process that leaves the group and drops its
 environment survives inside Codex's sandbox; the kill is hygiene, not the boundary. Its report:
-`status`, `thread_id` (for `--resume` and `codex resume`), `model`, `branch`, `job`,
+`status`, `thread_id` (for `--resume` and `codex resume`), `model`, `effort` (null without
+`--effort`), `branch`, `job`,
 `time_limit_minutes`, `timed_out`, `group_left`, `marked_killed`, `last_message` (Codex's final
 message: all the Claude chat reads of a turn), `events` (the JSONL event log, kept with the last
 message and Codex's stderr in `jobs/<key>/logs/`, beside the jobs and outside every folder Codex
@@ -164,6 +176,7 @@ except ImportError:  # Windows: refused in main
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 JOB_TOOL = os.path.join(HERE, 'codex_job.py')
+EFFORTS = ('minimal', 'low', 'medium', 'high', 'xhigh', 'max')  # Codex's efforts (#112)
 MODEL_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
 THREAD_RE = re.compile(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
 SHA_RE = re.compile(r'^[0-9a-f]{40}([0-9a-f]{24})?$')
@@ -666,14 +679,15 @@ def log_folder(where):
     return folder
 
 
-def codex_command(codex, model, resume, job, last_message, marker):
+def codex_command(codex, model, effort, resume, job, last_message, marker):
     command = [codex, 'exec']
     if resume:
         command += ['resume', resume]
     work, tmp = os.path.join(job, 'work'), os.path.join(job, 'tmp')
     variables = {'GIT_DIR': os.path.join(job, 'git'), 'GIT_WORK_TREE': work, 'TMPDIR': tmp,
                  'TMP': tmp, 'TEMP': tmp, MARKER: marker}
-    values = ['approval_policy="never"'] + profile_config(job)
+    values = ['model_reasoning_effort=%s' % toml_string(effort)] if effort else []
+    values += ['approval_policy="never"'] + profile_config(job)
     values += ['shell_environment_policy.set.%s=%s' % (name, toml_string(value))
                for name, value in variables.items()]
     # Off: hooks and the shell snapshot run outside Codex's sandbox; apps (the ChatGPT account's
@@ -863,7 +877,8 @@ def run_turn(args, codex, where):
     with open(prompt_path, 'w', encoding='utf-8') as handle:
         handle.write(prompt)
 
-    command = codex_command(codex, args.model, args.resume, job, last_message, marker)
+    command = codex_command(codex, args.model, args.effort, args.resume, job, last_message,
+                            marker)
     limit = args.time_limit * 60
     timed_out = False
     # Files, not pipes, for stdin, stdout and stderr: a process that outlives codex and keeps a
@@ -896,8 +911,9 @@ def run_turn(args, codex, where):
     except OSError:
         last = ''
     report = {'status': 'failed', 'thread_id': thread_id or args.resume, 'model': args.model,
-              'branch': branch, 'job': job, 'time_limit_minutes': args.time_limit,
-              'timed_out': timed_out, 'group_left': group_left,
+              'effort': args.effort, 'branch': branch, 'job': job,
+              'time_limit_minutes': args.time_limit, 'timed_out': timed_out,
+              'group_left': group_left,
               'marked_killed': marked_killed, 'last_message': last, 'events': events}
     if setup is not None:
         report['setup'] = {key: setup.get(key) for key in
@@ -965,6 +981,7 @@ def main(argv=None):
     parser.add_argument('worktree', nargs='?')
     parser.add_argument('--model')
     parser.add_argument('--prompt-file')
+    parser.add_argument('--effort', choices=EFFORTS)
     parser.add_argument('--resume', metavar='THREAD_ID')
     parser.add_argument('--time-limit', type=float, metavar='MINUTES')
     parser.add_argument('--fresh', action='store_true')
@@ -973,7 +990,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.sweep:
         if args.fresh or args.export or any(value is not None for value in (
-                args.worktree, args.model, args.prompt_file, args.resume, args.time_limit)):
+                args.worktree, args.model, args.prompt_file, args.effort, args.resume,
+                args.time_limit)):
             parser.error('--sweep takes nothing else')
         # No codex, no settings, no git: only the worker's own folder (the header's sweep).
         if fcntl is None:
@@ -990,7 +1008,8 @@ def main(argv=None):
         parser.error('the worktree is required, except with --sweep')
     if args.time_limit is None:
         args.time_limit = 60.0
-    if args.export and (args.model or args.prompt_file or args.resume or args.fresh):
+    if args.export and (args.model or args.prompt_file or args.effort or args.resume
+                        or args.fresh):
         parser.error('--export takes only the worktree')
     if not args.export and not (args.model and args.prompt_file):
         parser.error('a turn needs --model and --prompt-file')

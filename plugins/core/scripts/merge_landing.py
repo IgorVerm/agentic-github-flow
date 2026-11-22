@@ -30,10 +30,11 @@ started with them ("frozen .claude"):
      file (the sparse settings would overwrite it without a word).
   5. The leftovers of a bare `git merge` that died in the sandbox (#108) are taken in on both
      paths when they equal the merge's version: untracked files where the merge adds a path,
-     and, after a fast-forward, tracked files it already rewrote or deleted (unstaged). Outside
-     .claude/ and .mcp.json they are put back to HEAD's state right before the merge (removed,
-     or HEAD's version), so the merge writes the same bytes, and written back byte for byte if
-     the merge fails before it begins; on a protected path an untracked one is kept and frozen,
+     and, after a fast-forward, tracked files it already rewrote or deleted (unstaged), also a
+     file it turned into a folder that holds only such leftovers. Outside .claude/ and
+     .mcp.json they are put back to HEAD's state right before the merge (removed, or HEAD's
+     version), so the merge writes the same bytes, and written back byte for byte if the merge
+     fails before it begins; on a protected path an untracked one is kept and frozen,
      being the merged version already. A change staged as the merge's version is left to git;
      any other change to a path the merge changes is refused.
 
@@ -176,6 +177,7 @@ def in_the_way(tree, result, changed):
     added = zlist(git(tree, 'diff', '--name-only', '-z', '--no-renames', '--diff-filter=A',
                       'HEAD', result).stdout)
     full = lambda p: os.path.join(tree, *p.split('/'))  # noqa: E731
+    isdir = lambda p: os.path.isdir(full(p)) and not os.path.islink(full(p))  # noqa: E731
     files, parents, folders = [], set(), []
     for path in added:
         if protected(path):
@@ -198,7 +200,8 @@ def in_the_way(tree, result, changed):
         differ += [p for p in present if p not in same]
         clear_to = {p: None for p in same}
     # tracked paths the merge changes that differ from HEAD: a dead fast-forward's rewrites
-    mine = [p for p in changed if not protected(p) and p not in added]
+    new_paths = set(added)
+    mine = [p for p in changed if not protected(p) and p not in new_paths]
     touched = chunked(tree, ('diff', '--name-only', '-z', '--no-renames', 'HEAD'),
                       mine) if mine else []
     if touched:
@@ -213,6 +216,9 @@ def in_the_way(tree, result, changed):
         same = identical(tree, result, on_disk)
         for path in touched:
             gone = not os.path.lexists(full(path)) and path not in merged
+            if not gone and isdir(path) and merged.get(path, ('',))[0] == '040000':
+                # a file the merge turns into a folder, already a folder of leftovers on disk
+                gone = all(p in clear_to for p in untracked(tree, [path]))
             if not (path in same or gone):
                 differ.append(path)
             elif path in staged:
@@ -233,9 +239,12 @@ def in_the_way(tree, result, changed):
 
 
 def snapshot(full):
-    """What is on disk at `full`: ('link', target), ('file', bytes, executable) or None."""
+    """What is on disk at `full`: ('link', target), ('file', bytes, executable), ('dir', None)
+    or None."""
     if os.path.islink(full):
         return ('link', os.readlink(full))
+    if os.path.isdir(full):
+        return ('dir', None)
     if os.path.isfile(full):
         with open(full, 'rb') as handle:
             return ('file', handle.read(), bool(os.stat(full).st_mode & 0o111))
@@ -243,10 +252,17 @@ def snapshot(full):
 
 
 def put(full, kind, data, executable=False):
-    """Replace what is at `full` with a link to `data`, a file holding `data`, or nothing."""
-    if os.path.lexists(full):
+    """Replace what is at `full` with a link to `data`, a file holding `data`, an empty folder,
+    or nothing. A folder in the way goes only when empty (its leftovers were removed first)."""
+    if os.path.isdir(full) and not os.path.islink(full):
+        for folder, _, _ in os.walk(full, topdown=False):
+            os.rmdir(folder)  # OSError when a file is left in it
+    elif os.path.lexists(full):
         os.remove(full)
     if kind is None:
+        return
+    if kind == 'dir':
+        os.makedirs(full, exist_ok=True)
         return
     os.makedirs(os.path.dirname(full), exist_ok=True)
     if kind == 'link':
@@ -279,15 +295,18 @@ def clear(tree, clear_to):
     right before the merge, which writes the merge's version there; returns undo(), which
     writes back the leftovers byte for byte where the disk still holds that state."""
     full = lambda p: os.path.join(tree, *p.split('/'))  # noqa: E731
-    saved = {path: snapshot(full(path)) for path in clear_to}
+    # removals first, so that a folder of leftovers is empty when HEAD's file replaces it
+    order = sorted(clear_to, key=lambda p: clear_to[p] is not None)
+    saved = {path: snapshot(full(path)) for path in order}
 
     def undo():
-        for path, before in saved.items():
-            if before is not None and holds(tree, path, clear_to[path]):
-                put(full(path), *before)
+        for path in reversed(order):
+            if saved[path] is not None and holds(tree, path, clear_to[path]):
+                put(full(path), *saved[path])
 
     try:
-        for path, state in clear_to.items():
+        for path in order:
+            state = clear_to[path]
             if state is None:
                 put(full(path), None, None)
                 continue

@@ -558,6 +558,65 @@ class FrozenMerge(unittest.TestCase):
         self.assertFalse(os.path.lexists(os.path.join(self.wt, 'gone.md')))
         self.assertEqual(self.claude_files(), before)
 
+    def file_becomes_folder(self, claude):
+        """A task with no commits of its own; main turns the file `a` into the folder `a/b/x`."""
+        self.write(self.repo, 'a', 'file a\n')
+        self.commit(self.repo, 'file a', 'a')
+        self.git(self.repo, 'push', '-q', 'origin', 'main')
+        self.fresh_task()
+        self.git(self.repo, 'rm', '-q', '--', 'a')
+        writes = [('a/b/x', 'x\n'), ('README.md', 'main\n')]
+        if claude:
+            writes.append(('.claude/settings.json', 's2\n'))
+        self.land_on_main('a becomes a folder', writes=writes)
+
+    @unittest.skipUnless(CAN_PROTECT, 'a file mode cannot protect a folder here')
+    def test_a_dead_fast_forward_that_turns_a_file_into_a_folder_is_taken_in(self):
+        self.file_becomes_folder(True)
+        self.protect()
+        self.assertNotEqual(self.git(self.wt, 'merge', '--no-edit', 'origin/main',
+                                     check=False).returncode, 0)
+        status = self.git(self.wt, 'status', '--porcelain', '--untracked-files=all').stdout
+        self.assertIn(' D a', status)  # the fixture reproduces it: `a` is a folder now
+        self.assertIn('?? a/b/x', status)
+        code, out = self.tool('origin/main')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.head(), self.head('origin/main'))
+        self.assertEqual(self.git(self.wt, 'status', '--porcelain', '--untracked-files=all'
+                                  ).stdout, '')
+        self.assertEqual(self.read('a/b/x'), 'x\n')
+
+    def test_a_folder_of_leftovers_comes_back_when_the_merge_fails_before_it_begins(self):
+        self.file_becomes_folder(False)
+        os.remove(os.path.join(self.wt, 'a'))
+        self.leave(('a/b/x', 'x\n'), ('README.md', 'main\n'))
+        lock = work_proof.git_path(self.wt, 'index.lock')
+        open(lock, 'w').close()
+        try:
+            code, out = self.tool('origin/main')
+        finally:
+            os.remove(lock)
+        self.assertEqual(code, 1, out)
+        self.assertEqual(self.read('a/b/x'), 'x\n')
+        self.assertEqual(self.read('README.md'), 'main\n')
+        code, out = self.tool('origin/main')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.head(), self.head('origin/main'))
+        self.assertEqual(self.git(self.wt, 'status', '--porcelain', '--untracked-files=all'
+                                  ).stdout, '')
+
+    def test_a_folder_that_holds_a_file_of_ones_own_is_refused(self):
+        self.file_becomes_folder(False)
+        os.remove(os.path.join(self.wt, 'a'))
+        self.leave(('a/b/x', 'x\n'), ('a/mine.txt', 'mine\n'))
+        before = self.head()
+        code, out = self.tool('origin/main')
+        self.assertEqual(code, 1, out)
+        self.assertIn(': a;', out)
+        self.assertEqual(self.head(), before)
+        self.assertEqual(self.read('a/mine.txt'), 'mine\n')
+        self.assertEqual(self.read('a/b/x'), 'x\n')
+
     def test_tracked_leftovers_equal_to_the_merge_are_taken_in_on_the_plain_path(self):
         self.fresh_task()
         self.land_on_main('main changes files', writes=[('README.md', 'main\n'),

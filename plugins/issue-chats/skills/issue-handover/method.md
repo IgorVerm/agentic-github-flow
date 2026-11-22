@@ -444,8 +444,8 @@ by the path that the person's allow rule names (`docs/install.md`, *Codex as the
    turns, so a large task (a whole building) is split into issues per part, as for Claude work.
 8. **Then on as usual:** the checks, `ship-change` steps 1 to 5, the hand-over. The review route
    of `ship-change` does not change: the chat that ran Codex is not the independent reviewer of
-   the branch. Once the worktree is removed (`cleanup-merged`), the worker's next run removes
-   its job.
+   the branch. Once the worktree is removed (`cleanup-merged`), `<worker> --sweep` removes its
+   jobs and their logs; it starts no Codex (the worker's header has what it removes and keeps).
 
 What the route does not give: Codex's commands are not seen by Claude Code's hooks, only the
 `codex_worker.py` call is. Inside a worker turn the person's Codex configuration, execpolicy

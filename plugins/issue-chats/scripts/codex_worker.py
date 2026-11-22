@@ -5,6 +5,7 @@ Usage: python3 -I codex_worker.py <worktree> --model <model> --prompt-file <file
                                   [--effort <effort>] [--resume <thread id>]
                                   [--time-limit <minutes>] [--fresh]
        python3 -I codex_worker.py <worktree> --export
+       python3 -I codex_worker.py --sweep
 
 The route of method.md *Codex as the worker* (issues #103, #107): the Claude issue chat stays
 the owner of the issue and the person's interface, and hands the implementation to Codex. One
@@ -107,7 +108,8 @@ environment survives inside Codex's sandbox; the kill is hygiene, not the bounda
 `--effort`), `branch`, `job`,
 `time_limit_minutes`, `timed_out`, `group_left`, `marked_killed`, `last_message` (Codex's final
 message: all the Claude chat reads of a turn), `events` (the JSONL event log, kept with the last
-message in the worker's folder, outside every folder Codex writes, and removed after 30 days);
+message and Codex's stderr in `jobs/<key>/logs/`, beside the jobs and outside every folder Codex
+writes, removed after 30 days or with the worktree's jobs, whichever comes first);
 on a new job also `setup` (`apfs_clones`, `files`, `withheld`: tracked files that cannot exist in
 Codex's folder). Exit: 0 the turn completed; 1 Codex failed, timed out or the turn did not
 complete; 2 usage; 3 refused before Codex started.
@@ -120,7 +122,33 @@ data. Its report: `status` (`exported`, `nothing`, `failed`), `branch`, `base`, 
 3 refused.
 
 `--fresh` retires the job first, for a new start from the chat's HEAD. One worker at a time per
-worktree: a lock in the worker's folder. A job whose worktree is gone is removed at the next run.
+worktree: a lock in the worker's folder.
+
+**The sweep** (`--sweep`, issue #111; also at the start of every turn and export) removes the
+folder `jobs/<key>/` of each worktree that is gone, once `cleanup-merged` removed it: its jobs,
+its `state.json`, its lock and its logs. The logs go with it, decided in #111 on Igor's ask of
+2026-11-22 ("kijk dat alles van codex opgeruimd wordt"): they matter while the issue is open, and
+the issue's comments and the Codex thread keep what is worth keeping after it. A key folder that a run holds (its lock)
+stays, and so does one whose worktree still exists. Loose log files that older versions left in
+the worker's folder go after 30 days. `--sweep` takes nothing else, starts no `codex`, reads no
+settings and runs no git. Its report: `status` (`swept`, `failed` with `failure`), `removed`
+(each with its `worktree`, None when no run recorded one, and its number of log files, `logs`:
+three per turn), `kept`, `busy` (a gone worktree's folder that a run holds), `old_logs`. Every
+run records its worktree in `state.json` when it takes the lock, so a live worktree's folder is
+never taken for a gone one. A worktree whose path is missing for a while (an unmounted volume)
+loses its jobs and logs at a sweep in that time. Exit: 0 swept; 1 failed; 2 usage; 3 refused.
+
+Why the sweep keeps the rule above, outside every sandbox: it opens no file the chat or Codex
+wrote. It reads only `jobs/<key>/state.json`, which only this script writes: Codex's profile
+writes only a job's four folders below it, and Claude Code's sandbox cannot write
+`~/.cache/agentic-github-flow` (the person's condition in `docs/install.md`). Of the worktree it
+asks only whether its path exists (`lstat`), opening nothing there; a chat that makes a path
+vanish only costs that worktree its job, as `--fresh` would. It looks into no job's `work`, `git`,
+`tmp` or `out`. It acts only on names this script makes (`<key>`, `gone-…`), takes the lock first,
+then renames the key folder to `jobs/gone-<random>`, out of every path a job's profile names, so
+that a process a turn left behind cannot write into it while it goes, and removes it with
+`shutil.rmtree`, which unlinks names and follows no link (the worker refuses a Python where it
+would: `avoids_symlink_attacks`).
 """
 from __future__ import annotations
 
@@ -150,6 +178,8 @@ MODEL_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
 THREAD_RE = re.compile(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
 SHA_RE = re.compile(r'^[0-9a-f]{40}([0-9a-f]{24})?$')
 JOB_RE = re.compile(r'^job-[0-9a-f]{32}$')
+KEY_RE = re.compile(r'^[0-9a-f]{16}$')
+GONE_RE = re.compile(r'^gone-[0-9a-f]{32}$')
 MEASURED = ('darwin',)  # the systems the permission profile is measured on
 PROFILE = 'agf_codex_worker'
 PARTS = ('work', 'git', 'tmp', 'out')
@@ -199,13 +229,14 @@ def toml_string(value):
 
 # --- the worker's own folder -------------------------------------------------------------------
 
-def cache_folder():
+def cache_folder(create=True):
     # From the home folder ($HOME), not XDG_CACHE_HOME, which the chat could point where it
     # writes. A `HOME=…` prefix keeps the call inside Claude Code's sandbox (measured 2026-11-21:
     # an env-var prefix does not match `sandbox.excludedCommands`), where Codex cannot start.
     folder = os.path.join(os.path.realpath(os.path.expanduser('~')), '.cache',
                           'agentic-github-flow', 'codex-worker')
-    os.makedirs(folder, mode=0o700, exist_ok=True)
+    if create:
+        os.makedirs(folder, mode=0o700, exist_ok=True)
     return folder
 
 
@@ -213,7 +244,8 @@ def paths(worktree):
     key = hashlib.sha256(os.fsencode(worktree)).hexdigest()[:16]
     folder = os.path.join(cache_folder(), 'jobs', key)
     return {'folder': folder, 'state': os.path.join(folder, 'state.json'),
-            'lock': os.path.join(folder, 'lock'), 'worktree': worktree}
+            'lock': os.path.join(folder, 'lock'), 'logs': os.path.join(folder, 'logs'),
+            'worktree': worktree}
 
 
 def take_lock(path):
@@ -227,10 +259,26 @@ def take_lock(path):
 
 
 def lock(where):
-    os.makedirs(where['folder'], mode=0o700, exist_ok=True)
-    handle = take_lock(where['lock'])
-    if handle is None:
-        refuse('another codex_worker run holds %s' % where['lock'])
+    """Take the worktree's lock and record the worktree in its state, so that a sweep never
+    takes a live worktree's folder for a gone one. A sweep that removes the folder between its
+    making and the lock (its worktree looked gone) is met by making it again."""
+    for _ in range(3):
+        os.makedirs(where['folder'], mode=0o700, exist_ok=True)
+        try:
+            handle = take_lock(where['lock'])
+        except FileNotFoundError:
+            continue
+        if handle is None:
+            refuse('another codex_worker run holds %s' % where['lock'])
+        if os.path.exists(where['lock']):
+            break
+        handle.close()
+    else:
+        refuse('a sweep kept removing %s' % where['folder'])
+    state = read_state(where)
+    if state.get('worktree') != where['worktree']:
+        state['worktree'] = where['worktree']
+        write_state(where, state)
     return handle
 
 
@@ -248,37 +296,106 @@ def write_state(where, state):
         json.dump(state, handle, indent=2)
 
 
+def remove(path):
+    """Remove a name: a folder (not a link to one) with all below it, unlinking names and
+    following no link (main refuses a Python whose rmtree would), else the name itself."""
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return
+    if stat.S_ISDIR(info.st_mode):
+        shutil.rmtree(path, ignore_errors=True)
+    else:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+
+
 def retire(folder, name):
-    """Remove a job. It is renamed first, out of the paths its sandbox may write, so a process
-    it left behind cannot refill it; the removal unlinks names and follows no link."""
+    """Remove a job, or a worktree's key folder. It is renamed first, out of the paths a job's
+    sandbox may write, so a process a turn left behind cannot refill it while it goes."""
     path = os.path.join(folder, name)
     if not os.path.lexists(path):
         return
     gone = os.path.join(folder, 'gone-' + secrets.token_hex(16))
     os.rename(path, gone)
-    if os.path.isdir(gone) and not os.path.islink(gone):
-        shutil.rmtree(gone, ignore_errors=True)
-    else:
-        os.remove(gone)
+    remove(gone)
+
+
+def count_logs(folder):
+    try:
+        return len(os.listdir(folder)) if not os.path.islink(folder) else 0
+    except OSError:
+        return 0
+
+
+def prune_logs(folder):
+    """Remove the files in folder older than LOG_DAYS; return how many went."""
+    cutoff = time.time() - LOG_DAYS * 86400
+    removed = 0
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return 0
+    for name in names:
+        path = os.path.join(folder, name)
+        try:
+            info = os.lstat(path)
+            if info.st_mtime < cutoff and not stat.S_ISDIR(info.st_mode):
+                os.remove(path)
+                removed += 1
+        except OSError:
+            pass
+    return removed
+
+
+def sweep_jobs(skip=None):
+    """Remove the key folder of each worktree that is gone (cleanup-merged ran): its jobs, its
+    state, its lock and its logs, unless a run holds its lock; and what an interrupted sweep
+    left. Reads only the state.json this script wrote; of the worktree only lstat. Loose log
+    files of older versions in the worker's folder go after LOG_DAYS. Returns the report."""
+    report = {'removed': [], 'kept': 0, 'busy': [], 'old_logs': 0}
+    top = cache_folder(create=False)
+    if not os.path.isdir(top) or os.path.islink(top):
+        return report
+    report['old_logs'] = prune_logs(top)
+    jobs = os.path.join(top, 'jobs')
+    try:
+        names = sorted(os.listdir(jobs)) if not os.path.islink(jobs) else []
+    except FileNotFoundError:
+        names = []
+    for name in names:
+        folder = os.path.join(jobs, name)
+        if GONE_RE.match(name):
+            remove(folder)
+            continue
+        if folder == skip or not KEY_RE.match(name) or os.path.islink(folder) \
+                or not os.path.isdir(folder):
+            continue
+        worktree = read_state({'state': os.path.join(folder, 'state.json')}).get('worktree')
+        if not isinstance(worktree, str) or not os.path.isabs(worktree):
+            worktree = None
+        if worktree is not None and os.path.lexists(worktree):
+            report['kept'] += 1
+            continue
+        held = take_lock(os.path.join(folder, 'lock'))
+        if held is None:
+            report['busy'].append(worktree)
+            continue
+        try:
+            logs = count_logs(os.path.join(folder, 'logs'))
+            retire(jobs, name)
+        finally:
+            held.close()
+        report['removed'].append({'worktree': worktree, 'logs': logs})
+    return report
 
 
 def sweep(where):
-    """Remove the job folders whose worktree is gone (cleanup-merged ran), and what an
-    interrupted run left in this one."""
-    jobs = os.path.dirname(where['folder'])
-    for name in os.listdir(jobs):
-        folder = os.path.join(jobs, name)
-        if folder == where['folder'] or os.path.islink(folder) or not os.path.isdir(folder):
-            continue
-        worktree = read_state({'state': os.path.join(folder, 'state.json')}).get('worktree')
-        if isinstance(worktree, str) and os.path.lexists(worktree):
-            continue
-        held = take_lock(os.path.join(folder, 'lock'))
-        if held is not None:
-            try:
-                shutil.rmtree(folder, ignore_errors=True)
-            finally:
-                held.close()
+    """At the start of a run: sweep_jobs for the other worktrees, and what an interrupted run
+    left in this one."""
+    sweep_jobs(skip=where['folder'])
     current = read_state(where).get('job')
     for name in os.listdir(where['folder']):
         if name.startswith(('job-', 'gone-')) and name != current:
@@ -551,16 +668,11 @@ def text_of(report, key, limit=2000):
 
 # --- the turn ----------------------------------------------------------------------------------
 
-def log_folder():
-    folder = cache_folder()
-    cutoff = time.time() - LOG_DAYS * 86400
-    for name in os.listdir(folder):
-        path = os.path.join(folder, name)
-        try:
-            if os.lstat(path).st_mtime < cutoff and os.path.isfile(path):
-                os.remove(path)
-        except OSError:
-            pass
+def log_folder(where):
+    """The worktree's log folder, beside its jobs, so that the sweep removes them together."""
+    folder = where['logs']
+    os.makedirs(folder, mode=0o700, exist_ok=True)
+    prune_logs(folder)
     return folder
 
 
@@ -720,7 +832,7 @@ def run_turn(args, codex, where):
     state = read_state(where)
     if args.fresh and state.get('job'):
         retire(where['folder'], state['job'])
-        state = {}
+        state = {'worktree': where['worktree']}
         write_state(where, state)
     job = current_job(where, state)
     setup = name = None
@@ -754,7 +866,7 @@ def run_turn(args, codex, where):
     state['marker'] = marker
     write_state(where, state)
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
-    folder = log_folder()
+    folder = log_folder(where)
     events = os.path.join(folder, stamp + '.jsonl')
     last_message = os.path.join(folder, stamp + '.last.txt')
     stderr_path = os.path.join(folder, stamp + '.stderr.txt')
@@ -863,15 +975,36 @@ def export(codex, where):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Run Codex in a job of an issue worktree.')
-    parser.add_argument('worktree')
+    parser.add_argument('worktree', nargs='?')
     parser.add_argument('--model')
     parser.add_argument('--prompt-file')
     parser.add_argument('--effort', choices=EFFORTS)
     parser.add_argument('--resume', metavar='THREAD_ID')
-    parser.add_argument('--time-limit', type=float, default=60.0, metavar='MINUTES')
+    parser.add_argument('--time-limit', type=float, metavar='MINUTES')
     parser.add_argument('--fresh', action='store_true')
     parser.add_argument('--export', action='store_true')
+    parser.add_argument('--sweep', action='store_true')
     args = parser.parse_args(argv)
+    if args.sweep:
+        if args.fresh or args.export or any(value is not None for value in (
+                args.worktree, args.model, args.prompt_file, args.effort, args.resume,
+                args.time_limit)):
+            parser.error('--sweep takes nothing else')
+        # No codex, no settings, no git: only the worker's own folder (the header's sweep).
+        if fcntl is None:
+            refuse('this system has no file locks, so a running job cannot be told apart')
+        if not getattr(shutil.rmtree, 'avoids_symlink_attacks', False):
+            refuse('this Python cannot remove a folder without following links')
+        try:
+            report = dict(status='swept', **sweep_jobs())
+        except OSError as error:
+            report = {'status': 'failed', 'failure': '%s: %s' % (error.strerror, error.filename)}
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return 0 if report['status'] == 'swept' else 1
+    if args.worktree is None:
+        parser.error('the worktree is required, except with --sweep')
+    if args.time_limit is None:
+        args.time_limit = 60.0
     if args.export and (args.model or args.prompt_file or args.effort or args.resume
                         or args.fresh):
         parser.error('--export takes only the worktree')

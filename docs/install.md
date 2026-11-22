@@ -315,7 +315,8 @@ sandbox and never passes a `--dangerously-*` option:
 
 - **Writes:** only a job folder of the script's own under
   `~/.cache/agentic-github-flow/codex-worker/`, never the chat's repository. Its files are
-  copy-on-write clones of the worktree's and cost no disk.
+  copy-on-write clones of the worktree's and cost no disk. Once the worktree is removed, the
+  chat's `codex_worker.py --sweep` removes its jobs and logs.
 - **Reads:** the disk, except all of `~/.claude`, `~/.ssh`, `~/.aws`, `~/.netrc`, `~/.gnupg`,
   `~/.config/gh`, Claude Code's folders under `/private/tmp`, and any `.env`, `.env.*`, `*.pem`,
   `*.key` or `*.p12` file, plus, read at each run, every `Read(...)` deny rule and

@@ -10,16 +10,39 @@ repository whose HANDOFF.md has `## Issue chats settings`. Elsewhere it does not
 context-gate.sh exits before Python starts unless the branch starts with `agent/<digit>`.
 
 The limit L is the settings' `context limit` (tokens: `300000`, `300,000`, `300k`, `0.3M`),
-default 300,000 (Igor, 2026-11-17, for every repository; DESIGN_DECISIONS.md owns the value and
-its review date). The context is that of the newest API call in the transcript's tail: input plus
-cache writes plus cache reads. The hook calls no model and costs no tokens; a note it adds costs a
-few dozen. The settings are read once per session.
+default 300,000 (Igor, 2026-11-17, for every repository; DESIGN_DECISIONS.md owns the values and
+their review date). A label may have its own limit (#82, Igor 2026-11-22: `work: model` and
+`work: animation` get 600k): `` `300k`; label `work: model`: `600k` ``. A chat whose issue
+carries such a label gets the largest of them; every other chat the count before the first
+label. The context is that of the newest API call in the transcript's tail: input plus cache
+writes plus cache reads. The hook calls no model and costs no tokens; a note it adds costs a few
+dozen.
+
+Where the values come from, per tool call without a network call:
+  the settings   HANDOFF.md of origin's default branch, or of the local branch of that name when
+                 it is ahead (a setting landed on local main, not pushed yet). One git call per
+                 tool call compares both tips with the last read; HANDOFF.md is read again only
+                 after one moved, so a changed setting counts in a running session too.
+  the labels     only where the settings name a label: once per session, from the record that
+                 start_issue_chat.py writes for the worktree and issue before the chat starts (a
+                 hand-over writes it anew). A chat started some other way has none; the hook
+                 then reads the labels once with `gh issue view` and records them for later
+                 sessions in that worktree. No answer: the default. A label added after the start
+                 counts once start_issue_chat.py writes the record anew (a hand-over, a new
+                 start); a record the hook wrote stays until then.
+Cost: the hook runs at PreToolUse and PostToolUse, so a tool call pays two git calls.
+The records live in ~/.cache/agentic-github-flow/context-limits (AGENTIC_GITHUB_FLOW_LIMIT_RECORDS
+replaces it), outside CLAUDE_PLUGIN_DATA, which start_issue_chat.py does not get.
+
+The decision point D is twice the limit, at most 900k (Igor, 2026-11-22: "optie 1, plafond op
+900k"): 600k for a 300k chat, 900k for a 600k chat, below the automatic compaction at about
+967k-977k that would otherwise come first (a limit above 900k is its own decision point).
 
   PostToolUse, context >= L      note to the chat, again per further 25k: finish the step you
                                  are on and hand over, unless you judge you are close to a
-                                 solution, then finish it first; at 2L the user decides.
+                                 solution, then finish it first; at D the user decides.
                                  A subagent (agent_id): wrap up and report back now.
-  PreToolUse, context >= 2L      main thread: refuse every tool but asking the user
+  PreToolUse, context >= D       main thread: refuse every tool but asking the user
   and no grant covering it       (AskUserQuestion, a blocked wrap_up), loading a skill, stopping
                                  a task, the desktop app's session and turn tools, ToolSearch,
                                  and Bash whose every command (split outside quotes, heredoc
@@ -40,24 +63,33 @@ few dozen. The settings are read once per session.
 It never blocks over its own failure (no transcript, unreadable state: pass). Deny is exit 2 with
 the reason on stderr; notes are JSON `additionalContext` on stdout. State lives per session (and
 subagent) in question_label.state_dir("context-limit"), the user's own folder.
-AGENTIC_GITHUB_FLOW_CONTEXT_STATE replaces that folder (tests).
+AGENTIC_GITHUB_FLOW_CONTEXT_STATE replaces that folder (tests), AGENTIC_GITHUB_FLOW_GH (a JSON
+list) the `gh` command.
 Tests: python3 tests/context_limit.py
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import shlex
+import shutil
+import subprocess
 import sys
 from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)  # -I leaves the script's folder off sys.path
-from next_issue import row_in, settings_text  # noqa: E402
+from next_issue import row_in  # noqa: E402
 from question_label import chat_issue, state_dir  # noqa: E402
 
 DEFAULT_LIMIT = 300_000
+CEILING = 900_000      # the decision point: twice the limit, at most this (Igor, 2026-11-22, #82)
+RECORDS_ENV = "AGENTIC_GITHUB_FLOW_LIMIT_RECORDS"
+# `label `a`: `600k`` or `labels `a`, `b`: `600k``: the labels, then the colon and the count.
+LABEL_LIMIT = re.compile(r"labels?\s+((?:`[^`]+`[\s,]*(?:and\s+|or\s+)?)+?)\s*:\s*`?([^`;|]*)`?",
+                         re.I)
 STEP = 25_000          # a further note per this much growth past the limit
 TAIL = 512 * 1024      # bytes read from the transcript's end; once more at 8x when nothing is found
 ASK = "AskUserQuestion"
@@ -75,18 +107,149 @@ CAT_HEREDOC = re.compile(r"\$\(\s*cat\s*<<-?\s*(['\"]?)(\w+)\1[^\n]*\n.*?\n\s*\2
 OPERATORS = {";", "&&", "||", "|", "&", "\n"}
 
 
-def limit_for(top: str) -> int:
-    try:
-        _, text = settings_text(top)
-    except Exception:
-        return DEFAULT_LIMIT
-    cell = (row_in(text, "context limit") or "").lower()
-    m = re.search(r"(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*(k|m)?\b", cell)
+def decision_point(lim: int) -> int:
+    """Where the user decides whether a chat works on: twice the limit, at most CEILING, which
+    stays below Claude Code's automatic compaction (about 967k-977k with a 1M window, measured
+    2026-11-22), so a 600k chat reaches it."""
+    return min(2 * lim, max(CEILING, lim))
+
+
+def tokens(text: str) -> int | None:
+    """The first token count in text (`300000`, `300,000`, `300k`, `0.3M`), None below 10,000."""
+    m = re.search(r"(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*(k|m)?\b", text.lower())
     if not m:
-        return DEFAULT_LIMIT
+        return None
     n = float(m.group(1).replace(",", ""))
     n *= {"k": 1_000, "m": 1_000_000}.get(m.group(2) or "", 1)
-    return int(n) if n >= 10_000 else DEFAULT_LIMIT
+    return int(n) if n >= 10_000 else None
+
+
+def limits_in(cell: str | None) -> tuple[int, dict[str, int]]:
+    """The `context limit` cell: the default and the limit per label, from the form
+    `` `300k`; label `work: model`: `600k` `` (the default is the count before the first label)."""
+    cell = cell or ""
+    per = {}
+    for m in LABEL_LIMIT.finditer(cell):
+        n = tokens(m.group(2))
+        if n:
+            for name in re.findall(r"`([^`]+)`", m.group(1)):
+                per[name.strip().lower()] = n
+    first = re.search(r"\blabels?\b", cell, re.I)  # also where a label entry is malformed
+    return tokens(cell[:first.start()] if first else cell) or DEFAULT_LIMIT, per
+
+
+def limit_of(default: int, per: dict[str, int], labels) -> int:
+    """The chat's limit: the largest of its issue's labels that have one, else the default."""
+    hits = [per[str(name).lower()] for name in labels or () if str(name).lower() in per]
+    return max(hits) if hits else default
+
+
+def git_out(top: str, *args: str) -> str | None:
+    """git's output as UTF-8 (HANDOFF.md, also where the locale is cp1252), None on any failure:
+    the settings then fall back to the default, never to no limit."""
+    try:
+        p = subprocess.run(["git", "-C", top, *args], stdin=subprocess.DEVNULL,
+                           capture_output=True, encoding="utf-8", errors="replace", timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return p.stdout if p.returncode == 0 else None
+
+
+def settings_refs(top: str) -> list[str]:
+    """Pairs of origin's default branch and the local branch of the same name: origin/HEAD's
+    target, else main, then master (next_issue.settings_text tries the four in another order,
+    which differs only where origin lacks main but has master and local main exists)."""
+    head = (git_out(top, "symbolic-ref", "-q", "refs/remotes/origin/HEAD") or "").strip()
+    if head.startswith("refs/remotes/origin/"):
+        return [head, "refs/heads/" + head[len("refs/remotes/origin/"):]]
+    return ["refs/remotes/origin/main", "refs/heads/main", "refs/remotes/origin/master",
+            "refs/heads/master"]
+
+
+def settings_now(top: str, state: dict) -> tuple[int, dict[str, int]]:
+    """The settings' limits, read again whenever origin's default branch or its local twin moved:
+    one git call per tool call, a read of HANDOFF.md only after a move. The local branch counts
+    when it is ahead of origin's (a setting landed on local main, not pushed yet), else origin's."""
+    refs = state.get("refs")
+    if not isinstance(refs, list) or not all(isinstance(r, str) for r in refs):
+        refs = state["refs"] = settings_refs(top)
+    listed = git_out(top, "for-each-ref", "--format=%(refname) %(objectname)", *refs)
+    if listed is None and isinstance(state.get("limits"), list):  # git failed: keep the last read
+        default, per = state["limits"]
+        return int(default), {str(k): int(v) for k, v in per.items()}
+    tips = {}
+    for line in (listed or "").splitlines():
+        name, _, sha = line.partition(" ")
+        if name in refs:
+            tips[name] = sha
+    key = " ".join(f"{r}={tips.get(r, '')}" for r in refs)
+    if key == state.get("settings_key") and isinstance(state.get("limits"), list):
+        default, per = state["limits"]
+        return int(default), {str(k): int(v) for k, v in per.items()}
+    ref = None
+    for remote, local in zip(refs[::2], refs[1::2]):
+        if remote in tips and local in tips and tips[local] != tips[remote] and \
+                git_out(top, "merge-base", "--is-ancestor", remote, local) is not None:
+            ref = local
+        else:
+            ref = remote if remote in tips else local if local in tips else None
+        if ref:
+            break
+    text = git_out(top, "show", f"{ref}:HANDOFF.md") if ref else None
+    default, per = limits_in(row_in(text, "context limit"))
+    state["settings_key"], state["limits"] = key, [default, per]
+    return default, per
+
+
+def record_path(top: str, issue: int) -> str | None:
+    folder = state_dir("context-limits", RECORDS_ENV, plugin_data=False)
+    if not folder:
+        return None
+    where = hashlib.sha256(os.path.realpath(top).encode("utf-8")).hexdigest()[:16]
+    return os.path.join(folder, f"{where}-{int(issue)}.json")
+
+
+def record_labels(top: str, issue: int, labels, source: str) -> None:
+    """Note the issue's labels for the chats in this worktree (start_issue_chat.py, or this hook
+    once); the hook reads them, so it needs no network per tool call."""
+    names = sorted({str(n) for n in labels or () if str(n).strip()})
+    save(record_path(top, issue), {"worktree": os.path.realpath(top), "issue": int(issue),
+                                   "labels": names, "source": source, "time": now_iso()})
+
+
+def recorded_labels(top: str, issue: int) -> list[str] | None:
+    rec = load(record_path(top, issue))
+    if rec.get("worktree") != os.path.realpath(top) or rec.get("issue") != issue or \
+            not isinstance(rec.get("labels"), list):
+        return None
+    return [str(n) for n in rec["labels"]]
+
+
+def labels_from_github(top: str, issue: int) -> list[str] | None:
+    """A chat started without start_issue_chat.py: its issue's labels, read once per session."""
+    raw = os.environ.get("AGENTIC_GITHUB_FLOW_GH")
+    try:
+        command = json.loads(raw) if raw else [shutil.which("gh") or "gh"]
+        p = subprocess.run(command + ["issue", "view", str(issue), "--json", "labels"], cwd=top,
+                           stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=15)
+        data = json.loads(p.stdout) if p.returncode == 0 else None
+    except (OSError, ValueError, TypeError, subprocess.SubprocessError):
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("labels"), list):
+        return None
+    return [str(lb.get("name")) for lb in data["labels"] if isinstance(lb, dict) and lb.get("name")]
+
+
+def chat_limit(top: str, issue: int, state: dict) -> int:
+    default, per = settings_now(top, state)
+    if per and not isinstance(state.get("labels"), list):  # labels matter: resolved once
+        labels = recorded_labels(top, issue)
+        if labels is None:
+            labels = labels_from_github(top, issue)
+            if labels is not None:
+                record_labels(top, issue, labels, "hook")
+        state["labels"] = labels or []
+    return limit_of(default, per, state.get("labels"))
 
 
 def transcript_of(data: dict) -> str | None:
@@ -253,21 +416,25 @@ def main() -> int:
         return 0
     spath = state_path(data)
     state = load(spath)
-    if "issue" not in state:  # resolved once per session: the settings and the issue
+    if "issue" not in state or "top" not in state:  # once per session (and for older state)
         found = chat_issue(data.get("cwd") or "")
         state["issue"] = found[2] if found else None
-        state["limit"] = limit_for(found[0]) if found else None
+        state["top"] = found[0] if found else None
         save(spath, state)
-    issue, lim = state.get("issue"), state.get("limit")
-    if not isinstance(issue, int) or not isinstance(lim, int):
+    issue, top = state.get("issue"), state.get("top")
+    if not isinstance(issue, int) or not isinstance(top, str):
         return 0
+    before = json.dumps(state, sort_keys=True)
+    lim = state["limit"] = chat_limit(top, issue, state)
+    if json.dumps(state, sort_keys=True) != before:
+        save(spath, state)
     sub = bool(data.get("agent_id"))
     ctx = context_now(transcript, sidechain=sub)
     if ctx is None and sub:
         ctx = context_now(transcript, sidechain=False)
     if ctx is None:
         return 0
-    hard = 2 * lim
+    hard = decision_point(lim)
 
     if ctx < lim and any(key in state for key in ("noted", "stopped_at", "stopped_time", "granted_until")):
         for key in ("noted", "stopped_at", "stopped_time", "granted_until"):
@@ -290,12 +457,12 @@ def main() -> int:
         if allowed_when_stopped(tool, args, sub):
             return 0
         if sub:
-            print(f"context limit: this subagent's context is {k(ctx)}, past twice the limit "
-                  f"({k(hard)}). Stop and report what you found and did to the chat that started "
+            print(f"context limit: this subagent's context is {k(ctx)}, past the point "
+                  f"where it must stop ({k(hard)}). Stop and report what you found and did to the chat that started "
                   f"you; no other tool runs.", file=sys.stderr)
             return 2
-        print(f"context limit: the chat for issue #{issue} is at {k(ctx)} context, past twice the "
-              f"limit ({k(hard)}). From here the user decides whether this chat works on. Ask the "
+        print(f"context limit: the chat for issue #{issue} is at {k(ctx)} context, past the "
+              f"decision point ({k(hard)}). From here the user decides whether this chat works on. Ask the "
               f"user now, with AskUserQuestion or wrap_up with blocked: true (the question goes on "
               f"#{issue} with the question label first), whether to continue or hand over. Until "
               f"the user answers, only asking, skills, the session tools, and git, gh and the "
@@ -313,7 +480,7 @@ def main() -> int:
     if state.pop("grant_note", None):
         save(spath, state)
         return note("PostToolUse", f"context limit: the user answered while this chat was stopped "
-                                   f"at twice the limit. Follow that answer: to hand over, or to "
+                                   f"at the decision point. Follow that answer: to hand over, or to "
                                    f"work on; working on is allowed until "
                                    f"{k(state['granted_until'])}, then ask again.")
     if ctx < lim or ctx < state.get("noted", 0) + STEP:

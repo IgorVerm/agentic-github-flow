@@ -114,6 +114,29 @@ above 300k. **Binds:** `plugins/issue-chats/scripts/context_limit.py`, `context-
 or compaction changes; measure the share of issue-chat usage above the limit again and compare.
 **Detail:** issue #77.
 
+## Model and animation chats get a 600k context limit, keyed by label, 2026-11-22
+
+**Decision (the maintainer):** "dit klopt niet een modeler of een animation chat moet 600k
+context krijgen. Is dit nog niet geimplementeerd?" (this is wrong: a modelling or an animation
+chat must get 600k context; is this not implemented yet?); "nee er zijn ook fable lanes die niet
+modelen en animeren het moet specifiek over dat soort werk gaan" (no, there are also Fable lanes
+that do not model or animate; it must be about that kind of work specifically); on the proposed
+labels "akkoord met work: model, animation" (agreed with work: model, animation). **What:** this
+narrows the entry of 2026-11-17. The settings row `context limit` takes a limit per label
+(`` `300k`; label `work: model`: `600k`; label `work: animation`: `600k` ``); an issue chat whose
+issue carries such a label gets the largest of them, every other chat keeps 300k. It goes by
+the kind of work, not by the model. `start_issue_chat.py` records the issue's labels before a
+chat starts (a hand-over too), so the hook reads no network per tool call; a chat started
+otherwise reads them once. The settings are read again whenever origin's default branch or the
+local branch moves, the local one when it is ahead (a setting landed in local-main mode). The
+decision point is twice the limit, at most 900k: measured, a 1M context window and automatic
+compaction at about 967k–977k kept a 600k chat from reaching 1.2M; asked on #82, the maintainer
+chose "optie 1, plafond op 900k" (option 1, a ceiling at 900k). Measured before (issue
+#82): Fable building chats reached 190–280k before their first model code, so they handed over
+at 300k at or just after their first write. **Binds:** `context_limit.py`,
+`start_issue_chat.py`, `skills/issue-handover/method.md` §1 and §4, `tests/context_limit.py`,
+`tests/start_issue_chat.py`. **Review by:** with the entry of 2026-11-17. **Detail:** issue #82.
+
 ## The question label enforced by a hook, not by a rule or a GitHub Action, 2026-11-17
 
 **Decision (the maintainer):** asked whether the rule could be enforced "via script/hook zodat

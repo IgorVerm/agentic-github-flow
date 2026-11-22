@@ -16,13 +16,31 @@ it blocks, rather than guesses, a command that may run git and is longer than MA
 characters, holds an unquoted brace expansion (`git push origin {-f,main}`), an ANSI-C string it
 cannot decode (`$'…'` strings are decoded first), or is nested deeper than MAX_DEPTH (eval in
 eval in …). Hook input that is JSON but not an object is blocked too. A command the user asks for
-by name the user runs in their own terminal.
+by name the user runs in their own terminal. Shell comments are removed before anything is
+judged (`strip_comments`), and a commit's option values are never read as flags
+(`commit_flags`): `git commit -m "--no-verify"` is a message, not a hook bypass.
+
+Claude Code (`--claude`, #33): the same blocks, plus "ask" for what the user approves per call:
+a push, `commit --amend`, `update-ref` and changing a remote, in any spelling. It replaces the
+permission rules whose `*` could reach into a commit message (`git -C * clean*` stopped
+`git -C r commit -m "a clean step"`); the rules left in policy/claude-permissions.json start
+with `git <subcommand>`. A call is judged for blocks first, so a block anywhere in it wins over
+an ask. Under `--claude`, git text the parser cannot read (an open quote) is asked. The guards
+plugin's hooks.json runs it for Bash and for the terminal tool (`mcp__*__run_in_terminal`),
+which gets no permission rules. tests/claude_git_rules.py checks the rules and this mode
+together against the rules as they stood before #33.
+
+How it fails in Claude Code, where the `git -C` spellings now rest on this hook alone: a missing
+script makes Python exit 2, which blocks every Bash call; a crash before main() (a broken
+import) exits 1, which Claude Code lets through unchecked. Errors inside main() pass on purpose
+(below). Dropping the rules and wiring `--claude` ship together, in one plugin version.
 
 pre_tool_personal_data.py and pre_tool_delete_guard.py reuse its shell parsing: run
 tests/personal_data_guard.py and tests/delete_guard.py too.
 
-Usage as a hook: reads JSON on stdin. For tests: `pre_tool_git_guard.py --check '<command>'`
-prints the reason and exits 2, or exits 0.
+Usage as a hook: reads JSON on stdin (`--claude` for Claude Code). For tests:
+`pre_tool_git_guard.py [--claude] --check '<command>'` prints the reason and exits 2 for a
+block, 3 for an ask (`--claude` only), or exits 0.
 """
 import json, re, shlex, sys
 
@@ -45,6 +63,14 @@ GIT_WORD = re.compile(r'(?<![\w.-])(?:git|gh)(?![\w-])|\bGIT_\w+', re.I)
 ANSI_C = re.compile(r"\$'((?:[^'\\]|\\.)*)'", re.S)
 ANSI_ESCAPES = {'a': '\a', 'b': '\b', 'e': '\x1b', 'E': '\x1b', 'f': '\f', 'n': '\n',
                 'r': '\r', 't': '\t', 'v': '\v', '\\': '\\', "'": "'", '"': '"', '?': '?'}
+COMMIT_VALUE_SHORT = set('mFcCt')  # -m <msg>, -F <file>, -c/-C <commit>, -t <template>
+COMMIT_ATTACHED_SHORT = set('uS')  # -u<mode>, -S<keyid>: an optional value, attached only
+COMMIT_VALUE_LONG = ('--message', '--file', '--reuse-message', '--reedit-message', '--template',
+                     '--author', '--date', '--trailer', '--fixup', '--squash', '--cleanup',
+                     '--pathspec-from-file')
+COMMIT_FLAG_LONG = ('--amend', '--all', '--allow-empty', '--allow-empty-message', '--no-verify')
+HOOK_RUNNERS = {'commit', 'push', 'merge', 'am', 'pull', 'rebase', 'cherry-pick', 'revert',
+                'send-email'}  # the subcommands where --no-verify skips a hook
 
 
 def split_commands(text):
@@ -63,6 +89,52 @@ def split_commands(text):
             current.append(tok)
     if current:
         yield current
+
+
+def strip_comments(text):
+    """The text without shell comments: an unquoted `#` at the start of a word, to the end of
+    its line. Here-document bodies are copied as they are, without reading quotes in them. It
+    runs before the here-document and substitution passes, so they see the same quoting as the
+    shell: an apostrophe in `git -C r stash drop # don't` once left them an open quote, which
+    hid the command (#33)."""
+    lines, out, quote, i = text.split('\n'), [], None, 0
+    while i < len(lines):
+        line, kept, marks, k = lines[i], [], [], 0
+        while k < len(line):
+            c = line[k]
+            if quote:
+                kept.append(c)
+                if c == '\\' and quote == '"' and k + 1 < len(line):
+                    kept.append(line[k + 1])
+                    k += 1
+                elif c == quote:
+                    quote = None
+            elif c == '\\' and k + 1 < len(line):
+                kept.append(line[k:k + 2])
+                k += 1
+            elif c in '"\'':
+                quote = c
+                kept.append(c)
+            elif c == '#' and (k == 0 or line[k - 1] in ' \t;&|()'):
+                break
+            elif line.startswith('<<', k) and not line.startswith('<<<', k) and HEREDOC.match(line, k):
+                m = HEREDOC.match(line, k)
+                marks.append(m.groups())
+                kept.append(line[k:m.end()])
+                k = m.end()
+                continue
+            else:
+                kept.append(c)
+            k += 1
+        out.append(''.join(kept))
+        i += 1
+        for dash, word in marks:  # the body, verbatim, up to its closing line
+            while i < len(lines):
+                out.append(lines[i])
+                i += 1
+                if (lines[i - 1].lstrip('\t') if dash else lines[i - 1]) == word:
+                    break
+    return '\n'.join(out)
 
 
 def strip_heredocs(text):
@@ -237,6 +309,35 @@ def may_run_git(text):
                                for gap in ('', ' '))  # g''it, and -S'git …'
 
 
+def commit_flags(rest):
+    """The flags of `git commit`, without option values: a message is never a flag, also when
+    it is attached (`-mnote`) or looks like one (`-m "--amend"`)."""
+    flags, i = [], 0
+    while i < len(rest):
+        a = rest[i]
+        if a == '--':
+            break
+        if a.startswith('--'):
+            name = a.split('=', 1)[0]
+            flags.append(a)
+            if '=' not in a and len(name) >= 4 and any(v.startswith(name) for v in COMMIT_VALUE_LONG) \
+                    and not any(f.startswith(name) for f in COMMIT_FLAG_LONG):
+                i += 1  # its value is the next word
+        elif a.startswith('-') and a != '-':
+            kept = ''
+            for j, c in enumerate(a[1:]):
+                kept += c
+                if c in COMMIT_ATTACHED_SHORT:
+                    break
+                if c in COMMIT_VALUE_SHORT:
+                    if j == len(a) - 2:
+                        i += 1  # the value is the next word
+                    break
+            flags.append('-' + kept)
+        i += 1
+    return flags
+
+
 def judge_git(args):
     """args: tokens after `git`. Return a reason string or None."""
     i, config = 0, []
@@ -260,10 +361,11 @@ def judge_git(args):
         return None
     opts = [a for a in rest if a.startswith('-')]
     before_dd = rest[:rest.index('--')] if '--' in rest else rest
-    flags = [a for a in before_dd if a.startswith('-')]
+    flags = commit_flags(rest) if sub == 'commit' else [a for a in before_dd if a.startswith('-')]
     words = [a for a in before_dd if not a.startswith('-')]
 
-    if any(f.startswith('--no-v') and '--no-verify'.startswith(f) for f in flags):
+    if sub in HOOK_RUNNERS and any(f.startswith('--no-v') and '--no-verify'.startswith(f)
+                                   for f in flags):
         return 'bypasses a hook (--no-verify)'
     if sub == 'push':
         if has_short(flags, 'f') or has_long(flags, '--force', '--force-with-lease',
@@ -351,6 +453,42 @@ def judge_git(args):
     return None
 
 
+ASKING = False  # set by judge_ask(): judge_command then reports ask_git() reasons
+
+
+def ask_git(args):
+    """args: tokens after `git`. The reason the user is asked first (Claude Code), or None."""
+    i = 0
+    while i < len(args) and args[i].startswith('-'):
+        i += 2 if args[i] in GIT_VALUE_OPTS else 1
+    if i >= len(args):
+        return None
+    sub, rest = args[i], args[i + 1:]
+    if rest[:1] == ['--help'] or rest == ['-h']:
+        return None
+    flags = commit_flags(rest) if sub == 'commit' else \
+        [a for a in (rest[:rest.index('--')] if '--' in rest else rest) if a.startswith('-')]
+    if sub == 'push':
+        return 'pushes to a remote'
+    if sub == 'commit' and has_long(flags, '--amend'):
+        return 'amends a commit (commit --amend)'
+    if sub == 'update-ref':
+        return 'moves a ref (update-ref)'
+    if sub == 'remote' and rest[:1] in (['add'], ['set-url'], ['remove'], ['rm'], ['rename']):
+        return 'changes a remote (remote %s)' % rest[0]
+    return None
+
+
+def judge_ask(text):
+    """The ask reason for a command that judge() lets through, or None."""
+    global ASKING
+    ASKING = True
+    try:
+        return judge(text)
+    finally:
+        ASKING = False
+
+
 def judge_command(tokens, depth):
     """Judge one simple command, given as tokens."""
     while tokens and (ASSIGN.fullmatch(tokens[0]) or base(tokens[0]) in KEYWORDS):
@@ -363,7 +501,7 @@ def judge_command(tokens, depth):
         return 'is nested too deeply to check'
     name = base(tokens[0])
     if name == 'git':
-        return judge_git(tokens[1:])
+        return ask_git(tokens[1:]) if ASKING else judge_git(tokens[1:])
     if name == 'gh':
         if tokens[1:2] in (['config'], ['alias']) and tokens[2:3] in (
                 ['set'], ['delete'], ['import'], ['clear-cache']):
@@ -409,9 +547,10 @@ def judge(text, depth=0):
     text, decoded = unquote_ansi_c(text)
     if not decoded and may_run_git(text):
         return "holds a $'…' string the guard cannot decode"
+    text = strip_comments(text.replace('\\\n', ' '))
     if brace_expansion(text) and may_run_git(text):
         return 'uses brace expansion, which the guard cannot read safely'
-    text, bodies = strip_heredocs(text.replace('\\\n', ' '))
+    text, bodies = strip_heredocs(text)
     for line, body in bodies:
         readers = {base(w) for w in re.findall(r'[\w./-]+', line)}
         reason = judge(body, depth + 1) if readers & SHELLS else \
@@ -425,6 +564,8 @@ def judge(text, depth=0):
     try:
         commands = list(split_commands(text))
     except ValueError:
+        if ASKING and re.search(r'\bgit\b', text):
+            return 'cannot be read by the git guard (an open quote?)'
         return judge_raw(text)
     for tokens in commands:
         reason = judge_command(tokens, depth)
@@ -467,8 +608,8 @@ def in_order(segment, patterns):
 def judge_raw(code, needs_exec=False):
     """Plain pattern search, for text shlex cannot parse and for code handed to an
     interpreter. Interpreter code is judged only when it can start a process: code that
-    merely prints or compares such a string passes."""
-    if needs_exec and not EXEC_HINT.search(code):
+    merely prints or compares such a string passes. Never used for asks."""
+    if ASKING or needs_exec and not EXEC_HINT.search(code):
         return None
     for segment in SEGMENT.findall(code):
         if 'git' not in segment:
@@ -488,9 +629,18 @@ def check(command):
     return judge(command)
 
 
+def check_ask(command):
+    """The reason to ask the user first (Claude Code), for a command check() lets through."""
+    return judge_ask(command) if may_run_git(command) else None
+
+
 def main():
-    if len(sys.argv) == 3 and sys.argv[1] == '--check':
-        command = sys.argv[2]
+    args = sys.argv[1:]
+    claude = '--claude' in args
+    if claude:
+        args.remove('--claude')
+    if len(args) == 2 and args[0] == '--check':
+        command = args[1]
     else:
         try:
             event = json.load(sys.stdin)
@@ -507,9 +657,20 @@ def main():
             return 0
     try:
         reason = check(command)
+        ask = check_ask(command) if claude and not reason else None
     except Exception:
         # Deliberate: a guard that fails on an input it cannot read must not stop all shell
         # work. The client rules and the written rules still apply to that command.
+        return 0
+    if ask:
+        if args[:1] == ['--check']:
+            print(ask)
+            return 3
+        json.dump({'hookSpecificOutput': {
+            'hookEventName': 'PreToolUse', 'permissionDecision': 'ask',
+            'permissionDecisionReason': 'git guard (agentic-github-flow rules, §Git): this '
+                                        'command %s, which the user approves per call.' % ask}},
+                  sys.stdout)
         return 0
     if not reason:
         return 0

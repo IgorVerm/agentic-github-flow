@@ -132,7 +132,10 @@ always the same version. Tell the person what changed:
   the chosen plugins installed from it.
 - With `--guards`: the guards plugin in Claude Code; the ask and deny rules merged into
   `~/.claude/settings.json` (merged, never replaced). The exact behaviour, also of `--update`
-  and `--uninstall`: the installer's docstring.
+  and `--uninstall`: the installer's docstring. The git rules start with `git <subcommand>`;
+  the guards plugin's git guard judges the `git -C <dir>` spellings. When the install names
+  rules in the person's own settings that reach into a commit message (`git -C * clean*`),
+  pass the list on: they stop correct commits, and removing them is the person's change.
 - With `--guards sandbox`, also: one `PreToolUse` entry in `~/.claude/settings.json` that runs the
   sandbox-network guard from the clone.
 - With `--guards gcloud`, also: the Google Cloud ask and deny rules merged into
@@ -161,7 +164,9 @@ Nothing is sent anywhere except the git and plugin fetches: no telemetry.
    and skills such as `ship-change` and `open-issue`.
 4. **With `--guards`, a scratch test:** in a new, empty repository outside the person's real
    work (`git init` in a temporary folder, one commit), ask the fresh session to run
-   `git reset --hard`. Claude Code must refuse it (the deny list). Then delete the scratch folder with the system's trash.
+   `git reset --hard`. Claude Code must refuse it (the deny list), and `git -C <folder> clean -n`
+   too (the git guard); `git -C <folder> commit --allow-empty -m "a clean step"` must go through,
+   and `git -C <folder> push` must ask. Then delete the scratch folder with the system's trash.
 5. **Settings that point into the plugin cache:** if `~/.claude/settings.json` has permission
    rules or sandbox exclusions that point into `~/.claude/plugins/cache/`, each install names
    them and gives the same entry with the clone's path; when there are none it prints nothing.

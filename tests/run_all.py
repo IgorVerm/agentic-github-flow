@@ -12,6 +12,7 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TESTS = ['skills_format.py', 'repo_checks.py', 'claude_permissions.py', 'git_guard.py',
+         'claude_git_rules.py',
          'personal_data_guard.py', 'delete_guard.py', 'sandbox_network_guard.py',
          'delete_guard_differential.py', 'scan_secrets.py', 'audit_dependencies.py',
          'skill_triggers_offline.py', 'worktree_tools.py', 'new_worktree.py', 'installer.py',

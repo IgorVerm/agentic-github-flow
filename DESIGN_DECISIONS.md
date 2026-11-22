@@ -273,6 +273,27 @@ changed would do goes back, unless its bound is stated.
 `plugins/core/skills/ship-change/SKILL.md` steps 1, 4 and 6, `local-main.md` §1 and §2.
 **Detail:** issue #37.
 
+## Git rules: the git guard judges `git -C`, not a permission `*`, 2026-11-09
+
+**Decision (the maintainer):** "laat dit oplossen door een agent betere regel dat een correcte
+commit niet gestopt wordt" (have an agent solve this: a better rule, so that a correct commit is
+not stopped); split off as #33: "Yes, open it" (2026-11-10).
+**What:** `plugins/guards/policy/claude-permissions.json` holds no git rule whose `*` can reach
+into a commit message (`git -C * …`, `git -c * …`, `git * …`, `git commit * …`; 69 deny and 10
+ask rules dropped, `git commit --all*` became `git commit --all *`). The git guard's `--claude`
+mode judges those spellings by parsing instead: it blocks what they denied and asks for a push,
+`commit --amend`, `update-ref` and a remote change; a commit's option values are never flags and
+shell comments are removed first. The hook also covers the terminal tool. The installer removes
+the rules it added that the policy dropped, and names the user's own such rules without
+changing them.
+**Why:** such a `*` spans the rest of the command, so `git -C r commit -m "a clean step"` was
+refused by `git -C * clean*` and a message saying "push" asked the user (six refused commits in
+one day in another repository).
+**Binds:** `plugins/guards/scripts/pre_tool_git_guard.py`, `plugins/guards/hooks/hooks.json`,
+`tools/installer.py` (`REACHES_COMMIT`), `tests/claude_git_rules.py` (against
+`tests/claude_git_rules_former.json`), `tests/claude_permissions.py`, `tests/git_guard.py`.
+**Detail:** issue #33.
+
 ## Agents may merge their own pull request under a standing grant, 2026-11-09
 
 **Decision (the maintainer):** "ja zo wil ik dat het werkt" (that is how I want it to work), on

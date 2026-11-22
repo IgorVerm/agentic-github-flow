@@ -4,7 +4,9 @@
 BLOCK lists commands the core rules' §Git forbids, in the spellings the Codex prefix rules cannot see
 (tests/codex_policy.py GAPS) and inside wrappers. ALLOW lists everyday commands, including commit
 messages that merely mention a forbidden command, which must pass. The hook contract (JSON on
-stdin, exit 2 to block) is exercised for one case of each kind.
+stdin, exit 2 to block) is exercised for one case of each kind. Under `--claude` (Claude Code,
+#33) ASK lists what the user approves per call (exit 3 with --check, "ask" on stdout as a hook),
+CLAUDE_PASS commits whose message names an asked command, and every BLOCK stays blocked.
 """
 import json, os, subprocess, sys, time
 
@@ -114,7 +116,36 @@ ALLOW = [
     # brace expansion without git as a command word: words that merely contain git or gh
     'mkdir -p src/{high,low}', 'cp night.txt{,.bak}', 'mkdir -p .github/{workflows,ISSUE_TEMPLATE}',
     'touch {highlight,digit}.md', 'mv my-git-notes.{txt,md}', 'ls ~/.gitconfig.d/{a,b}',
+    # a commit message is never a flag (#33), also attached or flag-shaped
+    'git commit -mnote', 'git commit -m "--no-verify"', 'git commit -m "-n is refused now"',
+    'git -C /r commit -q -m "a clean step: push, rebase, reset --hard, add -A"',
+    'git commit -F msg.txt -- a.md', 'git log --grep --no-verify', 'git -C /r log --grep clean',
+    'git -C /r commit -uno -m x -- a.md', 'git commit -uall -m x', 'git commit -Sabc -m x',
+    'git -C /r commit -m "fix: don\'t push --force" -- a.md # it\'s', 'git commit -m "#33 note"',
+    'git commit --allow-empty -m "--all of it"', 'git commit --message "--amend" -- a.md',
+    'git status # {a,b} is not expanded in a comment', 'echo ${#x} && git status',
 ]
+# a shell comment with an apostrophe once hid these from the parser (#33)
+BLOCK += ["git -C /r stash drop # don't", "git -C /r tag -d v1 # it's gone",
+          "git -C /r worktree remove /w # it's landed", "git -C /r add -A # don't",
+          "git -C /r commit -am x # it's", "git -C /r update-ref -d refs/x # it's",
+          "git -C /r config core.hooksPath /dev/null # don't",
+          "# don't\necho \"$(git -C /r clean -fd)\"", "echo hi # it's\necho \"`git -C /r stash drop`\"",
+          "echo hi # it's\nx=\"$(git -C /r reset --hard)\"",
+          "# it's\ngit -C /r log --format=\"$(git -C /r tag -d v1)\"",
+          'git commit -m x --no-verify # a message is not this flag', 'git commit -nm x',
+          'git commit --all -m x', 'git -C /r commit -q --all -m "a clean step"']
+# Claude Code (--claude): exit 3 asks the user, 0 passes, 2 blocks (a block beats an earlier ask)
+ASK = ['git push origin main', 'git -C /r push origin main', 'git -C /r commit --amend --no-edit',
+       'git update-ref refs/heads/x HEAD', 'git -C /r remote add up https://x', 'ssh box git push',
+       'timeout 60 git -C /r push', "git -C /r push origin main # it's ready",
+       'git -C /r remote set-url origin https://x', 'git -C /r remote rename a b',
+       'git -c user.name=x -C /r commit -m x --amend', 'bash -lc "git -C /r push"',
+       'git -C /r commit -m "an open quote']  # what the guard cannot read is asked
+CLAUDE_PASS = ["# don't\ngit -C /r commit -F - <<'EOF'\nit's done # here\nEOF",
+               'git -C /r commit -m "push it, then --amend"', 'git -C /r commit -m "--amend"',
+               'git log --grep push', 'git -C /r remote -v', 'git -C /r status',
+               'git -C /r commit --allow-empty -m "push, clean, update-ref"', 'git push --help']
 
 
 def run(command):
@@ -166,6 +197,42 @@ if slow.returncode != 2 or time.time() - started > 3:
     failures.append('the unparsable 9 KB case must block within 3 s (took %.1f s)'
                     % (time.time() - started))
 
+
+def run_claude(command):
+    return subprocess.run([sys.executable, HOOK, '--claude', '--check', command],
+                          capture_output=True, text=True)
+
+
+for command in ASK:
+    if run_claude(command).returncode != 3:
+        failures.append('NOT ASKED (--claude): ' + command)
+for command in CLAUDE_PASS:
+    if run_claude(command).returncode != 0:
+        failures.append('WRONGLY STOPPED (--claude): ' + command)
+for command in ALLOW:
+    # some of these ask under --claude (a push, --amend); none is blocked
+    if run_claude(command).returncode == 2:
+        failures.append('WRONGLY BLOCKED (--claude): ' + command)
+for command in BLOCK + ['git push origin x && git reset --hard']:
+    if run_claude(command).returncode != 2:
+        failures.append('NOT BLOCKED (--claude): ' + command)
+if run('git push origin main').returncode != 0:
+    failures.append('without --claude a push is not the guard\'s to ask')
+event = {'tool_name': 'Bash', 'tool_input': {'command': 'git -C /r push origin main'}}
+out = subprocess.run([sys.executable, HOOK, '--claude'], input=json.dumps(event),
+                     capture_output=True, text=True)
+try:
+    decision = json.loads(out.stdout)['hookSpecificOutput']['permissionDecision']
+except (ValueError, KeyError, TypeError):
+    decision = None
+if out.returncode != 0 or decision != 'ask':
+    failures.append('hook contract (--claude): a push must answer "ask" on stdout')
+event = {'tool_name': 'mcp__terminal__run_in_terminal', 'tool_input': {'command': 'git -C /r clean -fd'}}
+if subprocess.run([sys.executable, HOOK, '--claude'], input=json.dumps(event), capture_output=True,
+                  text=True).returncode != 2:
+    failures.append('hook contract (--claude): the terminal tool is judged like Bash')
+
 if failures:
     print('\n'.join(failures)); sys.exit(1)
-print('OK: %d blocked, %d allowed, hook contract holds' % (len(BLOCK), len(ALLOW)))
+print('OK: %d blocked, %d allowed, %d asked (--claude), hook contract holds'
+      % (len(BLOCK), len(ALLOW), len(ASK)))

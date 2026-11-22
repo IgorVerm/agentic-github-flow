@@ -9,8 +9,8 @@ compatibility: macOS only, the one system the worker's read deny list is measure
 With the settings row `codex worker`, an issue that carries its label is built by Codex. The
 Claude issue chat stays its owner: it claims the issue, asks the user the questions, runs every
 GitHub step, reviews Codex's work and pushes it on the user's word. Codex writes the code and
-commits it, in a job folder of its own; the chat imports the commits. Why: Codex models do the
-work well and talk to people badly (the user's ruling, `DESIGN_DECISIONS.md`, #103). The worker
+commits it, in a job folder of its own; the chat imports the commits. Why: the user's ruling
+(`DESIGN_DECISIONS.md`, #103). The worker
 runs outside Claude Code's sandbox, so it runs no git and opens no file that the chat or Codex
 wrote: everything that reads such data runs inside Codex's sandbox, and Codex's work comes back
 as a git bundle, which is data (#107).
@@ -41,7 +41,8 @@ A row of the repository's `## Issue chats settings` (the method's §1), owned he
    its own on Codex's git setup, never pushing and that Codex cannot ask. The file is read
    inside Codex's sandbox, under its read deny list; its text goes to OpenAI.
 3. **Run a turn:** `<worker> <worktree> --model <model> --prompt-file <file> [--time-limit
-   <minutes>] [--effort <effort>]`, in the background, since a turn may run long. One turn is
+   <minutes>] [--effort <effort>]`, in the background, since a turn may run long; wait for it in
+   this turn (the method's §4). One turn is
    one `codex exec`: Codex works until it stops, which may be a large task with many commits.
    The first turn makes the job, in a folder of the worker's under `~/.cache` that the chat's
    sandbox cannot write. The worker's header owns the refusals and Codex's sandbox: it writes

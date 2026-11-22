@@ -27,7 +27,7 @@ landings at once git lets one through.
 - Refused because `<landing>` or `origin/<landing>` is not in the candidate: merge it into your
   branch (SKILL step 2), re-check per §3, run it again.
 - Refused with `landing mode unknown` (GitHub could not be asked, as inside the sandbox): run
-  the same command outside the sandbox (SKILL step 1, **unknown**).
+  it again as a call of its own (SKILL step 1, **unknown**).
 - Any other refusal, or git's: stop and report. Never retry with weaker flags, and never stash,
   move or delete another session's files in the primary checkout to make it pass. If your client
   may not reach the primary checkout, hand the landing to an agent that may.
@@ -85,7 +85,7 @@ branch until the user decides; a correction after a landing is a new change or `
 1. `git fetch origin`. `origin/<landing>` must be an ancestor of the local `<landing>`
    (`git merge-base --is-ancestor origin/<landing> <landing>`). If not, someone else pushed:
    stop, bring their commits in through a task branch (SKILL step 2) and land again; never force.
-2. Run `landing.py` again (on `unknown`, outside the sandbox: SKILL step 1). If the mode is now
+2. Run `landing.py` again (on `unknown`, as SKILL step 1 says). If the mode is now
    pull request (a protection or a collaborator was added since), the push would be wrong or
    rejected: stop and tell the user. The landed commits then go out through a pull request from
    a branch at `<landing>`'s tip.

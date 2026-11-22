@@ -57,9 +57,9 @@ deny: the `Read(...)` deny rules and `sandbox.filesystem.denyRead` of `~/.claude
 and the managed settings (files the chat's sandbox cannot write), and of the project's
 `.claude/settings.json` and `settings.local.json` in the worktree the worker runs on, which are
 the chat's files and so are read inside Codex's sandbox; the job keeps those it was made under,
-for every later turn and the export. That is the merge condition Igor set on 2026-11-21 (#107):
-the floor and the person's settings hold in every case; a project's read limits bind the
-worktree the worker is given, not a chat that names another worktree. What the profile cannot express refuses the run: a rule of
+for every later turn and the export. That is the merge condition the maintainer set on
+2026-11-21 (#107): the floor and the person's settings hold in every case; a project's read
+limits bind the worktree the worker is given, not a chat that names another worktree. What the profile cannot express refuses the run: a rule of
 another form than `**/name`, `~/path` and `//path` (a denyRead entry also `/path`, in the
 person's own settings), an optional trailing `/**` aside; `sandbox.credentials`;
 `permissions.blockReadsOutsideWorkingDirectories`; and a settings source this script does not
@@ -145,9 +145,9 @@ worktree: a lock in the worker's folder.
 
 **The sweep** (`--sweep`, issue #111; also at the start of every turn and export) removes the
 folder `jobs/<key>/` of each worktree that is gone, once `cleanup-merged` removed it: its jobs,
-its `state.json`, its lock and its logs. The logs go with it, decided in #111 on Igor's ask of
-2026-11-22 ("kijk dat alles van codex opgeruimd wordt"): they matter while the issue is open, and
-the issue's comments and the Codex thread keep what is worth keeping after it. A key folder that a run holds (its lock)
+its `state.json`, its lock and its logs. The logs go with it, decided in #111 on the maintainer's
+ask of 2026-11-22 ("kijk dat alles van codex opgeruimd wordt"): they matter while the issue is
+open, and the issue's comments and the Codex thread keep what is worth keeping after it. A key folder that a run holds (its lock)
 stays, and so does one whose worktree still exists. Loose log files that older versions left in
 the worker's folder go after 30 days. `--sweep` takes nothing else, starts no `codex`, reads no
 settings and runs no git. Its report: `status` (`swept`, `failed` with `failure`), `removed`
@@ -227,7 +227,7 @@ MANAGED_SETTINGS = '/Library/Application Support/ClaudeCode'
 SETTINGS_MAX = 1024 * 1024
 # Sources of Claude Code settings this script does not read (Claude Code 2.1.322): MDM profiles,
 # server-managed settings, and a moved configuration folder. Any read limit there would be
-# missing from Codex's deny list, so a run refuses when one may be in play (Igor, #107).
+# missing from Codex's deny list, so a run refuses when one may be in play (the maintainer, #107).
 UNREAD_VARIABLES = ('CLAUDE_CONFIG_DIR', 'CLAUDE_CODE_MANAGED_SETTINGS_PATH',
                     'CLAUDE_CODE_REMOTE_SETTINGS_PATH')
 MANAGED_PREFERENCES = ('/Library/Managed Preferences/%(user)s/com.anthropic.claudecode.plist',
@@ -663,9 +663,10 @@ def outside_denied(path):
 def project_denials(codex, job, worktree):
     """What the project's `.claude/settings.json` and `settings.local.json` in <worktree> deny;
     None when they cannot be read. They are the chat's files, so they are read inside Codex's
-    sandbox (codex_job.py `settings`). Igor's ruling of 2026-11-21 (#107) binds the project
-    settings of the worktree the worker runs on: a chat that names another worktree is not held
-    to its own project's read limits; the floor and the person's settings hold in every case."""
+    sandbox (codex_job.py `settings`). The maintainer's ruling of 2026-11-21 (#107) binds the
+    project settings of the worktree the worker runs on: a chat that names another worktree is not
+    held to its own project's read limits; the floor and the person's settings hold in every
+    case."""
     code, read = in_sandbox(codex, job, 'settings', worktree)
     files = read.get('settings')
     if code != 0 or read.get('status') != 'read' or not isinstance(files, dict):

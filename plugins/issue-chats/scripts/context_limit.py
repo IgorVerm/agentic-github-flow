@@ -10,9 +10,10 @@ repository whose HANDOFF.md has `## Issue chats settings`. Elsewhere it does not
 context-gate.sh exits before Python starts unless the branch starts with `agent/<digit>`.
 
 The limit L is the settings' `context limit` (tokens: `300000`, `300,000`, `300k`, `0.3M`),
-default 300,000 (Igor, 2026-11-17, for every repository; DESIGN_DECISIONS.md owns the values and
-their review date). A label may have its own limit (#82, Igor 2026-11-22: `work: model` and
-`work: animation` get 600k): `` `300k`; label `work: model`: `600k` ``. A chat whose issue
+default 300,000 (the maintainer, 2026-11-17, for every repository; DESIGN_DECISIONS.md owns
+the values and their review date). A label may have its own limit (#82, the maintainer
+2026-11-22: `work: model` and `work: animation` get 600k):
+`` `300k`; label `work: model`: `600k` ``. A chat whose issue
 carries such a label gets the largest of them; every other chat the count before the first
 label. The context is that of the newest API call in the transcript's tail: input plus cache
 writes plus cache reads. The hook calls no model and costs no tokens; a note it adds costs a few
@@ -34,9 +35,9 @@ Cost: the hook runs at PreToolUse and PostToolUse, so a tool call pays two git c
 The records live in ~/.cache/agentic-github-flow/context-limits (AGENTIC_GITHUB_FLOW_LIMIT_RECORDS
 replaces it), outside CLAUDE_PLUGIN_DATA, which start_issue_chat.py does not get.
 
-The decision point D is twice the limit, at most 900k (Igor, 2026-11-22: "optie 1, plafond op
-900k"): 600k for a 300k chat, 900k for a 600k chat, below the automatic compaction at about
-967k-977k that would otherwise come first (a limit above 900k is its own decision point).
+The decision point D is twice the limit, at most 900k (the maintainer, 2026-11-22: "optie 1,
+plafond op 900k"): 600k for a 300k chat, 900k for a 600k chat, below the automatic compaction
+at about 967k-977k that would otherwise come first (a limit above 900k is its own decision point).
 
   PostToolUse, context >= L      note to the chat, again per further 25k: finish the step you
                                  are on and hand over, unless you judge you are close to a
@@ -85,7 +86,7 @@ from next_issue import row_in  # noqa: E402
 from question_label import chat_issue, state_dir  # noqa: E402
 
 DEFAULT_LIMIT = 300_000
-CEILING = 900_000      # the decision point: twice the limit, at most this (Igor, 2026-11-22, #82)
+CEILING = 900_000      # the decision point: twice the limit, at most this (#82)
 RECORDS_ENV = "AGENTIC_GITHUB_FLOW_LIMIT_RECORDS"
 # `label `a`: `600k`` or `labels `a`, `b`: `600k``: the labels, then the colon and the count.
 LABEL_LIMIT = re.compile(r"labels?\s+((?:`[^`]+`[\s,]*(?:and\s+|or\s+)?)+?)\s*:\s*`?([^`;|]*)`?",

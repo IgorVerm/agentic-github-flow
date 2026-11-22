@@ -6,7 +6,9 @@
   absolute home path (a macOS or Windows user folder, or a Linux home); the secret scanner of the
   security plugin is clean on the tree;
 - attribution: NOTICE carries the copyright line; every plugin manifest has the author and
-  homepage, both marketplace files the owner; the author is named nowhere in rules/ or a skill;
+  homepage, both marketplace files the owner; the author is named nowhere in rules/ or a skill,
+  and the maintainer's first name nowhere in a plugin, rules/, templates/, tools/ or the two
+  install scripts (a ruling there says "the maintainer");
 - manifests: each plugin's two manifests and both marketplace entries agree on name and version,
   every plugin folder is listed, the repository URL is the same everywhere it is written, and a
   plugin whose files differ from the default branch (origin/main, when fetched) has a new version;
@@ -17,7 +19,8 @@
   --guards, so a guide never names a stale command (#91);
 - review dates: a DESIGN_DECISIONS.md entry with `**Review by:** YYYY-MM-DD` fails the check once
   that date has passed, so the value it fixes is looked at again (#77).
-The author's name is assembled below, so this file does not count as a mention.
+The author's and the maintainer's names are assembled below, so this file does not count as a
+mention.
 """
 import json
 import os
@@ -28,6 +31,8 @@ import sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 AUTHOR = 'MAI' + '-Tech'
 SITE = 'https://mai-tech' + '.be'
+MAINTAINER = re.compile(r'\b' + 'Ig' + 'or' + r'\b')  # not the owner in the repository URL
+SHIPPED = ('plugins/', 'rules/', 'templates/', 'tools/', 'install.sh', 'install.ps1')
 NOTICE_LINE = 'agentic-github-flow, Copyright 2026 %s (%s)' % (AUTHOR, SITE)
 EMAIL = re.compile(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}')
 ALLOWED_EMAIL = re.compile(r'(?:^|[.@])(?:example\.(?:com|org|net)|[a-z0-9-]+\.(?:example|test|'
@@ -118,6 +123,8 @@ for rel in files:
     if rel.startswith('rules/') or '/skills/' in rel:
         if AUTHOR.lower() in read(rel).lower():
             fail('%s names the author; attribution belongs in README, NOTICE and manifests' % rel)
+    if rel.startswith(SHIPPED) and MAINTAINER.search(read(rel)):
+        fail('%s names the maintainer; write "the maintainer"' % rel)
 
 # manifests agree
 claude_entries = {e['name']: e for e in markets['.claude-plugin/marketplace.json']['plugins']}

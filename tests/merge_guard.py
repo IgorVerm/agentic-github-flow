@@ -38,6 +38,9 @@ BLOCK = [
     'git merge @{{u}}', 'git merge @{{upstream}}', 'git merge main@{{0}}',
     'git merge --no-edit @{{u}}', '{{ git merge main; }}',
     '{{ cd {other}; cd {wt}; }} && git merge main',
+    # wrapper options with a value (third review of #109)
+    'env -u GIT_DIR git merge main', 'timeout -s KILL 10 git merge main',
+    'nice -n 5 git merge main', 'timeout -k 5 30 git merge main',
 ]
 ALLOW = [
     'git merge readme', 'git merge --abort', 'git merge --continue', 'git merge no-such-ref',
@@ -47,6 +50,15 @@ ALLOW = [
     'git status', 'git merge -S readme', '(cd {other} && git merge main)', 'cd {wt} && (cd {other}; git merge main)',
     'git merge readme@{{0}}', '{{ cd {other}; }} && git merge main',
     'pushd {other} && git merge main',  # pushd is not followed: the folder is unknown
+    'env -C {other} git merge main', 'git merge readme && git fetch',
+    'git fetch && git -C {other} merge readme',
+]
+# a merge after a fetch in the same call is judged before the fetch runs (third review of #109)
+AFTER_FETCH = [
+    'git fetch && git merge readme', 'git fetch origin && git merge origin/main',
+    'git fetch -q origin main && git merge --no-edit FETCH_HEAD',
+    'git pull --ff-only; git merge readme', 'bash -c "git fetch -q" && git merge readme',
+    'git -C {wt} fetch && cd {wt} && git merge readme',
 ]
 
 
@@ -160,6 +172,19 @@ class MergeGuard(unittest.TestCase):
         code, out = self.check('git merge main')
         self.assertNotIn(' -C ', out)
         self.assertNotIn('does not honour', out)
+
+    @skip_no_sandbox
+    def test_a_merge_after_a_fetch_in_the_same_call_is_refused(self):
+        for command in AFTER_FETCH:
+            with self.subTest(command=command):
+                code, out = self.check(command)
+                self.assertEqual(code, 2, out)
+                self.assertIn('Run the fetch as its own call', out)
+        # a merge that changes .claude/ gets the refusal that names its paths
+        for command in ('git fetch && git merge main', 'git fetch && git merge @{u}'):
+            code, out = self.check(command.replace('{', '{{').replace('}', '}}'))
+            self.assertEqual(code, 2, out)
+            self.assertIn('.claude/agents/a.md', out)
 
     @skip_no_sandbox
     def test_the_refusal_says_which_flags_merge_landing_does_not_honour(self):

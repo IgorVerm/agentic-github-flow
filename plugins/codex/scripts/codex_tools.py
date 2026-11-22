@@ -83,7 +83,7 @@ the log and removes its files. Calls to one tool run one after another. A call w
 for its server to start, stops waiting (exit 125) when the server's `ready` file has not been
 touched for 20 s (it touches it every 2 s while it lives), and stops waiting (exit 124) when no
 result comes within the tool's limit and 2 minutes.
-The worker outside every sandbox opens none of these files (method.md *Codex as the worker*, issue
+The worker outside every sandbox opens none of these files (the `codex-worker` skill, issue
 #107): it starts the servers with fixed arguments and kills them, by the turn's marker, when the
 turn ends. A tool not in the list has no server, so its call is refused; a call whose command line
 the anchors do not allow is refused by the server (exit 126). Codex's own sandbox stays as it was.

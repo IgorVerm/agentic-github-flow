@@ -36,8 +36,8 @@ the pinned commit: `git diff origin/<base>...<sha>`. Your verdict rests on this 
 
 ## 4. Review
 
-- **Code review:** Claude Code `/code-review <n>`; Codex `/review` with custom instructions to
-  review `git diff origin/<base>...<sha>`. It is an aid: `/code-review <n>` reads the pull
+- **Code review:** Claude Code `/code-review <n>`; another client its own review command, told
+  to review `git diff origin/<base>...<sha>`. It is an aid: `/code-review <n>` reads the pull
   request as it is when it runs, which may no longer be `<sha>`. Check what it reports against
   the diff of step 3: a finding you cannot confirm there is dropped or marked uncertain, and
   what it missed is still yours.
@@ -59,7 +59,7 @@ open question you cannot settle from the code is a finding, not an approval.
 ## 5. Post the verdict
 
 `<agent>` is the name you sign comments with: your client and model (`Claude Opus 5.5`, `Claude
-Fable 5.2`, `Codex` with its model; the core rules' signature), without parentheses.
+Fable 5.2`; the core rules' signature), without parentheses.
 
 - **No finding:** `python3 <plugin>/scripts/review_verdict.py approve <n> --sha <sha> --agent
   "<agent>" --note "<what you checked, review-security yes or no, the Efficient design line,

@@ -1,7 +1,7 @@
 {
   "name": "agentic-github-flow-issue-chats",
-  "version": "0.8.0",
-  "description": "Issue chats for Claude Code and Codex: each chat takes one ready GitHub issue, prepares its branch for a pull request, then starts the chat for the next issue and archives itself once its work is on GitHub.",
+  "version": "0.9.0",
+  "description": "Issue chats: each chat takes one ready GitHub issue, prepares its branch for a pull request, then starts the chat for the next issue and archives itself once its work is on GitHub.",
   "author": {
     "name": "MAI-Tech",
     "url": "https://mai-tech.be"
@@ -19,7 +19,7 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "agentic-github-flow: Issue chats",
-    "shortDescription": "Issue chats for Claude Code and Codex: each chat takes one ready GitHub issue, prepares its branch for a pull request, then starts the chat for the next issue and archives itself once its work is on GitHub.",
+    "shortDescription": "Issue chats: each chat takes one ready GitHub issue, prepares its branch for a pull request, then starts the chat for the next issue and archives itself once its work is on GitHub.",
     "longDescription": "One issue per chat: a chat picks the next ready issue by priority, checks it for overlapping work, claims it and starts its chat in a new worktree, then hands over a complete brief. The push stays on the user's yes for each branch; a chat archives itself only when its worktree is clean and its commits are on GitHub, which a Claude Code hook checks again.",
     "developerName": "MAI-Tech",
     "category": "Coding",

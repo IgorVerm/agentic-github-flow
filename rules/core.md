@@ -1,6 +1,6 @@
 # agentic-github-flow: rules for every session
 
-Every AI coding agent (Claude Code, Codex) here follows these rules; procedures are skills,
+Every AI coding agent here follows these rules; procedures are skills,
 loaded when a task matches.
 
 **Precedence.** A company overlay's binding rules (its AI policy, its data classes) are never

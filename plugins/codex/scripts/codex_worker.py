@@ -7,7 +7,7 @@ Usage: python3 -I codex_worker.py <worktree> --model <model> --prompt-file <file
        python3 -I codex_worker.py <worktree> --export
        python3 -I codex_worker.py --sweep
 
-The route of method.md *Codex as the worker* (issues #103, #107): the Claude issue chat stays
+The route of the `codex-worker` skill (issues #103, #107): the Claude issue chat stays
 the owner of the issue and the person's interface, and hands the implementation to Codex. One
 tool, so that a single narrow allow rule and one `sandbox.excludedCommands` entry cover it,
 instead of rules on `codex exec *`, which would also admit

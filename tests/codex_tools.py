@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Checks plugins/issue-chats/scripts/codex_tools.py: python3 tests/codex_tools.py.
+"""Checks plugins/codex/scripts/codex_tools.py: python3 tests/codex_tools.py.
 
 Offline, everywhere: the project's tool list is validated (a name, a command, a grant, a network
 entry, a unix socket, a variable, a time limit that is not a plain value is refused, and so is a
@@ -36,7 +36,7 @@ import threading
 import time
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
-SCRIPT = os.path.join(ROOT, 'plugins', 'issue-chats', 'scripts', 'codex_tools.py')
+SCRIPT = os.path.join(ROOT, 'plugins', 'codex', 'scripts', 'codex_tools.py')
 spec = importlib.util.spec_from_file_location('codex_tools', SCRIPT)
 ct = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ct)

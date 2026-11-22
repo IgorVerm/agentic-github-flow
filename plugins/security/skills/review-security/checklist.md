@@ -280,7 +280,7 @@ by name only; a line number instead of a quoted secret-bearing line.
 
 ## Focus for a client review
 
-Codex `/review` (and any other client without `/security-review`) gets this focus text:
+A client without `/security-review` gets this focus text in its own review command:
 
 > Review the diff for security only: missing or bypassable authorization on server entry points,
 > injection (SQL, shell, path, HTML), secrets or tokens in code or configuration, unsafe

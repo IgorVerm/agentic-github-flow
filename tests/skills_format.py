@@ -4,7 +4,9 @@
 Both clients (Claude Code, Codex) read the same skill files, so the checks keep them inside what
 both accept: the Agent Skills frontmatter (name, description) plus the one Claude Code extension
 allowed here, and the size limits past which adherence drops or a client truncates. Skill names
-are unique across all plugins, and every skill, path or link the rules name exists. The standard
+are unique across all plugins, and every skill, path or link the rules name exists. No Claude
+skill file and not rules/core.md names Codex: Codex's side lives in the codex plugin and in
+rules/codex.md, which only a Codex install loads (#98). The standard
 and where these checks are stricter: plugins/core/skills/repo-docs/skill-standard.md.
 """
 import os, re, sys
@@ -27,6 +29,7 @@ def relative_links(text):
     return [link for link in LINK.findall(text) if not link.startswith(('http', '/'))]
 
 
+CODEX_RULES_LIMIT = 2000  # rules/codex.md: inlined after core.md in Codex's block only (#98)
 rules_path = os.path.join(ROOT, 'rules', 'core.md')
 with open(rules_path, 'rb') as f:
     rules_bytes = f.read()
@@ -120,6 +123,24 @@ for plugin in sorted(os.listdir(plugins_dir)):
 for skill in re.findall(r'`([a-z0-9-]+)` skill', rules):
     if skill not in skills:
         fail(f'rules/core.md names a skill that does not exist: {skill}')
+if 'codex' in rules.lower():
+    fail('rules/core.md names Codex; Codex\'s side goes in rules/codex.md, which only Codex loads')
+with open(os.path.join(ROOT, 'rules', 'codex.md'), 'rb') as f:
+    codex_bytes = f.read()
+if len(codex_bytes) >= CODEX_RULES_LIMIT:
+    fail(f'rules/codex.md is {len(codex_bytes)} bytes; keep it under {CODEX_RULES_LIMIT}')
+for skill in re.findall(r'`([a-z0-9]+(?:-[a-z0-9]+)+)`', codex_bytes.decode('utf-8')):
+    if skill not in skills:  # every hyphenated name in backticks there is a skill
+        fail(f'rules/codex.md names a skill that does not exist: {skill}')
+for name, folder in skills.items():  # Claude's skills carry no Codex text (#98)
+    if folder.startswith(os.path.join('plugins', 'codex') + os.sep):
+        continue
+    for base, _, files in os.walk(os.path.join(ROOT, folder)):
+        for file in files:
+            with open(os.path.join(base, file), 'rb') as f:  # a binary asset reads too
+                if b'codex' in f.read().lower():
+                    fail(f'{folder}/{file} names Codex; it belongs in the codex plugin or '
+                         'rules/codex.md, which only a Codex install loads')
 for link in LINK.findall(rules):
     if not link.startswith('http') and not os.path.exists(os.path.join(ROOT, link)):
         fail(f'rules/core.md links to a missing file: {link}')

@@ -14,9 +14,15 @@ None. The core rules apply here too, through the maintainer's own install.
   8,000 bytes (`wc -c`) and a rule is added only after the same mistake happened twice. A rule
   that must hold every time without exception becomes a hook or a permission rule in the guards
   plugin, because a sentence is advice the model weighs, not a guarantee.
+- **Codex only where Codex is chosen** (#98, `DESIGN_DECISIONS.md`). No skill outside the codex
+  plugin and not `rules/core.md` names Codex: Codex's side of a shared skill goes into
+  `rules/codex.md` (inlined into the Codex block only, under 2,000 bytes), and Codex-only
+  procedures and scripts into `plugins/codex/`, which the installer adds only with Codex in the
+  plan. A seam in a shared skill stays client-neutral. `tests/skills_format.py` checks it.
 - **Skills are written once** for both clients: `plugins/<plugin>/skills/<name>/SKILL.md`,
   inside what both accept (`tests/skills_format.py`). Writing or changing one follows the Agent
-  Skills standard: `plugins/core/skills/repo-docs/skill-standard.md`. Scripts a skill runs live
+  Skills standard: `plugins/core/skills/repo-docs/skill-standard.md`, with Codex's additions in
+  `rules/codex.md`. Scripts a skill runs live
   in its plugin's `scripts/` folder, because an installed plugin is copied without the rest of
   the repository.
 - **Plugin names never change** once published. When any file of a plugin changes, raise its

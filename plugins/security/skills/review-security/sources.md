@@ -137,12 +137,10 @@ checks that rest on it, named as the skill files name them.
 | [security-guidance plugin](https://code.claude.com/docs/en/security-guidance) | n/d | Not used by this skill: hooks on every edit and an end-of-turn review by a separate model call; "none of the layers block writes or commits" |
 | [claude-security plugin](https://code.claude.com/docs/en/claude-security) | n/d | The opt-in one-time deep scan: multi-agent, writes `CLAUDE-SECURITY-<timestamp>/` with Markdown, JSONL and SARIF, patches never applied automatically, reads source and "not a running site or deployed service" |
 
-## OpenAI (Codex)
+## OpenAI
 
 | Source | Version | Backs |
 |---|---|---|
-| [Agent approvals and security](https://learn.chatgpt.com/docs/agent-approvals-security) | n/d (Codex 0.114+) | Sandbox modes (`read-only`, `workspace-write`, `danger-full-access`), network off by default, `--yolo` not recommended; "treat web results as untrusted", cached web search against live-content injection; Codex Cloud strips secrets before the agent phase |
-| [Sandboxing](https://learn.chatgpt.com/docs/sandboxing) | n/d | Seatbelt on macOS, bubblewrap on Linux; applies to spawned commands |
 | [Safety in building agents](https://developers.openai.com/api/docs/guides/agent-builder-safety) | n/d | Prompt injection defined as untrusted text entering the system to exfiltrate data through downstream tool calls; untrusted input never drives behaviour directly; keep tool approvals on; agents "can still make mistakes or be tricked" |
 
 ## Scanners and GitHub
@@ -204,7 +202,7 @@ client and 200 to a browser user agent: a link checker needs the latter.
 `owasp.org/asvs` → `asvs.owasp.org`; `owasp.org/Top10/2025` → `top10.owasp.org/2025`;
 `nextjs.org/blog/cve-2025-29927` → the Vercel postmortem above; `vercel.com/docs/headers/security-headers`
 → `/docs/cdn-security/security-headers`; `…/attack-challenge-mode` → `/docs/vercel-firewall/attack-mode`;
-`developers.openai.com/codex/…` → `learn.chatgpt.com/docs/…`; `code.claude.com/docs/en/iam` now
+`code.claude.com/docs/en/iam` now
 serves authentication, permissions are at `/docs/en/permissions`. Gone: OWASP
 `NPM_Security_Cheat_Sheet.html`. Not obtainable: a GitHub page stating Secret Protection's price.
 Gaps in the sources themselves: Google's web-server OAuth page does not describe PKCE (the

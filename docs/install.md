@@ -17,7 +17,7 @@ Run each check and tell the person what is missing. Stop until the hard requirem
 |---|---|---|
 | git | `git --version` | hard requirement; on Windows Git for Windows (`winget install Git.Git`) |
 | Python 3.8 or newer | `python3 --version` (Windows: `py -3 --version`) | hard requirement; on Windows for example `winget install Python.Python.3.12` |
-| Claude Code, Codex or both | `claude --version`, `codex --version` | at least one; a client that is missing is skipped |
+| Claude Code, Codex or both | `claude --version`, `codex --version` | at least one; a client that is missing is skipped. Codex counts only when its command is found: a `~/.codex` folder alone does not (`--codex` sets it up anyway) |
 | the GitHub CLI, signed in | `gh auth status` | optional: without it agents cannot open pull requests or check merges and hand the person the text instead |
 
 macOS, Linux and Windows are supported. The repositories it works on must be on github.com:
@@ -57,8 +57,13 @@ Ask these in one message, with your recommendation, and wait for the answers.
      its Bash sandbox (step 5);
    - `--guards gcloud`: the guards plus the Google Cloud guard, for people who are signed in to
      Google Cloud on this machine (step 5); `--guards sandbox,gcloud` for both.
-4. **Which clients?** Both by default; `--no-claude` or `--no-codex` leaves one alone. A client
-   that is not on `PATH`: `--claude-bin <path>` or `--codex-bin <path>`.
+4. **Which clients?** Ask which clients the person uses: Claude Code, Codex or both. Recommend
+   only the ones they use: for a Claude-only person or team, `--no-codex`, so that nothing of
+   Codex is installed (no Codex rules block, no Codex plugin, no Codex text in what Claude
+   loads). Without that answer the installer sets up each client whose command it finds; a
+   `~/.codex` folder without the `codex` command is skipped with a note, and `--codex` sets
+   Codex up anyway. A client that is not on `PATH`: `--claude-bin <path>` or
+   `--codex-bin <path>`. When Codex is chosen, read step 8 too; otherwise skip it.
 5. **Their work identity** (for `--guards`): the personal-data guard knows the person's
    `git config --global` identity, the gh login of github.com and the local account name. Ask
    whether they use another name or e-mail address at work (set per repository, for example);
@@ -92,6 +97,7 @@ The options, all optional, combined as the person decided:
 | `--guards gcloud` | the guards plus the opt-in Google Cloud guard (both clients) |
 | `--overlay <git-url-or-path>` | add a company or personal overlay (repeatable) |
 | `--no-claude`, `--no-codex` | leave one client alone |
+| `--codex` | set up Codex even when the `codex` command is not found (its plugins wait for the command) |
 | `--claude-bin <path>`, `--codex-bin <path>` | a client that is not on `PATH` |
 
 For example, a work machine: `~/.agentic-github-flow/install.sh --guards --overlay <company-overlay>`.
@@ -122,27 +128,19 @@ always the same version. Tell the person what changed:
 - `~/.claude/CLAUDE.md`: a block between `<!-- >>> agentic-github-flow >>> -->` and
   `<!-- <<< agentic-github-flow <<< -->` that imports `rules/core.md` and each overlay's
   `AGENTS.md`. Lines outside the block are never touched.
-- `~/.codex/AGENTS.md`: the same block with the text written out, because Codex does not follow
-  imports there; `--update` rewrites it.
-- Both clients: the clone registered as the plugin marketplace `agentic-github-flow`, and the
-  chosen plugins installed from it.
-- With `--guards`: the guards plugin in Claude Code (Codex has no guards plugin: its guards are
-  the rules and hooks that follow); the ask and deny rules merged into
-  `~/.claude/settings.json` (merged, never replaced); the Codex
-  execpolicy rules (git safety and delete prompts) copied into `~/.codex/rules/`; the git guard
-  and the personal-data guard added to `~/.codex/hooks.json` beside the person's own entries.
-  In Codex the personal-data guard denies instead of asking, because a Codex hook cannot ask;
-  the delete prompt rules take the delete guard's place there. The exact behaviour, also of
-  `--update` and `--uninstall`: the installer's docstring.
+- Each client set up: the clone registered as the plugin marketplace `agentic-github-flow`, and
+  the chosen plugins installed from it.
+- With `--guards`: the guards plugin in Claude Code; the ask and deny rules merged into
+  `~/.claude/settings.json` (merged, never replaced). The exact behaviour, also of `--update`
+  and `--uninstall`: the installer's docstring.
 - With `--guards sandbox`, also: one `PreToolUse` entry in `~/.claude/settings.json` that runs the
   sandbox-network guard from the clone.
 - With `--guards gcloud`, also: the Google Cloud ask and deny rules merged into
-  `~/.claude/settings.json` like the others, and a third rules file copied into `~/.codex/rules/`.
+  `~/.claude/settings.json` like the others.
 - Overlays: one given as a git URL is cloned into `~/.agentic-github-flow/overlays/`; one given
   as a folder is used where it is, so it must stay there (Claude Code imports it by its absolute
-  path). Codex gets the overlay's text written out, so after an overlay changes, run
-  `install.sh --update` (it also pulls the cloned ones).
-- Backups: before each change to an existing `~/.claude/settings.json` or `~/.codex/hooks.json`,
+  path). After an overlay changes, run `install.sh --update` (it also pulls the cloned ones).
+- Backups: before each change to an existing `~/.claude/settings.json`,
   by an install, `--update` or `--uninstall`, the installer copies it beside itself as
   `<file>.agentic-github-flow-backup-<date>-<time>`. These copies stay; they are the person's to
   delete.
@@ -154,22 +152,17 @@ Nothing is sent anywhere except the git and plugin fetches: no telemetry.
 ## 4. Verify
 
 1. **The last line is `done`** and no line says `FAIL`. On a `FAIL`, go to step 6.
-2. **Codex with `--guards`:** Codex runs a new hook only after the person trusts it once: ask
-   them to run `/hooks` in Codex and trust the two hooks the installer named.
-3. **The plugins are installed:** `claude plugin list` shows `agentic-github-flow-core`, each
+2. **The plugins are installed:** `claude plugin list` shows `agentic-github-flow-core`, each
    chosen plugin and, with `--guards`, `agentic-github-flow-guards`, from the marketplace
-   `agentic-github-flow`. For Codex the installer's `ok codex: add …` lines are the proof (its
-   `plugin list` also lists plugins that are only available); Codex never gets the guards
-   plugin.
-4. **A fresh session loads the rules:** ask the person to start a new session in each client
+   `agentic-github-flow`.
+3. **A fresh session loads the rules:** ask the person to start a new session in each client
    (the running ones do not reload) and ask it "Which agentic-github-flow rules and skills do you
    have?". It should name the rules (ask before a push, work in a worktree, issues as the queue)
    and skills such as `ship-change` and `open-issue`.
-5. **With `--guards`, a scratch test:** in a new, empty repository outside the person's real
+4. **With `--guards`, a scratch test:** in a new, empty repository outside the person's real
    work (`git init` in a temporary folder, one commit), ask the fresh session to run
-   `git reset --hard`. Claude Code must refuse it (the deny list) and Codex must forbid it (the
-   execpolicy rules). Then delete the scratch folder with the system's trash.
-6. **Settings that point into the plugin cache:** if `~/.claude/settings.json` has permission
+   `git reset --hard`. Claude Code must refuse it (the deny list). Then delete the scratch folder with the system's trash.
+5. **Settings that point into the plugin cache:** if `~/.claude/settings.json` has permission
    rules or sandbox exclusions that point into `~/.claude/plugins/cache/`, each install names
    them and gives the same entry with the clone's path; when there are none it prints nothing.
    Pass such a list on: such an entry silently
@@ -189,13 +182,12 @@ comments are ignored.
 
 | File | Entry | Effect |
 |---|---|---|
-| `personal-data` | an identifier beyond the git and gh identity, optionally `email:`, `phone:` or `name:` | calls that send it are asked (Claude Code) or denied (Codex) |
+| `personal-data` | an identifier beyond the git and gh identity, optionally `email:`, `phone:` or `name:` | calls that send it are asked |
 | `exempt-dirs` | an absolute folder (`~` allowed) | sessions working inside it are not checked, for work that other rules govern |
 | `local-mcp` | an MCP server name | its `mcp__<name>__*` tools count as local and are not checked |
 
 The work identity of step 2 goes into `personal-data`. Listing a folder or a server turns the
-check off there: `/` or `~` in `exempt-dirs` turns it off everywhere, and `codex_apps` in
-`local-mcp` passes every Codex connector. A settings folder that a repository moves into itself
+check off there: `/` or `~` in `exempt-dirs` turns it off everywhere. A settings folder that a repository moves into itself
 (through `XDG_CONFIG_HOME` or `HOME` in its own settings) is not trusted for the two exemption
 files. The exact matching rules: the header of
 [`plugins/guards/scripts/pre_tool_personal_data.py`](../plugins/guards/scripts/pre_tool_personal_data.py).
@@ -222,7 +214,7 @@ What it refuses and the forms it teaches: the header of
 
 An agent on the machine can use the person's Google Cloud login: `gcloud`, `gsutil`, `bq` and
 `cloud-sql-proxy` act with their credentials on live projects and data. The guard makes each of
-those commands wait for the person's approval (Claude Code: an ask rule; Codex: a prompt rule),
+those commands wait for the person's approval (an ask rule),
 and in Claude Code denies reading and editing the gcloud configuration folder
 (`~/.config/gcloud/`; on Windows `%APPDATA%\gcloud`, not measured there), which holds the login
 and the Application Default Credentials file. With Claude Code's Bash sandbox on
@@ -235,12 +227,12 @@ It is not complete: rules match a program's name at the start of a command, so a
 (`CLOUDSDK_CORE_PROJECT=prod gcloud …`) and other tools on the same credentials (Terraform's
 Google provider, `docker push` through gcloud's credential helper, `kubectl`, `firebase`) are
 not asked about; with the sandbox on the credentials stay closed to them inside it, without it a
-command such as `cat` reads them. Codex rules cannot close a folder; a folder moved with
+command such as `cat` reads them. A folder moved with
 `CLOUDSDK_CONFIG` or a key file named in `GOOGLE_APPLICATION_CREDENTIALS` is not covered; and a
 database client such as `psql` to a production database looks like one to a local database. The
 written rules still bind there. The rules: the `gcloud` key of
 [`plugins/guards/policy/claude-permissions.json`](../plugins/guards/policy/claude-permissions.json)
-and [`plugins/guards/policy/gcloud.rules`](../plugins/guards/policy/gcloud.rules).
+(for Codex, step 8).
 
 **Setting up gcloud.** Give the person these steps, each with Google's page
 (docs.cloud.google.com, read 2026-11-19), to run in their own terminal (in Claude Code,
@@ -303,87 +295,6 @@ desktop app, the `claude` CLI logged in (`claude auth login`) and `gh`; it was m
 is unmeasured on Linux and refused on Windows. The full list of what a chain needs: the
 `issue-handover` skill's [method.md](../plugins/issue-chats/skills/issue-handover/method.md),
 §7.
-
-### Codex as the worker (issue chats, opt-in per repository)
-
-A repository whose `## Issue chats settings` has the row `codex worker` (a label, a Codex model
-and optionally a time limit per turn and a reasoning effort) lets a Claude issue chat hand the
-implementation of an issue with that label to Codex, while the chat keeps the issue, the
-questions to the person, the review and the push (method.md §4 *Codex as the worker*). Codex
-must be installed and logged in (`codex login`); the route runs on macOS only, the one system
-its read deny list is measured on. The chat runs Codex through one script, which fixes Codex's
-sandbox and never passes a `--dangerously-*` option:
-
-- **Writes:** only a job folder of the script's own under
-  `~/.cache/agentic-github-flow/codex-worker/`, never the chat's repository. Its files are
-  copy-on-write clones of the worktree's and cost no disk. Once the worktree is removed, the
-  chat's `codex_worker.py --sweep` removes its jobs and logs.
-- **Reads:** the disk, except all of `~/.claude`, `~/.ssh`, `~/.aws`, `~/.netrc`, `~/.gnupg`,
-  `~/.config/gh`, Claude Code's folders under `/private/tmp`, and any `.env`, `.env.*`, `*.pem`,
-  `*.key` or `*.p12` file, plus, read at each run, every `Read(...)` deny rule and
-  `sandbox.filesystem.denyRead` entry of `~/.claude/settings.json`, the managed settings and the
-  project's `.claude/settings.json` and `settings.local.json` in the worktree the worker is
-  given. The floor and the person's own settings hold for every run; a project's read limits
-  bind only a run on that project's worktree, not a chat that hands the worker another one. A
-  deny rule must be written as `**/name`, `~/path` or `//path`, a denyRead entry as `~/path`,
-  `//path` or, in the person's own settings, `/path` (each with an optional trailing `/**`);
-  another form refuses the run, as do `sandbox.credentials`,
-  `permissions.blockReadsOutsideWorkingDirectories`, a plugin copy under `~/.claude`, and a
-  settings source the script does not read: an MDM profile (`com.anthropic.claudecode.plist`
-  under `/Library/Managed Preferences`), server-managed settings
-  (`~/.claude/remote-settings.json`), or `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_MANAGED_SETTINGS_PATH`
-  or `CLAUDE_CODE_REMOTE_SETTINGS_PATH` set. A session started with `--settings <file>` can add
-  read limits the script cannot see. Everything else Codex may read can go to OpenAI: send it no work on a machine whose files may
-  not.
-- **No network**, approval `never`, a time limit per turn, after which the script kills what is
-  left of it.
-- **The project's tools** (opt-in per project, #116): commands a project lists in
-  `.agents/codex-tools.json` (Blender headless, its game or QA runs, a script that reaches one
-  LAN host), which Codex's own sandbox cannot run. Each runs in a sandbox the script makes with
-  `sandbox-exec`: writes only the job, the same read deny list, and only the tool's grants on top
-  (`gpu`: the Metal device; a network `host:port`: through a forwarder of the script's to that
-  one address; a unix socket such as a dedicated ssh agent). The person's settings are the
-  anchor: a tool runs only if a `Bash(...)` allow rule of the person's, the managed or the
-  project's Claude Code settings covers its command line (no deny or ask rule), and its network
-  hosts and sockets only if `sandbox.network.allowedDomains` and `allowUnixSockets` of
-  `~/.claude/settings.json` or the managed settings hold them; a project's settings never widen
-  these. So a project grants Codex no command and no network its sandboxed Claude chats may not
-  use themselves; the `gpu` grant is the exception (Claude Code's sandbox has no GPU), and the
-  command rule binds an honest chat only, since a chat can write the project settings of a
-  worktree it makes: against a hostile chat the bound is the tool's sandbox, the person's deny
-  rules and the person's network grants.
-  The format: `codex_tools.py`'s header; how a chat uses it: method.md §4.
-- **The person's Codex configuration does not apply in these turns** (`~/.codex/config.toml`,
-  its rules, MCP servers and hooks), because each can run a command outside Codex's sandbox.
-  **Nor do the ChatGPT account's apps (connectors) and Codex plugins:** they are on whenever
-  Codex is logged in with ChatGPT, whatever the configuration, and their tools run outside
-  Codex's sandbox with the account's connections, so the script turns them off for each turn.
-
-The script itself runs outside Claude Code's sandbox (Codex needs the network and writes
-`~/.codex`). It therefore runs no git and opens no file that the chat or Codex wrote: the setup
-of a job, the reading of the prompt and the export of Codex's commits as a git bundle all run
-inside Codex's sandbox, and the chat imports the bundle inside its own with `codex_import.py`,
-which refuses submodules, hooks and hook managers' files, and changes to `.claude/`,
-`.codex/`, `.agents/`, `.mcp.json`, `CLAUDE.md`, `AGENTS.md` and `AGENTS.override.md`, and runs
-no hook while it fast-forwards. It takes no program to run (`codex` and `python3` come from
-PATH). Three conditions are the person's: Claude Code's sandbox must not make
-`~/.cache/agentic-github-flow`, the installed plugin folder or a folder on PATH before `codex`'s
-and `python3`'s writable, and the rule below is spelled with `-I`, so that Python reads no
-`PYTHONPATH`. On the person's yes, allow that script alone and exclude it from the sandbox, in
-each spelling the agents use, never `codex exec` or `codex sandbox` itself and never
-`codex_import.py` or `codex_job.py`:
-
-```json
-"Bash(python3 -I ~/.agentic-github-flow/plugins/issue-chats/scripts/codex_worker.py *)"
-```
-
-and in `sandbox.excludedCommands`
-`"python3 -I ~/.agentic-github-flow/plugins/issue-chats/scripts/codex_worker.py *"`. Without them
-each Codex turn asks. Codex's work counts against the person's Codex usage limits. OpenAI's
-Codex plugin for Claude Code (`openai/codex-plugin-cc`) was reviewed and tried for this (#103)
-and is not used: it does not run inside the sandbox either, answers every approval with an
-error, may delegate to Codex unasked in every session, and drops its jobs when the session
-ends.
 
 ### Worktree clones on macOS
 
@@ -468,12 +379,132 @@ agreement, through a branch like any other change:
 ```
 
 `--update` pulls the clone and repeats what was installed. `--uninstall` removes exactly what the
-installer recorded that it added; it leaves the person's own lines in `~/.claude/CLAUDE.md` and
-`~/.codex/AGENTS.md` byte for byte as they were. It leaves the clone, the backups of step 3, the
+installer recorded that it added; it leaves the person's own lines in each client's rules file
+byte for byte as they were. It leaves the clone, the backups of step 3, the
 settings files of step 5 and anything made per repository: delete those afterwards, with the
 person's agreement and the system's trash, to remove it completely. Neither combines with `--with`, `--guards` or `--overlay`; to change what is
 installed, run the installer without `--update` (step 3). On Windows, use `install.ps1` with the same options. After either, start a
 new session in each client.
+
+## 8. Codex (only when the person chose it)
+
+Read this step only when Codex is set up. A Claude-only install gets none of it.
+
+### What the installer changes for Codex
+
+- `~/.codex/AGENTS.md`: the rules block of step 3 with the text written out, because Codex does
+  not follow imports there, and with `rules/codex.md` after the core rules: Codex's side of the
+  shared skills, which only the Codex block carries; `--update` rewrites it. An overlay's text
+  is written out too, so after an overlay changes, run `install.sh --update`.
+- The chosen plugins, added to Codex. With `--with issue-chats`, also the codex plugin, in both
+  clients: the Codex worker for Claude issue chats and the Codex adapter for Codex issue chats.
+  An install or `--update` without Codex removes it from Claude Code again.
+- With `--guards`: Codex has no guards plugin. The Codex execpolicy rules (git safety and delete
+  prompts) are copied into `~/.codex/rules/`, and the git guard and the personal-data guard are
+  added to `~/.codex/hooks.json` beside the person's own entries (backed up like
+  `~/.claude/settings.json`). In Codex the personal-data guard denies instead of asking, because
+  a Codex hook cannot ask; the delete prompt rules take the delete guard's place there.
+- With `--guards gcloud`, also a third rules file in `~/.codex/rules/`:
+  [`plugins/guards/policy/gcloud.rules`](../plugins/guards/policy/gcloud.rules), prompt rules for
+  the same programs. Codex rules cannot close a folder, so the gcloud folder stays readable there.
+- An install from before #98 counted Codex when only a `~/.codex` folder existed. `--update` no
+  longer repeats that: it skips Codex with a note and leaves what is in `~/.codex` as it was.
+  Rerun the installer with `--codex` to keep Codex set up without its command on `PATH` (the
+  Codex CLI inside ChatGPT.app is not found: #47).
+
+### Verify in Codex
+
+1. **With `--guards`:** Codex runs a new hook only after the person trusts it once: ask them to
+   run `/hooks` in Codex and trust the two hooks the installer named.
+2. **The plugins:** the installer's `ok codex: add …` lines are the proof (Codex's `plugin list`
+   also lists plugins that are only available); Codex never gets the guards plugin.
+3. **The scratch test** of step 4: Codex must forbid the same command (the execpolicy rules).
+4. **The personal-data guard** (step 5): in Codex a call that sends a listed identifier is
+   denied, and `codex_apps` in `local-mcp` passes every Codex connector.
+
+### Codex as the worker (issue chats, opt-in per repository)
+
+A repository whose `## Issue chats settings` has the row `codex worker` (a label, a Codex model
+and optionally a time limit per turn and a reasoning effort) lets a Claude issue chat hand the
+implementation of an issue with that label to Codex, while the chat keeps the issue, the
+questions to the person, the review and the push (the codex plugin's `codex-worker` skill). The
+codex plugin comes with `--with issue-chats` once Codex is set up (step 2). Codex
+must be installed and logged in (`codex login`); the route runs on macOS only, the one system
+its read deny list is measured on. The chat runs Codex through one script, which fixes Codex's
+sandbox and never passes a `--dangerously-*` option:
+
+- **Writes:** only a job folder of the script's own under
+  `~/.cache/agentic-github-flow/codex-worker/`, never the chat's repository. Its files are
+  copy-on-write clones of the worktree's and cost no disk. Once the worktree is removed, the
+  chat's `codex_worker.py --sweep` removes its jobs and logs.
+- **Reads:** the disk, except all of `~/.claude`, `~/.ssh`, `~/.aws`, `~/.netrc`, `~/.gnupg`,
+  `~/.config/gh`, Claude Code's folders under `/private/tmp`, and any `.env`, `.env.*`, `*.pem`,
+  `*.key` or `*.p12` file, plus, read at each run, every `Read(...)` deny rule and
+  `sandbox.filesystem.denyRead` entry of `~/.claude/settings.json`, the managed settings and the
+  project's `.claude/settings.json` and `settings.local.json` in the worktree the worker is
+  given. The floor and the person's own settings hold for every run; a project's read limits
+  bind only a run on that project's worktree, not a chat that hands the worker another one. A
+  deny rule must be written as `**/name`, `~/path` or `//path`, a denyRead entry as `~/path`,
+  `//path` or, in the person's own settings, `/path` (each with an optional trailing `/**`);
+  another form refuses the run, as do `sandbox.credentials`,
+  `permissions.blockReadsOutsideWorkingDirectories`, a plugin copy under `~/.claude`, and a
+  settings source the script does not read: an MDM profile (`com.anthropic.claudecode.plist`
+  under `/Library/Managed Preferences`), server-managed settings
+  (`~/.claude/remote-settings.json`), or `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_MANAGED_SETTINGS_PATH`
+  or `CLAUDE_CODE_REMOTE_SETTINGS_PATH` set. A session started with `--settings <file>` can add
+  read limits the script cannot see. Everything else Codex may read can go to OpenAI: send it no work on a machine whose files may
+  not.
+- **No network**, approval `never`, a time limit per turn, after which the script kills what is
+  left of it.
+- **The project's tools** (opt-in per project, #116): commands a project lists in
+  `.agents/codex-tools.json` (Blender headless, its game or QA runs, a script that reaches one
+  LAN host), which Codex's own sandbox cannot run. Each runs in a sandbox the script makes with
+  `sandbox-exec`: writes only the job, the same read deny list, and only the tool's grants on top
+  (`gpu`: the Metal device; a network `host:port`: through a forwarder of the script's to that
+  one address; a unix socket such as a dedicated ssh agent). The person's settings are the
+  anchor: a tool runs only if a `Bash(...)` allow rule of the person's, the managed or the
+  project's Claude Code settings covers its command line (no deny or ask rule), and its network
+  hosts and sockets only if `sandbox.network.allowedDomains` and `allowUnixSockets` of
+  `~/.claude/settings.json` or the managed settings hold them; a project's settings never widen
+  these. So a project grants Codex no command and no network its sandboxed Claude chats may not
+  use themselves; the `gpu` grant is the exception (Claude Code's sandbox has no GPU), and the
+  command rule binds an honest chat only, since a chat can write the project settings of a
+  worktree it makes: against a hostile chat the bound is the tool's sandbox, the person's deny
+  rules and the person's network grants.
+  The format: `codex_tools.py`'s header; how a chat uses it: the `codex-worker` skill.
+- **The person's Codex configuration does not apply in these turns** (`~/.codex/config.toml`,
+  its rules, MCP servers and hooks), because each can run a command outside Codex's sandbox.
+  **Nor do the ChatGPT account's apps (connectors) and Codex plugins:** they are on whenever
+  Codex is logged in with ChatGPT, whatever the configuration, and their tools run outside
+  Codex's sandbox with the account's connections, so the script turns them off for each turn.
+
+The script itself runs outside Claude Code's sandbox (Codex needs the network and writes
+`~/.codex`). It therefore runs no git and opens no file that the chat or Codex wrote: the setup
+of a job, the reading of the prompt and the export of Codex's commits as a git bundle all run
+inside Codex's sandbox, and the chat imports the bundle inside its own with `codex_import.py`,
+which refuses submodules, hooks and hook managers' files, and changes to `.claude/`,
+`.codex/`, `.agents/`, `.mcp.json`, `CLAUDE.md`, `AGENTS.md` and `AGENTS.override.md`, and runs
+no hook while it fast-forwards. It takes no program to run (`codex` and `python3` come from
+PATH). Three conditions are the person's: Claude Code's sandbox must not make
+`~/.cache/agentic-github-flow`, the installed plugin folder or a folder on PATH before `codex`'s
+and `python3`'s writable, and the rule below is spelled with `-I`, so that Python reads no
+`PYTHONPATH`. On the person's yes, allow that script alone and exclude it from the sandbox, in
+each spelling the agents use, never `codex exec` or `codex sandbox` itself and never
+`codex_import.py` or `codex_job.py`:
+
+```json
+"Bash(python3 -I ~/.agentic-github-flow/plugins/codex/scripts/codex_worker.py *)"
+```
+
+and in `sandbox.excludedCommands`
+`"python3 -I ~/.agentic-github-flow/plugins/codex/scripts/codex_worker.py *"`. Without them
+each Codex turn asks. Until #98 the script lived in the issue-chats plugin: an entry that still
+names `plugins/issue-chats/scripts/codex_worker.py` no longer matches, and the installer names
+it with the new path (it changes no permission). Codex's work counts against the person's Codex usage limits. OpenAI's
+Codex plugin for Claude Code (`openai/codex-plugin-cc`) was reviewed and tried for this (#103)
+and is not used: it does not run inside the sandbox either, answers every approval with an
+error, may delegate to Codex unasked in every session, and drops its jobs when the session
+ends.
 
 ## Other ways to install
 

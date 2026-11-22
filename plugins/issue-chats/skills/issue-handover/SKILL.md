@@ -1,14 +1,15 @@
 ---
 name: issue-handover
 description: Pick and claim the next ready GitHub issue and hand an issue chat over to the chat for it - record the branch ready to push or landed on local main, pick the next issue by priority, check it for overlap, start and claim its chat, hand over the brief, then push or ask for it, see the pull request through to its merge, and archive. Use when an issue chat's branch is ready to push or landed, when its context nears the limit, after two failed corrections, or when the user asks to start issue chats.
-compatibility: The background start needs the Claude Code desktop app and a logged-in claude CLI (measured on macOS; Linux unmeasured; Windows unsupported) plus gh. Codex desktop uses codex.md. Elsewhere the chat gives the user the brief to paste.
+compatibility: The background start needs the Claude Code desktop app and a logged-in claude CLI (measured on macOS; Linux unmeasured; Windows unsupported) plus gh. Another client uses its own adapter skill where one is installed. Elsewhere the chat gives the user the brief to paste.
 ---
 
 # Pick the next issue and hand over to its chat
 
-**Codex:** use [the Codex adapter](codex.md) for this hand-over, including its authorization
-and fallback checks; do not run the Claude-specific steps below. The adapter adds no permission
-by itself: the repository's settings section or the user's request supplies it.
+**In another client than Claude Code:** use that client's adapter skill for this hand-over
+where one is installed, including its authorization and fallback checks, and do not run the
+Claude-specific steps below. The adapter adds no permission by itself: the repository's
+settings section or the user's request supplies it.
 
 The method and why the steps come in this order: [method.md](method.md), §4 and §5. The
 repository's `HANDOFF.md` section `## Issue chats settings` gives the values below (model and
@@ -79,9 +80,9 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
    step 6.
    The issue stays open and assigned; the merge closes it. **In local-main mode** land the work
    instead (`local-main.md` §1; for the independent route a subagent that did not write it
-   reviews and lands it, §2; a Codex chat starts that integrator itself and ends its turn or
-   hands over only after its receipt, and the integrator posts the landing comment,
-   [codex.md](codex.md) *Start the integrator*), then the signed comment opens with
+   reviews and lands it, §2; where a client's adapter has the author start that integrator
+   itself, the author ends its turn or hands over only after its receipt, and the integrator
+   posts the landing comment), then the signed comment opens with
    `landed on local <landing branch> at <commit>` and the fields of `local-main.md` §1;
    the issue stays open and assigned until the push's cleanup closes it. Landing refused: stop
    and report, no hand-over. A correction to an earlier comment is a new comment, never an edit. Each open question for the user stands on its owning issue,
@@ -153,9 +154,8 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
    govern its start (read, check the claim, the design note when the claim names an overlap or
    the issue is labelled `type:design-first`, housekeeping, the requirements stop), that it
    brings the landing branch in, during the work as at the landing, only with the core plugin's
-   `merge_landing.py` (`ship-change` step 2), never a bare `git merge`, that Codex builds it
-   when the issue carries the label of the settings row `codex worker` (method.md §4 *Codex as
-   the worker*), that it pushes only on the user's yes, and that a question for the user that
+   `merge_landing.py` (`ship-change` step 2), never a bare `git merge`, what a settings row of
+   another plugin changes for this issue (load the skill that owns that row), that it pushes only on the user's yes, and that a question for the user that
    the work waits on goes on the issue too, signed, with the question label, also when it is
    asked in plain text
    (method.md §4, *Questions for the user*).
@@ -199,8 +199,8 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
       in the turn of their word. A refusal for anything else (a red check, a review requesting
       changes) is more work of item 2.
    3. **After the merge:** the `cleanup-merged` skill for this chat's worktree, run from the
-      primary checkout, and with the settings row `codex worker` then the worker's `--sweep`,
-      spelled as the allow rule names it (method.md §4 *Codex as the worker* step 8), then a signed comment on the issue whose
+      primary checkout, then what the skill that owns another plugin's settings row adds after a
+      cleanup (load that skill), then a signed comment on the issue whose
       text after the signature opens with `merged: #<number> at <merge commit>`, with what
       cleanup removed and kept.
    4. **Archive:** end your own live work (above), rerun the worktree check (`ok` once the

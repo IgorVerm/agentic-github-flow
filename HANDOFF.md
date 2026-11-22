@@ -4,7 +4,7 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
 
 ## State
 
-- Five plugins: core, security, web-deploy, guards and issue-chats; each version lives in its
+- Six plugins: core, security, web-deploy, guards, issue-chats and codex; each version lives in its
   manifests (`plugins/<name>/.claude-plugin/plugin.json`). Not published in a directory yet.
 - Maintainers: the author named in `NOTICE`.
 - v2 brought the team edition up to date with the personal rules repository it was built from;
@@ -30,8 +30,20 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
     only once a chat's work is on GitHub (also when a successor's pushed branch holds it); a
     side chat started with `start_session` only once its work landed or its pull request merged. The method: `plugins/issue-chats/skills/issue-handover/method.md`.
     The automatic start of the next chat needs the Claude Code CLI and desktop app (measured on
-    macOS only); Codex uses its own thread tools; elsewhere the chat hands over a brief to paste.
-    With the settings row `codex worker` (#103, #107), a Claude issue chat hands the
+    macOS only); Codex uses its own thread tools (the codex plugin's `codex-issue-chats` skill);
+    elsewhere the chat hands over a brief to paste.
+    A hook (`question_label.py`, #75) keeps an issue's question label true in Claude Code: it
+    refuses a question the work waits on while the issue lacks the label and removes the label
+    at the answer and at the close. Measured live in the desktop app (#75).
+    A second hook (`context_limit.py`, #77) enforces `context limit` (default 300,000; per label,
+    #82, e.g. 600k for `work: model` and `work: animation`): past it a note to hand over, past
+    twice it (at most 900k) only asking the user and the hand-over run until the user answers. Measured
+    offline; not yet in a live chat.
+  - codex (#98, installed only with issue-chats and Codex in the plan, in both clients): nothing
+    of Codex reaches a Claude-only install; Codex counts only when its command is found or
+    `--codex` asks; Codex's side of the shared skills is `rules/codex.md`, in the Codex block
+    only. With the settings row `codex worker` (#103, #107; the `codex-worker` skill owns it), a
+    Claude issue chat hands the
     implementation of an issue with that label to Codex through `codex_worker.py` (`codex exec`
     in a job folder of the worker's own, under a permission profile: writes only the job, no
     network, a read deny list, approval `never`, a time limit per turn; the worker runs no git
@@ -41,13 +53,6 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
     app. A project may list tools in `.agents/codex-tools.json` (Blender, its QA runs, the
     Spark scripts) that the worker serves to Codex from sandboxes of its own, anchored in the
     Claude Code settings (#116, `codex_tools.py`).
-    A hook (`question_label.py`, #75) keeps an issue's question label true in Claude Code: it
-    refuses a question the work waits on while the issue lacks the label and removes the label
-    at the answer and at the close. Measured live in the desktop app (#75).
-    A second hook (`context_limit.py`, #77) enforces `context limit` (default 300,000; per label,
-    #82, e.g. 600k for `work: model` and `work: animation`): past it a note to hand over, past
-    twice it (at most 900k) only asking the user and the hand-over run until the user answers. Measured
-    offline; not yet in a live chat.
 - Efficient design (#37): the core skill `efficient-design` is a checklist at design and review
   (work per frame, request or job run grows with what changed, not with all data), and the core
   rule *Work grows with what changed* has the author write an `Efficient design:` line in the
@@ -129,7 +134,8 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
 | merging the landing branch in the sandbox | `plugins/core/scripts/merge_landing.py` header, `frozen_unexplained` in `plugins/core/scripts/work_proof.py`, `plugins/core/skills/ship-change/SKILL.md` step 2, `DESIGN_DECISIONS.md`, `tests/merge_landing.py`, `plugins/guards/scripts/pre_tool_merge_guard.py` header, `tests/merge_guard.py` |
 | the security scanners | `plugins/security/scripts/*.py` headers, `plugins/security/skills/review-security/sources.md`, `tests/scan_secrets.py`, `tests/audit_dependencies.py` |
 | the pre-push hook | `templates/pre-push` header, `plugins/core/scripts/push_paths.py`, the push check in `plugins/guards/scripts/pre_tool_personal_data.py`, `tests/pre_push_checks.py`, its older refusals in `tests/worktree_tools.py` (`PrePushTests`) |
-| issue chats | `plugins/issue-chats/skills/issue-handover/method.md`, `plugins/issue-chats/scripts/*.py` headers, `tests/next_issue.py`, `tests/start_issue_chat.py`, `tests/chat_archivable.py`, `tests/archive_guard.py`, `tests/question_label.py`, `tests/context_limit.py`, `tests/codex_worker.py`, `tests/codex_tools.py` (live part outside Claude Code's sandbox only) |
+| issue chats | `plugins/issue-chats/skills/issue-handover/method.md`, `plugins/issue-chats/scripts/*.py` headers, `tests/next_issue.py`, `tests/start_issue_chat.py`, `tests/chat_archivable.py`, `tests/archive_guard.py`, `tests/question_label.py`, `tests/context_limit.py` |
+| the Codex plugin | `plugins/codex/skills/codex-worker/SKILL.md`, `plugins/codex/skills/codex-issue-chats/SKILL.md`, `plugins/codex/scripts/*.py` headers, `rules/codex.md`, `tests/codex_worker.py`, `tests/codex_tools.py` (live part outside Claude Code's sandbox only), the Codex cases of `tests/installer.py` |
 
 ## Landing settings
 

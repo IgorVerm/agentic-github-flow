@@ -267,6 +267,15 @@ class ContextLimit(unittest.TestCase):
         from context_limit import git_out, settings_now
         self.assertIsNone(git_out(os.path.join(self.tmp.name, 'nowhere'), 'status'))
         self.assertEqual(settings_now(os.path.join(self.tmp.name, 'nowhere'), {}), (300_000, {}))
+        cached = {'limits': [300_000, {'work: model': 600_000}], 'settings_key': 'x'}
+        self.assertEqual(settings_now(os.path.join(self.tmp.name, 'nowhere'), cached),
+                         (300_000, {'work: model': 600_000}))  # a git failure keeps the last read
+
+    def test_a_malformed_label_entry_leaves_the_default(self):
+        sys.path.insert(0, SCRIPTS)
+        from context_limit import limits_in
+        self.assertEqual(limits_in("label `a` `600k`"), (300_000, {}))
+        self.assertEqual(limits_in("`250k`; label `a` `600k`"), (250_000, {}))
 
     def test_a_labelled_issue_gets_its_label_limit_from_the_record(self):
         repo = self.per_label_repo()

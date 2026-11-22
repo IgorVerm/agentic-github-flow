@@ -122,7 +122,7 @@ def limits_in(cell: str | None) -> tuple[int, dict[str, int]]:
         if n:
             for name in re.findall(r"`([^`]+)`", m.group(1)):
                 per[name.strip().lower()] = n
-    first = LABEL_LIMIT.search(cell)
+    first = re.search(r"\blabels?\b", cell, re.I)  # also where a label entry is malformed
     return tokens(cell[:first.start()] if first else cell) or DEFAULT_LIMIT, per
 
 
@@ -161,9 +161,12 @@ def settings_now(top: str, state: dict) -> tuple[int, dict[str, int]]:
     refs = state.get("refs")
     if not isinstance(refs, list) or not all(isinstance(r, str) for r in refs):
         refs = state["refs"] = settings_refs(top)
+    listed = git_out(top, "for-each-ref", "--format=%(refname) %(objectname)", *refs)
+    if listed is None and isinstance(state.get("limits"), list):  # git failed: keep the last read
+        default, per = state["limits"]
+        return int(default), {str(k): int(v) for k, v in per.items()}
     tips = {}
-    for line in (git_out(top, "for-each-ref", "--format=%(refname) %(objectname)", *refs)
-                 or "").splitlines():
+    for line in (listed or "").splitlines():
         name, _, sha = line.partition(" ")
         if name in refs:
             tips[name] = sha

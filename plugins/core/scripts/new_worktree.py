@@ -15,9 +15,10 @@ sync clients corrupt git's files. When the repository's post-checkout hook fails
 makes the worktree and its branch and exits with the hook's status; so does this script, and it
 says that the worktree stands.
 
-Clones (on by default on macOS; Igor's ruling on #19, DESIGN_DECISIONS.md): the tracked files
-are APFS clones of the primary checkout's (copy-on-write: they share disk blocks until one side
-changes), so a worktree of a repository with large tracked files costs almost no disk.
+Clones (on by default on macOS; the maintainer's ruling on #19, DESIGN_DECISIONS.md): the
+tracked files are APFS clones of the primary checkout's (copy-on-write: they share disk
+blocks until one side changes), so a worktree of a repository with large tracked files costs
+almost no disk.
 --no-clones or AGENTIC_GITHUB_FLOW_CLONES=0 turns it off; on other systems nothing changes
 unless --clones or AGENTIC_GITHUB_FLOW_CLONES=1 asks for it. It runs `git worktree add
 --no-checkout`, fills the index from <base> and clones every tracked file whose blob a clean

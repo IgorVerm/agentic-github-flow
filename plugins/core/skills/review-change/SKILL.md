@@ -7,11 +7,10 @@ description: Review another agent's pull request or branch as the independent re
 
 You are the context that did not write the change, which the review route of the `ship-change`
 skill asks for. You find and report: you do not fix the change unless asked, never push to its
-branch, never merge it. Your verdict names one commit. Under a standing grant `merge_pr.py`
-merges on it, so the comment is written and posted by
-[review_verdict.py](../../scripts/review_verdict.py) (its header owns the format), never by
-hand. `<plugin>` below is the folder two levels above this skill's folder; `<n>` is the pull
-request's number.
+branch, never merge it. Your verdict names one commit, which `merge_pr.py` merges on where
+automatic merging is on, so [review_verdict.py](../../scripts/review_verdict.py) writes and
+posts it (its header owns the format), run as a call of its own, never by hand. `<plugin>` is
+the folder two levels above this skill's folder; `<n>` the pull request's number.
 
 ## 1. Did this session write it?
 
@@ -68,7 +67,7 @@ Fable 5.2`; the core rules' signature), without parentheses.
   `python3 <plugin>/scripts/review_verdict.py findings <n> --sha <sha> --agent "<agent>"
   --body-file <file>`.
 
-`--dry-run` shows the comment without posting. What the exit codes mean:
+`--dry-run` shows the comment without posting. The exit codes:
 
 - 0: posted for the head. Report the verdict, `<sha>` and the comment's URL to whoever asked.
 - 1: refused, nothing posted. *The head is …, not …*: the author pushed during the review; go

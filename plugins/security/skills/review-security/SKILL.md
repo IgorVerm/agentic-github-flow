@@ -11,9 +11,9 @@ get a pass. A real secret found stops everything else: tell the user the file an
 the secret is revoked first, and history is cleaned up only on the user's word (it needs a
 force-push).
 
-`<plugin>` below is the folder two levels above this skill's folder. The checks are in
-[checklist.md](checklist.md), each with the source it rests on; the sources, with the date they
-were read, are in [sources.md](sources.md).
+`<plugin>` is the folder two levels above this skill's folder. The checks are in
+[checklist.md](checklist.md), each with its source; the sources, with the date they were read,
+are in [sources.md](sources.md).
 
 1. **Scope and context.** A change: the diff of the branch against the default branch and the
    files it touches. An audit: the whole repository. Read the repository's `AGENTS.md`,
@@ -22,8 +22,8 @@ were read, are in [sources.md](sources.md).
    the change against it instead of restating it.
 2. **Secrets.** `python3 <plugin>/scripts/scan_secrets.py <repo>` for the tree, with
    `--history` for an audit or when the change touches configuration. It prints the pattern,
-   the file, the line and the commit, never the value. History can take minutes on a large
-   repository: run it in the background. A finding on a test fixture or a regular expression is
+   the file, the line and the commit, never the value. History can take minutes: run it in the
+   background, waiting in this turn. A finding on a test fixture or a regular expression is
    dismissed with one line saying why; anything else goes to the user as above.
 3. **Dependencies.** `python3 <plugin>/scripts/audit_dependencies.py <repo>` checks every
    lockfile (npm, pnpm, Cargo, poetry, uv, composer, pinned requirements) against the OSV

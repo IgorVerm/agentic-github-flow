@@ -75,8 +75,8 @@ repository's landing mode), with the user's yes before any push.
    area, the rulings' branch or pull request, what waits for them (a push, a review). Start no
    build, no successor and no issue chat: the packages wait for whoever picks them up (a
    `priority: high` one: `open-issue` step 4). Where issue chats run, then call
-   `get_session "self"` (the plugin's archive guard needs its result) and run the worktree
-   check (the issue-chats plugin's `scripts/chat_archivable.py <worktree>`) on the worktree
+   `get_session "self"` (the archive guard needs its result) and run the worktree
+   check (the issue-chats plugin's `scripts/chat_archivable.py <worktree>`, alone) on the worktree
    this chat made and on the `worktreePath` that result names, if any. When every check says
    `ok`, archive this chat (`archive_session` with `"self"` and a short `reason`), telling the
    user first; on `keep:`, or when the archive is refused, stop with the reason. A rulings

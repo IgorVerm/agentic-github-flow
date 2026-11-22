@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
-# agentic-github-flow installer for macOS and Linux. The one command (README):
-#   git clone https://github.com/IgorVerm/agentic-github-flow.git ~/.agentic-github-flow && ~/.agentic-github-flow/install.sh
+# agentic-github-flow installer for macOS and Linux. The command to run: docs/install.md.
 # It makes sure the clone exists in ~/.agentic-github-flow, finds Python 3.8+ and hands over to
-# tools/installer.py in that clone, which owns every step. Options (all passed on):
-#   --with security,web-deploy   --guards   --overlay <git-url-or-path>   --update   --uninstall
-#   --no-claude   --no-codex   --claude-bin <path>   --codex-bin <path>   --help
+# tools/installer.py in that clone, which owns every step and the options, all passed on
+# (its docstring, or --help).
 set -eu
 
 REPO_URL="${AGENTIC_GITHUB_FLOW_REPO:-https://github.com/IgorVerm/agentic-github-flow.git}"

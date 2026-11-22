@@ -10,11 +10,11 @@ alone. The ready label says that the body is enough to start; an issue without i
 the optional `agentic-github-flow-issue-chats` plugin runs, issue chats pick their next task from
 the open, unassigned issues with the ready label, so an issue without it is picked up by nobody.
 
-**Labels.** The ready label is `agent-ready` and the requirements label `needs-spec`, unless the
-repository's `HANDOFF.md` has a section `## Issue chats settings` whose rows `ready label` or
-`requirements label` name others; read them there first. A label the repository does not have
-yet: creating it (`gh label create`) changes the repository's settings on GitHub, so ask the
-user first, and without a yes open the issue without that label and say so. The issue gets no
+**Labels.** The ready label is `agent-ready`, the requirements label `needs-spec` and the
+question label `needs-user`, unless rows of the same names in `HANDOFF.md`
+`## Issue chats settings` name others; read them there first. A label the repository lacks:
+creating it (`gh label create`) changes the repository's settings on GitHub, so ask the user
+first, and without a yes open the issue without that label and say so. The issue gets no
 assignee here: an assignee is the claim of whoever works on it, and the overlap check
 (`overlap_check.py` in this plugin's `scripts/`) reads assigned issues as work in progress.
 

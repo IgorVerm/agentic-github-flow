@@ -38,9 +38,12 @@ its transcript (`<CLAUDE_CONFIG_DIR or ~/.claude>/projects/*/<sessionId>.jsonl`)
 reply to the ready prompt, checks that reply's model against --model, runs
 `claude stop <short id>`, and opens it with `claude --desktop --resume <sessionId>` under
 `script` (the desktop switch refuses without a terminal; `script -q /dev/null` on macOS, the
-measured form; `script -q -c` on Linux, not measured). It claims nothing: the caller assigns
-the issue right after exit 0. --effort left out: this chat's own effort (`CLAUDE_EFFORT`), else
-the user's default. AGENTIC_GITHUB_FLOW_GH, a JSON list, replaces the `gh` command, and
+measured form; `script -q -c` on Linux, not measured). Before `claude --bg` it records the
+issue's labels, read in the same `gh issue view`, for the worktree and the issue
+(context_limit.record_labels): the hook context_limit.py takes the chat's context limit from
+them (a label with its own limit in the settings, #82) without a network call, and a hand-over
+records them anew. It claims nothing: the caller assigns the issue right after exit 0.
+--effort left out: this chat's own effort (`CLAUDE_EFFORT`), else the user's default. AGENTIC_GITHUB_FLOW_GH, a JSON list, replaces the `gh` command, and
 AGENTIC_GITHUB_FLOW_START_WAIT_S the 120 s (tests).
 
 Why the reply and its model are checked: `idle` can be listed before the session has answered.
@@ -78,6 +81,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))  # -I leaves it off
+import context_limit  # noqa: E402
 import handover_note  # noqa: E402
 
 READY = "Reply with exactly one line: ready. Use no tools."
@@ -145,9 +149,10 @@ def real(path: str) -> str:
 
 
 def preflight(wt: str, title: str, model: str, effort: str | None, prefix: str = "",
-              handover: bool = False) -> set[str]:
+              handover: bool = False) -> tuple[set[str], list[str] | None]:
     """The checks before anything starts; returns the sessions that may stay in <wt> (with
-    --handover: the chat whose claim is handed over), else an empty set."""
+    --handover: the chat whose claim is handed over), else an empty set, and the issue's labels
+    (None without an issue)."""
     if sys.platform not in ("darwin", "linux"):
         raise Fail(f"no form of `script` known for {sys.platform}: give the user the brief")
     if not shutil.which("script"):
@@ -182,11 +187,12 @@ def preflight(wt: str, title: str, model: str, effort: str | None, prefix: str =
     if gd == common:
         raise Fail(f"{wt} is a primary checkout, not a linked worktree")
     keep: set[str] = set()
+    labels = None
     if git(wt, "status", "--porcelain"):
         raise Fail(f"{wt} has changes: commit what is verified first (a hand-over), or the next "
                    "chat needs a fresh worktree")
     if issue is not None:
-        keep = unclaimed(wt, issue, handover)
+        keep, labels = unclaimed(wt, issue, handover)
     me = os.environ.get("CLAUDE_CODE_SESSION_ID")
     for row in agents():
         sid = str(row.get("sessionId"))
@@ -196,16 +202,16 @@ def preflight(wt: str, title: str, model: str, effort: str | None, prefix: str =
                 raise Fail(f"session {sid} already works in {wt}")
         if row.get("name") == title and sid != me and sid not in keep:
             raise Fail(f"session {sid} already carries the title {title!r}")
-    return keep
+    return keep, labels
 
 
-def unclaimed(wt: str, issue: int, handover: bool = False) -> set[str]:
+def unclaimed(wt: str, issue: int, handover: bool = False) -> tuple[set[str], list[str]]:
     """The issue is open and nobody claimed it (no assignee), read in the worktree's repository;
-    with handover, the caller's own claim may stand."""
+    with handover, the caller's own claim may stand. Also returns the issue's labels."""
     command = gh_command()
     if not command:
         raise Fail("gh is not on PATH: the claim on the issue cannot be checked")
-    fields = "state,assignees,comments" if handover else "state,assignees"
+    fields = "state,assignees,labels,comments" if handover else "state,assignees,labels"
     p = run(command + ["issue", "view", str(issue), "--json", fields], cwd=wt)
     try:
         data = json.loads(p.stdout) if p.returncode == 0 else None
@@ -215,10 +221,12 @@ def unclaimed(wt: str, issue: int, handover: bool = False) -> set[str]:
         raise Fail(f"gh issue view {issue}: {(p.stderr or p.stdout).strip()[:200] or 'no answer'}")
     if data.get("state") != "OPEN":
         raise Fail(f"issue #{issue} is {str(data.get('state')).lower()}, not open")
+    labels = [str(lb.get("name")) for lb in data.get("labels") or []
+              if isinstance(lb, dict) and lb.get("name")]
     if not data.get("assignees"):
-        return set()
+        return set(), labels
     if handover:
-        return own_claim(wt, issue, data.get("comments"))
+        return own_claim(wt, issue, data.get("comments")), labels
     who = ", ".join(str(a.get("login")) for a in data["assignees"] if isinstance(a, dict))
     raise Fail(f"issue #{issue} is already claimed (assigned to {who}): another chat works on it")
 
@@ -412,10 +420,12 @@ def main(argv: list[str]) -> int:
         effort = None
     wt = real(a.worktree)
     try:
-        keep = preflight(wt, a.title, a.model, effort, a.prefix, a.handover)
+        keep, labels = preflight(wt, a.title, a.model, effort, a.prefix, a.handover)
+        issue = title_issue(a.title, a.prefix)[1]
+        if issue is not None:  # the context limit's labels, before the chat's first tool call
+            context_limit.record_labels(wt, issue, labels, "start_issue_chat")
         code, line = start(wt, a.title, a.model, effort, keep)
         if code == 0 and a.handover and keep:
-            issue = title_issue(a.title, a.prefix)[1]
             if not handover_note.write(keep, wt, line.split()[-1], issue):
                 line += ("; the hand-over note could not be written: the archive guard will "
                          "refuse to archive the old chat")

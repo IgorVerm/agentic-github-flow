@@ -157,15 +157,18 @@ def remove_label(issue: int, label: str, cwd: str, repo: list[str] | None = None
 
 
 def state_dir(name: str = "question-markers",
-              env: str = "AGENTIC_GITHUB_FLOW_QUESTION_STATE") -> str | None:
+              env: str = "AGENTIC_GITHUB_FLOW_QUESTION_STATE",
+              plugin_data: bool = True) -> str | None:
     """The marker folder <name>, private to this user, or None when it cannot be trusted.
 
     Not the shared temp folder: on a multi-user host another user could make it first and read
     or redirect the markers. The plugin's data folder, else one under the user's home; made 0700,
-    and refused when it is a symlink or another user's. context_limit.py uses it too."""
+    and refused when it is a symlink or another user's. context_limit.py uses it too, and with
+    plugin_data=False (always under the home) for what a script outside the plugin's hooks writes
+    for them, since only the hooks get CLAUDE_PLUGIN_DATA."""
     path = (os.environ.get(env)
             or (os.path.join(os.environ["CLAUDE_PLUGIN_DATA"], name)
-                if os.environ.get("CLAUDE_PLUGIN_DATA") else None)
+                if plugin_data and os.environ.get("CLAUDE_PLUGIN_DATA") else None)
             or os.path.join(os.path.expanduser("~"), ".cache", "agentic-github-flow", name))
     try:
         os.makedirs(path, mode=0o700, exist_ok=True)

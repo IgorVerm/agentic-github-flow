@@ -213,7 +213,8 @@ def offline():
           'com.apple.MTLCompilerService' in gpu)
     with_socket = ct.profile(folders, denied, [], ['/private/tmp/agf-cw-x/n0'])
     check('profile: a named socket only', '(path-literal "/private/tmp/agf-cw-x/n0")' in
-          with_socket and with_socket.count('network-outbound') == 1, with_socket[-600:])
+          with_socket and with_socket.count('network-outbound') ==
+          len(ct.both_forms('/private/tmp/agf-cw-x/n0')), with_socket[-600:])
 
     # The note and the environment a tool gets.
     check('no tools: no note', ct.note([], '/usr/bin/python3') == '')
@@ -228,7 +229,7 @@ def offline():
     env = broker.tool_env({'env': {'PAX_DATA_DIR': '{tmp}/pax-data'}}, {})
     check('a tool keeps only a short list of the person\'s variables, plus the job\'s',
           sorted(env) == ['GIT_DIR', 'HOME', 'LC_ALL', 'PAX_DATA_DIR'] and
-          env['PAX_DATA_DIR'] == '/j/tmp/pax-data', str(env))
+          env['PAX_DATA_DIR'] == os.path.join('/j', 'tmp') + '/pax-data', str(env))
     env = broker.tool_env({'env': {}}, {'h:22': '/s'})
     check('a tool with network: the proxy route', env['SANDBOX_RUNTIME'] == '1' and
           ' connect "$1" "$2"' in env['SRT_SSH_PROXY_COMMAND'] and

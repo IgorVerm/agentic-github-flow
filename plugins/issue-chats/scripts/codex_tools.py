@@ -97,13 +97,16 @@ ID_RE = re.compile(r'^[0-9a-f]{32}$')
 HOST_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9.-]{0,252}:[0-9]{1,5}$')
 ENV_RE = re.compile(r'^[A-Z_][A-Z0-9_]{0,63}$')
 # Names a list may not set: the job's, the route's and the loader's.
-ENV_RESERVED = re.compile(r'^(GIT_.*|TMPDIR|TMP|TEMP|DYLD_.*|SANDBOX_RUNTIME|SRT_.*|AGF_.*|'
+ENV_RESERVED = re.compile(r'^(GIT_.*|TMPDIR|TMP|TEMP|PATH|DYLD_.*|SANDBOX_RUNTIME|SRT_.*|AGF_.*|'
                           r'CODEX_WORKER_TURN|PYTHON.*)$')
 GRANTS = ('gpu',)
 LIMIT_DEFAULT, LIMIT_MAX = 30, 240
 TOOLS_MAX, ARGS_MAX, ARG_MAX = 32, 256, 4096
 POLL = 0.2
 REFUSED = 126
+TIMED_OUT = 124
+READY_SECONDS = 30   # how long a call waits for its tool's server to start
+GRACE_SECONDS = 120  # past the tool's limit, a call stops waiting for its result
 
 # The base of every tool's sandbox: deny by default, then what a process needs to start and run
 # Python, a shell, git, ssh and rsync and read files; modelled on Codex's own seatbelt policy
@@ -382,11 +385,12 @@ class Broker:
     """The tools of one turn, run by codex_worker.py outside every sandbox. It starts one server
     per tool with fixed arguments and opens no file of the job's."""
 
-    def __init__(self, job, denied, specs, base_env, marker, python=None):
+    def __init__(self, job, denied, specs, base_env, python=None):
         self.job, self.denied, self.specs = job, list(denied), specs
-        self.base_env, self.marker = dict(base_env), marker
+        self.base_env = dict(base_env)
         self.python = python or sys.executable
         self.servers, self.listeners, self.pipes = [], [], []
+        self.ended = {}  # name: exit code of a server that ended before the turn did
         self.folder = None
         self.stopping = threading.Event()
 
@@ -454,17 +458,24 @@ class Broker:
                            list(net.values()) + spec['unix_sockets'])
             log = open(os.path.join(log_folder, 'tool-%s.txt' % spec['name']), 'ab')
             try:
-                self.servers.append(subprocess.Popen(
+                self.servers.append((spec['name'], subprocess.Popen(
                     [SANDBOX_EXEC, '-p', text, self.python, '-I', os.path.abspath(__file__),
                      'serve', self.job, json.dumps(spec)],
                     cwd=os.path.join(self.job, 'work'), env=self.tool_env(spec, net),
-                    stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True))
+                    stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)))
+            except OSError as error:
+                self.ended[spec['name']] = 'not started: %s' % error.strerror
             finally:
                 log.close()
 
     def stop(self):
+        """Kill the servers, their tools' groups and the forwarders. A tool's own group is left to
+        the worker's kill by the turn's marker, which every tool carries in its environment."""
         self.stopping.set()
-        for process in self.servers + self.pipes:
+        for name, process in self.servers:
+            if process.poll() is not None:
+                self.ended[name] = process.returncode
+        for process in [p for _, p in self.servers] + self.pipes:
             try:
                 os.killpg(process.pid, signal.SIGKILL)
             except OSError:
@@ -589,7 +600,8 @@ def serve(job, spec_text):
     if os.path.islink(folder) or not os.path.isdir(folder):
         print('codex_tools: %s is not a folder' % folder, file=sys.stderr)
         return 1
-    write_done(folder, 'ready', {'pid': os.getpid(), 'command': spec['command']})
+    write_done(folder, 'ready', {'pid': os.getpid(), 'command': spec['command'],
+                                 'time_limit_minutes': spec['time_limit_minutes']})
     os.replace(os.path.join(folder, 'ready.done'), os.path.join(folder, 'ready'))
     while True:
         try:
@@ -613,22 +625,36 @@ def serve(job, spec_text):
 # --- inside Codex's sandbox: the call -----------------------------------------------------------
 
 def call(name, args):
+    """Ask the tool's server for one run and wait for it; print its output, return its exit."""
     top = os.environ.get('AGF_CODEX_TOOLS_DIR')
-    folder = os.path.join(top, name) if top and NAME_RE.match(name or '') else None
-    if folder is None or not os.path.isfile(os.path.join(folder, 'ready')):
-        try:
-            names = sorted(n for n in os.listdir(top) if NAME_RE.match(n)) if top else []
-        except OSError:
-            names = []
-        print('codex_tools: refused: %r is not a tool of this project (tools: %s)'
-              % (name, ', '.join(names) or 'none'), file=sys.stderr)
+    served = [n for n in os.environ.get('AGF_CODEX_TOOLS', '').split(',') if NAME_RE.match(n)]
+    if not top or name not in served:
+        print('codex_tools: refused: %r is not a tool of this turn (tools: %s)'
+              % (name, ', '.join(served) or 'none'), file=sys.stderr)
         return REFUSED
+    folder = os.path.join(top, name)
+    ready = os.path.join(folder, 'ready')
+    deadline = time.time() + READY_SECONDS
+    while not os.path.isfile(ready):
+        if time.time() > deadline:
+            print('codex_tools: the server of %s did not start in %g s; the worker\'s log '
+                  'tool-%s.txt beside the turn\'s events says why' % (name, READY_SECONDS, name),
+                  file=sys.stderr)
+            return REFUSED
+        time.sleep(POLL)
+    try:
+        with open(ready, encoding='utf-8') as handle:
+            limit = float(json.load(handle).get('time_limit_minutes', LIMIT_MAX))
+    except (OSError, ValueError, TypeError, AttributeError):
+        limit = LIMIT_MAX
     ident = secrets.token_hex(16)
     temporary = os.path.join(folder, ident + '.tmp')
     with open(temporary, 'w', encoding='utf-8') as handle:
         json.dump({'args': args, 'cwd': os.getcwd()}, handle)
     os.replace(temporary, os.path.join(folder, ident + '.req'))
     log_path, done_path = (os.path.join(folder, ident + suffix) for suffix in ('.log', '.done'))
+    # Calls to one tool run one after another, so the wait counts from when this one starts.
+    deadline = None
     offset = 0
     out = sys.stdout.buffer
     while True:
@@ -640,17 +666,27 @@ def call(name, args):
             offset += len(chunk)
             out.write(chunk)
             out.flush()
+            if deadline is None:
+                deadline = time.time() + limit * 60 + GRACE_SECONDS
         except FileNotFoundError:
             pass
         if finished:
             break
+        if deadline is not None and time.time() > deadline:
+            print('codex_tools: no result from %s within its limit; stopped waiting' % name,
+                  file=sys.stderr)
+            return TIMED_OUT
         time.sleep(POLL)
-    with open(done_path, encoding='utf-8') as handle:
-        result = json.load(handle)
-    code = result.get('exit') if isinstance(result.get('exit'), int) else 1
+    try:
+        with open(done_path, encoding='utf-8') as handle:
+            result = json.load(handle)
+    except (OSError, ValueError):
+        result = {}
+    if not isinstance(result, dict):
+        result = {}
     if result.get('timed_out'):
         print('codex_tools: %s ran past its time limit and was killed' % name, file=sys.stderr)
-    return code
+    return result['exit'] if isinstance(result.get('exit'), int) else 1
 
 
 # --- inside the tool's sandbox: ssh's way out ---------------------------------------------------

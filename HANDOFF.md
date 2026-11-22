@@ -63,7 +63,11 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
   `plugins/core/scripts/merge_landing.py`, which commits the ordinary merge inside the Claude
   Code sandbox and keeps the worktree's `.claude/` and `.mcp.json` on disk as the chat started
   with them; the cleanup and archive checks accept those paths while they match its manifest.
-  Not measured yet in a real issue chat whose landing branch changed `.claude/`.
+  Merged that way inside the sandbox in two pax_deorum issue chats on 2026-11-21 (#108); their
+  landing and cleanup not seen yet (#50). During the work too: the guards plugin's merge guard
+  (`pre_tool_merge_guard.py`, #108) refuses a bare `git merge` the sandbox would break, and the
+  tool takes in the leftovers of one (untracked files, and tracked files a fast-forward already
+  rewrote) only when they equal the merge's version.
 - Automatic merging (#13, narrowed by #26, `DESIGN_DECISIONS.md`): off by default, switched on per
   repository by the row `automatic merge` | `on` in `HANDOFF.md` §Landing settings, next to the
   landing mode (`landing.py` owns it, `--explain` reports it); an overlay cannot switch it on. There
@@ -116,11 +120,11 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
 | a skill | its `SKILL.md`, `plugins/core/skills/repo-docs/skill-standard.md`, `tests/skills_format.py` |
 | the installer | `tools/installer.py` (its docstring owns the behaviour), `tests/installer.py`, `docs/install.md` (the installing agent's guide, kept true to the docstring) |
 | the documents for users | `README.md` (the entry), `docs/guide.md` (for colleagues: what it does, what to ask for), `docs/install.md` (for the installing agent) |
-| the guards | `plugins/guards/scripts/*.py` headers, `plugins/guards/policy/*.rules`, `tests/git_guard.py`, `tests/delete_guard.py` (cases in `tests/delete_guard_cases.py`; `tests/delete_guard_differential.py` checks it never asks less than before issue 4), `tests/personal_data_guard.py`, `tests/sandbox_network_guard.py` (with `--guards sandbox` in `tools/installer.py`), `tests/claude_permissions.py`, `tests/codex_policy.py` (part 3: the opt-in `gcloud.rules`) |
+| the guards | `plugins/guards/scripts/*.py` headers, `plugins/guards/policy/*.rules`, `tests/git_guard.py`, `tests/delete_guard.py` (cases in `tests/delete_guard_cases.py`; `tests/delete_guard_differential.py` checks it never asks less than before issue 4), `tests/personal_data_guard.py`, `tests/sandbox_network_guard.py` (with `--guards sandbox` in `tools/installer.py`), `tests/merge_guard.py`, `tests/claude_permissions.py`, `tests/codex_policy.py` (part 3: the opt-in `gcloud.rules`) |
 | automatic merging and the unasked push | `plugins/core/scripts/merge_pr.py`, `push_branch.py` and `review_verdict.py` headers, `plugins/core/skills/ship-change/SKILL.md` steps 6 to 8, `plugins/core/skills/review-change/SKILL.md`, `DESIGN_DECISIONS.md`, `tests/merge_pr.py`, `tests/push_branch.py`, `tests/review_verdict.py` |
 | landing modes | `plugins/core/scripts/landing.py` and `promote_main.py` headers, `plugins/core/skills/ship-change/` (`SKILL.md`, `local-main.md`), `tests/landing.py`, `tests/promote_main.py` |
 | worktrees and cleanup | `plugins/core/scripts/*.py` headers, `plugins/core/skills/cleanup-merged/SKILL.md`, `tests/worktree_tools.py`, `tests/new_worktree.py`, `tests/overlap_check.py` |
-| merging the landing branch in the sandbox | `plugins/core/scripts/merge_landing.py` header, `frozen_unexplained` in `plugins/core/scripts/work_proof.py`, `plugins/core/skills/ship-change/SKILL.md` step 2, `DESIGN_DECISIONS.md`, `tests/merge_landing.py` |
+| merging the landing branch in the sandbox | `plugins/core/scripts/merge_landing.py` header, `frozen_unexplained` in `plugins/core/scripts/work_proof.py`, `plugins/core/skills/ship-change/SKILL.md` step 2, `DESIGN_DECISIONS.md`, `tests/merge_landing.py`, `plugins/guards/scripts/pre_tool_merge_guard.py` header, `tests/merge_guard.py` |
 | the security scanners | `plugins/security/scripts/*.py` headers, `plugins/security/skills/review-security/sources.md`, `tests/scan_secrets.py`, `tests/audit_dependencies.py` |
 | the pre-push hook | `templates/pre-push` header, `plugins/core/scripts/push_paths.py`, the push check in `plugins/guards/scripts/pre_tool_personal_data.py`, `tests/pre_push_checks.py`, its older refusals in `tests/worktree_tools.py` (`PrePushTests`) |
 | issue chats | `plugins/issue-chats/skills/issue-handover/method.md`, `plugins/issue-chats/scripts/*.py` headers, `tests/next_issue.py`, `tests/start_issue_chat.py`, `tests/chat_archivable.py`, `tests/archive_guard.py`, `tests/question_label.py`, `tests/context_limit.py`, `tests/codex_worker.py` |

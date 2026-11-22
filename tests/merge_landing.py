@@ -363,6 +363,338 @@ class FrozenMerge(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout)
         self.assertIn('.claude/notes.md', r.stdout)
 
+    # #108: the leftovers of a bare `git merge` that died in the sandbox
+    def main_adds_files(self, claude):
+        writes = [('docs/new.md', 'new\n'), ('tools/run.sh', '#!/bin/sh\n')]
+        if claude:
+            writes.append(('.claude/settings.json', 's2\n'))
+        self.land_on_main('main adds files', writes=writes)
+        if os.name != 'nt':
+            os.chmod(os.path.join(self.repo, 'tools', 'run.sh'), 0o755)
+            self.git(self.repo, 'update-index', '--chmod=+x', 'tools/run.sh')
+            self.git(self.repo, 'commit', '-q', '-m', 'executable')
+            self.git(self.repo, 'push', '-q', 'origin', 'main')
+            self.git(self.wt, 'fetch', '-q', 'origin')
+
+    def leave(self, *pairs):
+        for rel, text in pairs:
+            self.write(self.wt, rel, text)
+
+    def test_identical_leftovers_are_taken_in_on_both_paths(self):
+        for claude in (False, True):
+            with self.subTest(frozen=claude):
+                if claude:
+                    self.tearDown()
+                    self.setUp()
+                self.main_adds_files(claude)
+                self.leave(('docs/new.md', 'new\n'), ('tools/run.sh', '#!/bin/sh\n'))
+                self.assertNotEqual(self.git(self.wt, 'merge', '--no-edit', 'origin/main',
+                                             check=False).returncode, 0)  # git refuses them
+                self.protect()
+                expected = self.merge_tree()
+                code, out = self.tool('origin/main')
+                self.assertEqual(code, 0, out)
+                self.assertEqual(self.head('HEAD^{tree}'), expected)
+                self.assertEqual(self.git(self.wt, 'status', '--porcelain',
+                                          '--untracked-files=all').stdout, '')
+                self.assertEqual(self.read('docs/new.md'), 'new\n')
+                self.protect(False)
+
+    def test_a_leftover_that_differs_is_refused_and_kept(self):
+        for claude in (False, True):
+            with self.subTest(frozen=claude):
+                if claude:
+                    self.tearDown()
+                    self.setUp()
+                self.main_adds_files(claude)
+                self.leave(('docs/new.md', 'MINE\n'), ('tools/run.sh', '#!/bin/sh\n'))
+                before = self.head()
+                self.protect()
+                code, out = self.tool('origin/main')
+                self.assertEqual(code, 1, out)
+                self.assertIn('docs/new.md', out)
+                self.assertNotIn('tools/run.sh', out)
+                self.assertEqual(self.head(), before)
+                self.assertEqual(self.read('docs/new.md'), 'MINE\n')
+                self.assertEqual(self.read('tools/run.sh'), '#!/bin/sh\n')
+                self.assertFalse(os.path.exists(work_proof.git_path(
+                    self.wt, work_proof.FROZEN_MANIFEST)))
+                self.protect(False)
+
+    def test_a_file_where_the_merge_needs_a_folder_is_refused(self):
+        self.main_adds_files(False)
+        self.leave(('docs', 'a file\n'))
+        code, out = self.tool('origin/main')
+        self.assertEqual(code, 1, out)
+        self.assertIn('docs', out)
+        with open(os.path.join(self.wt, 'docs')) as f:
+            self.assertEqual(f.read(), 'a file\n')
+
+    def test_a_tracked_folder_that_main_turns_into_a_file_merges(self):
+        self.write(self.repo, 'a/x.md', 'x\n')
+        self.commit(self.repo, 'folder a', 'a')
+        self.git(self.repo, 'push', '-q', 'origin', 'main')
+        self.git(self.wt, 'fetch', '-q', 'origin')
+        self.assertEqual(self.tool('origin/main')[0], 0)
+        self.git(self.repo, 'rm', '-q', '-r', '--', 'a')
+        self.write(self.repo, 'a', 'now a file\n')
+        self.commit(self.repo, 'a becomes a file', 'a')
+        self.git(self.repo, 'push', '-q', 'origin', 'main')
+        self.git(self.wt, 'fetch', '-q', 'origin')
+        expected = self.merge_tree()
+        code, out = self.tool('origin/main')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.head('HEAD^{tree}'), expected)
+        self.assertEqual(self.read('a'), 'now a file\n')
+
+    def test_a_rename_that_only_changes_case_merges(self):
+        probe = os.path.join(self.wt, 'README.md'.lower().upper())
+        if not os.path.exists(probe):
+            self.skipTest('this file system tells names apart by case')
+        self.write(self.repo, 'docs/Foo.md', 'foo\n')
+        self.commit(self.repo, 'Foo', 'docs')
+        self.git(self.repo, 'push', '-q', 'origin', 'main')
+        self.git(self.wt, 'fetch', '-q', 'origin')
+        self.assertEqual(self.tool('origin/main')[0], 0)
+        self.git(self.repo, 'mv', 'docs/Foo.md', 'docs/foo.md')
+        self.write(self.repo, 'docs/foo.md', 'foo, changed\n')
+        self.commit(self.repo, 'rename by case', 'docs')
+        self.git(self.repo, 'push', '-q', 'origin', 'main')
+        self.git(self.wt, 'fetch', '-q', 'origin')
+        expected = self.merge_tree()
+        code, out = self.tool('origin/main')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.head('HEAD^{tree}'), expected)
+        self.assertEqual(self.read('docs/foo.md'), 'foo, changed\n')
+
+    def test_an_identical_leftover_in_claude_is_frozen_not_refused(self):
+        self.land_on_main('main adds an agent', writes=[('.claude/agents/new.md', 'new\n')])
+        self.write(self.wt, '.claude/agents/new.md', 'new\n')
+        self.protect()
+        expected = self.merge_tree()
+        code, out = self.tool('origin/main')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.head('HEAD^{tree}'), expected)
+        self.assertEqual(self.git(self.wt, 'status', '--porcelain', '--untracked-files=all'
+                                  ).stdout, '')
+        self.protect(False)
+        self.write(self.wt, '.claude/agents/other.md', 'mine\n')
+        self.land_on_main('main adds another', writes=[('.claude/agents/other.md', 'main\n')])
+        code, out = self.tool('origin/main')
+        self.assertEqual(code, 1, out)
+        self.assertIn('.claude/agents/other.md', out)
+        self.assertEqual(self.read('.claude/agents/other.md'), 'mine\n')
+
+    def test_an_ignored_file_in_the_way_is_left_to_git(self):
+        self.write(self.wt, '.gitignore', 'build.log\n')
+        self.commit(self.wt, 'ignore', '.gitignore')
+        self.write(self.wt, 'build.log', 'local\n')
+        self.write(self.repo, 'build.log', 'tracked\n')
+        self.git(self.repo, 'add', '-f', '--', 'build.log')
+        self.git(self.repo, 'commit', '-q', '-m', 'track build.log')
+        self.git(self.repo, 'push', '-q', 'origin', 'main')
+        self.git(self.wt, 'fetch', '-q', 'origin')
+        code, out = self.tool('origin/main')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.read('build.log'), 'tracked\n')
+
+    def test_leftovers_come_back_when_the_merge_fails_before_it_begins(self):
+        self.main_adds_files(False)
+        self.land_on_main('readme', writes=[('README.md', 'main\n')])
+        self.leave(('docs/new.md', 'new\n'), ('README.md', 'main\n'))  # untracked and ` M`
+        expected = self.merge_tree()
+        # a held index lock makes the merge fail before it begins
+        lock = work_proof.git_path(self.wt, 'index.lock')
+        open(lock, 'w').close()
+        try:
+            code, out = self.tool('origin/main')
+        finally:
+            os.remove(lock)
+        self.assertEqual(code, 1, out)
+        self.assertEqual(self.read('docs/new.md'), 'new\n')
+        self.assertEqual(self.read('README.md'), 'main\n')
+        code, out = self.tool('origin/main')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.head('HEAD^{tree}'), expected)
+        self.assertEqual(self.git(self.wt, 'status', '--porcelain', '--untracked-files=all'
+                                  ).stdout, '')
+
+    # #108, second review: a bare merge that was a fast-forward and died leaves tracked files
+    # already rewritten to the ref's version (` M`) or deleted (` D`), not only untracked ones
+    def fresh_task(self):
+        """A task worktree at origin/main with no commits of its own: merging main is a
+        fast-forward."""
+        self.write(self.repo, 'gone.md', 'gone\n')
+        self.commit(self.repo, 'gone.md', 'gone.md')
+        self.git(self.repo, 'push', '-q', 'origin', 'main')
+        self.wt = os.path.join(self.dir, 'repo-worktrees', 'fresh')
+        self.git(self.repo, 'worktree', 'add', '-q', '-b', 'agent/fresh', self.wt, 'origin/main')
+
+    @unittest.skipUnless(CAN_PROTECT, 'a file mode cannot protect a folder here')
+    def test_a_dead_fast_forward_is_taken_in_on_the_frozen_path(self):
+        self.fresh_task()
+        # a changed and a new file in an existing .claude/ folder: a deletion or a new folder
+        # there stops git before it updates anything (measured, git 2.54), leaving no ` M`
+        self.land_on_main('main changes .claude and more',
+                          writes=[('README.md', 'main\n'), ('.claude/settings.json', 's2\n'),
+                                  ('.claude/agents/new.md', 'new\n'),
+                                  ('docs/new.md', 'new\n')],
+                          deletes=['gone.md'])
+        self.protect()
+        bare = self.git(self.wt, 'merge', '--no-edit', 'origin/main', check=False)
+        self.assertNotEqual(bare.returncode, 0, bare.stdout)
+        status = self.git(self.wt, 'status', '--porcelain', '--untracked-files=all').stdout
+        self.assertIn(' M README.md', status)  # the fixture reproduces the dead fast-forward
+        self.assertIn('?? docs/new.md', status)
+        before = self.claude_files()
+        expected = self.merge_tree()
+        code, out = self.tool('origin/main')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.head(), self.head('origin/main'))
+        self.assertEqual(self.head('HEAD^{tree}'), expected)
+        self.assertEqual(self.git(self.wt, 'status', '--porcelain', '--untracked-files=all'
+                                  ).stdout, '')
+        self.assertEqual(self.read('README.md'), 'main\n')
+        self.assertFalse(os.path.lexists(os.path.join(self.wt, 'gone.md')))
+        self.assertEqual(self.claude_files(), before)
+
+    def file_becomes_folder(self, claude):
+        """A task with no commits of its own; main turns the file `a` into the folder `a/b/x`."""
+        self.write(self.repo, 'a', 'file a\n')
+        self.commit(self.repo, 'file a', 'a')
+        self.git(self.repo, 'push', '-q', 'origin', 'main')
+        self.fresh_task()
+        self.git(self.repo, 'rm', '-q', '--', 'a')
+        writes = [('a/b/x', 'x\n'), ('README.md', 'main\n')]
+        if claude:
+            writes.append(('.claude/settings.json', 's2\n'))
+        self.land_on_main('a becomes a folder', writes=writes)
+
+    @unittest.skipUnless(CAN_PROTECT, 'a file mode cannot protect a folder here')
+    def test_a_dead_fast_forward_that_turns_a_file_into_a_folder_is_taken_in(self):
+        self.file_becomes_folder(True)
+        self.protect()
+        self.assertNotEqual(self.git(self.wt, 'merge', '--no-edit', 'origin/main',
+                                     check=False).returncode, 0)
+        status = self.git(self.wt, 'status', '--porcelain', '--untracked-files=all').stdout
+        self.assertIn(' D a', status)  # the fixture reproduces it: `a` is a folder now
+        self.assertIn('?? a/b/x', status)
+        code, out = self.tool('origin/main')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.head(), self.head('origin/main'))
+        self.assertEqual(self.git(self.wt, 'status', '--porcelain', '--untracked-files=all'
+                                  ).stdout, '')
+        self.assertEqual(self.read('a/b/x'), 'x\n')
+
+    def test_a_folder_of_leftovers_comes_back_when_the_merge_fails_before_it_begins(self):
+        self.file_becomes_folder(False)
+        os.remove(os.path.join(self.wt, 'a'))
+        self.leave(('a/b/x', 'x\n'), ('README.md', 'main\n'))
+        lock = work_proof.git_path(self.wt, 'index.lock')
+        open(lock, 'w').close()
+        try:
+            code, out = self.tool('origin/main')
+        finally:
+            os.remove(lock)
+        self.assertEqual(code, 1, out)
+        self.assertEqual(self.read('a/b/x'), 'x\n')
+        self.assertEqual(self.read('README.md'), 'main\n')
+        code, out = self.tool('origin/main')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.head(), self.head('origin/main'))
+        self.assertEqual(self.git(self.wt, 'status', '--porcelain', '--untracked-files=all'
+                                  ).stdout, '')
+
+    def test_a_folder_that_holds_a_file_of_ones_own_is_refused(self):
+        self.file_becomes_folder(False)
+        os.remove(os.path.join(self.wt, 'a'))
+        self.leave(('a/b/x', 'x\n'), ('a/mine.txt', 'mine\n'))
+        before = self.head()
+        code, out = self.tool('origin/main')
+        self.assertEqual(code, 1, out)
+        self.assertIn(': a;', out)
+        self.assertEqual(self.head(), before)
+        self.assertEqual(self.read('a/mine.txt'), 'mine\n')
+        self.assertEqual(self.read('a/b/x'), 'x\n')
+
+    def test_a_submodule_whose_checkout_lags_is_left_to_git(self):
+        """A merge never moves a submodule's checkout, so after one that moved its pointer the
+        checkout lags HEAD (` M lib`); the next merge that moves it again goes through, as a
+        plain `git merge` does (fifth review of #109)."""
+        lib = os.path.join(self.dir, 'lib')
+        self.git(self.dir, 'init', '-q', '-b', 'main', lib)
+        commits = []
+        for n in (1, 2, 3):
+            self.write(lib, 'v.txt', '%d\n' % n)
+            self.commit(lib, 'c%d' % n, 'v.txt')
+            commits.append(self.git(lib, 'rev-parse', 'HEAD').stdout.strip())
+        allow = ('-c', 'protocol.file.allow=always')
+        self.git(self.repo, *allow, 'submodule', 'add', '-q', lib, 'lib')
+        self.git(os.path.join(self.repo, 'lib'), 'checkout', '-q', commits[1])
+        self.commit(self.repo, 'lib at c2', '.gitmodules', 'lib')
+        self.git(self.repo, 'push', '-q', 'origin', 'main')
+        self.fresh_task()
+        self.git(self.wt, *allow, 'submodule', 'update', '-q', '--init')
+        self.git(os.path.join(self.wt, 'lib'), 'checkout', '-q', commits[0])
+        self.assertIn(' M lib', self.git(self.wt, 'status', '--porcelain').stdout)
+        self.git(os.path.join(self.repo, 'lib'), 'checkout', '-q', commits[2])
+        self.commit(self.repo, 'lib at c3', 'lib')
+        self.git(self.repo, 'push', '-q', 'origin', 'main')
+        self.git(self.wt, 'fetch', '-q', 'origin')
+        code, out = self.tool('origin/main')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.head(), self.head('origin/main'))
+
+    def test_tracked_leftovers_equal_to_the_merge_are_taken_in_on_the_plain_path(self):
+        self.fresh_task()
+        self.land_on_main('main changes files', writes=[('README.md', 'main\n'),
+                                                        ('docs/new.md', 'new\n')],
+                          deletes=['gone.md'])
+        # what a fast-forward that died leaves: rewritten, deleted and new files
+        self.leave(('README.md', 'main\n'), ('docs/new.md', 'new\n'))
+        os.remove(os.path.join(self.wt, 'gone.md'))
+        self.assertNotEqual(self.git(self.wt, 'merge', '--no-edit', 'origin/main',
+                                     check=False).returncode, 0)  # git refuses them
+        code, out = self.tool('origin/main')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.head(), self.head('origin/main'))
+        self.assertEqual(self.git(self.wt, 'status', '--porcelain', '--untracked-files=all'
+                                  ).stdout, '')
+
+    def test_a_tracked_change_that_differs_from_the_merge_is_refused(self):
+        for claude in (False, True):
+            with self.subTest(frozen=claude):
+                if claude:
+                    self.tearDown()
+                    self.setUp()
+                self.fresh_task()
+                if claude:
+                    self.main_changes_claude()
+                self.land_on_main('main changes files', writes=[('README.md', 'main\n'),
+                                                                ('docs/new.md', 'new\n')])
+                self.leave(('README.md', 'MINE\n'), ('docs/new.md', 'new\n'))
+                before = self.head()
+                self.protect()
+                code, out = self.tool('origin/main')
+                self.assertEqual(code, 1, out)
+                self.assertIn('README.md', out)
+                self.assertNotIn('docs/new.md', out)
+                self.assertEqual(self.head(), before)
+                self.assertEqual(self.read('README.md'), 'MINE\n')
+                self.assertEqual(self.read('docs/new.md'), 'new\n')
+                self.assertFalse(os.path.exists(work_proof.git_path(
+                    self.wt, work_proof.FROZEN_MANIFEST)))
+                self.protect(False)
+                # a staged change that differs is refused too
+                self.git(self.wt, 'add', '--', 'README.md')
+                self.assertEqual(self.tool('origin/main')[0], 1)
+                self.assertEqual(self.read('README.md'), 'MINE\n')
+                # one staged as the merge's version is git's to take
+                self.write(self.wt, 'README.md', 'main\n')
+                self.git(self.wt, 'add', '--', 'README.md')
+                code, out = self.tool('origin/main')
+                self.assertEqual(code, 0, out)
+                self.assertEqual(self.head(), self.head('origin/main'))
 
 if __name__ == '__main__':
     unittest.main()

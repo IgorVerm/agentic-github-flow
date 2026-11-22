@@ -143,7 +143,11 @@ BLOCK += ["git -C /r stash drop # don't", "git -C /r tag -d v1 # it's gone",
           "cat <<\\EOF\n'\nEOF\necho ' # ' ; git -C r clean -fdx",
           'git ci --no-verify -m x', 'git -C r ci --no-verify -m x',
           'git -C r --attr-source HEAD clean -fdx', 'git --attr-source HEAD reset --hard',
-          'git --some-new-option HEAD clean -fdx', 'git -C r --no-pager clean -n']
+          'git --some-new-option HEAD clean -fdx', 'git -C r --no-pager clean -n',
+          # a comment inside backticks ends at the closing backtick (second review)
+          'echo `echo a #b` ; git -C r clean -fdx', 'x="`echo a # b`"; git -C r reset --hard',
+          # more unknown options than the guard reads both ways
+          'git ' + '-q ' * 16 + 'status']
 # Claude Code (--claude): exit 3 asks the user, 0 passes, 2 blocks (a block beats an earlier ask)
 ASK = ['git push origin main', 'git -C /r push origin main', 'git -C /r commit --amend --no-edit',
        'git update-ref refs/heads/x HEAD', 'git -C /r remote add up https://x', 'ssh box git push',
@@ -152,13 +156,15 @@ ASK = ['git push origin main', 'git -C /r push origin main', 'git -C /r commit -
        'git -c user.name=x -C /r commit -m x --amend', 'bash -lc "git -C /r push"',
        'echo "$(echo \'"\')\' # " ; git -C r push origin main',
        'git -C r --attr-source HEAD push origin main', 'git --some-new-option x push',
+       'echo `echo a #b` ; git -C r push origin main',
        'git -C /r commit -m "an open quote']  # what the guard cannot read is asked
 CLAUDE_PASS = ["# don't\ngit -C /r commit -F - <<'EOF'\nit's done # here\nEOF",
                'git -C /r commit -m "push it, then --amend"', 'git -C /r commit -m "--amend"',
                'git log --grep push', 'git -C /r remote -v', 'git -C /r status',
                'git -C /r commit --allow-empty -m "push, clean, update-ref"', 'git push --help',
                'git -C /r commit -m "$(echo \'a "clean" step\')" # don\'t push it', 'git --no-pager log -1',
-               "cat <<\\EOF\nit's # push\nEOF"]
+               "cat <<\\EOF\nit's # push\nEOF", 'git -P diff', 'git -C r -P log --grep clean',
+               'echo `date` # it\'s ; git push']
 
 
 def run(command):

@@ -153,8 +153,9 @@ def strip_comments(text):
         elif c == ')' and top == ')':
             stack.pop()
         elif c == '#' and (i == 0 or text[i - 1] in ' \t\n;&|()`'):
-            j = text.find('\n', i)
-            i = n if j < 0 else j
+            ends = [k for k in (text.find('\n', i), text.find('`', i) if '`' in stack else -1)
+                    if k >= 0]  # inside backticks a comment ends at the closing backtick
+            i = min(ends) if ends else n
             continue
         elif text.startswith('<<', i) and not text.startswith('<<<', i) and HEREDOC.match(text, i):
             m = HEREDOC.match(text, i)
@@ -368,8 +369,24 @@ def commit_flags(rest):
     return flags
 
 
+def unknown_options(args):
+    """How many options before the subcommand are in neither GIT_VALUE_OPTS nor GIT_FLAG_OPTS.
+    Each is judged both ways, which doubles the work, so more than MAX_UNKNOWN are refused
+    (git itself refuses them too)."""
+    i, count = 0, 0
+    while i < len(args) and args[i].startswith('-'):
+        count += args[i] not in GIT_VALUE_OPTS | GIT_FLAG_OPTS and '=' not in args[i]
+        i += 2 if args[i] in GIT_VALUE_OPTS else 1
+    return count
+
+
+MAX_UNKNOWN = 2
+
+
 def judge_git(args):
     """args: tokens after `git`. Return a reason string or None."""
+    if unknown_options(args) > MAX_UNKNOWN:
+        return 'uses git options the guard does not know'
     i, config = 0, []
     while i < len(args) and args[i].startswith('-'):
         opt = args[i]
@@ -492,6 +509,8 @@ ASKING = False  # set by judge_ask(): judge_command then reports ask_git() reaso
 
 def ask_git(args):
     """args: tokens after `git`. The reason the user is asked first (Claude Code), or None."""
+    if unknown_options(args) > MAX_UNKNOWN:
+        return 'uses git options the guard does not know'
     i = 0
     while i < len(args) and args[i].startswith('-'):
         opt = args[i]

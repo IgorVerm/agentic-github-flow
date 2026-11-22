@@ -197,8 +197,9 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
       changes) is more work of item 2.
    3. **After the merge:** the `cleanup-merged` skill for this chat's worktree, run from the
       primary checkout, and with the settings row `codex worker` then `codex_worker.py --sweep`
-      (method.md §4 *Codex as the worker* step 8), then a signed comment on the issue whose text after the signature opens
-      with `merged: #<number> at <merge commit>`, with what cleanup removed and kept.
+      (method.md §4 *Codex as the worker* step 8), then a signed comment on the issue whose
+      text after the signature opens with `merged: #<number> at <merge commit>`, with what
+      cleanup removed and kept.
    4. **Archive:** end your own live work (above), rerun the worktree check (`ok` once the
       worktree is gone or its commits are in the default branch), call `get_session "self"`, and
       `archive_session` with `session_id: "self"` and a short `reason`. No detach first: the CLI

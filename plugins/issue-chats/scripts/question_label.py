@@ -31,7 +31,7 @@ none. Per event:
 Known limits: two questions open on one issue at once lose the label at the first answer (the
 chat adds it again); a question asked in plain text, and an issue closed on github.com or by a
 command this hook does not parse, are not seen (cleanup-merged step 4 still removes the label at
-the close). Codex runs no such hooks.
+the close). The Codex worker's turns run no hooks (`codex_worker.py`).
 
 It never blocks for its own failures: no gh, no network, no repository -> pass silently, since a
 question to the user must always be possible. Deny is exit 2 with the reason on stderr; notes

@@ -54,8 +54,8 @@ The pages were read on 2026-10-30. None shows a version or a date.
 
 ## Where skills live
 
-In a repository, Claude Code reads a skill at `.claude/skills/<name>/SKILL.md`. A client that
-reads skills elsewhere gets the same folder through a symlink, so a skill is written once; its
-rules name the place. No client command checks a single skill's frontmatter (`claude plugin validate` checks a
+In a repository, Claude Code reads a skill at `.claude/skills/<name>/SKILL.md`. Where another
+client reads skills from another folder, one of the two is a symlink to the other, so a skill is
+written once; that client's rules say which. No client command checks a single skill's frontmatter (`claude plugin validate` checks a
 plugin's layout and passed malformed frontmatter when tried), so check it against the table
 above, and after changing a description, try the two requests in a fresh session of each client.

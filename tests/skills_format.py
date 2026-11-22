@@ -137,8 +137,8 @@ for name, folder in skills.items():  # Claude's skills carry no Codex text (#98)
         continue
     for base, _, files in os.walk(os.path.join(ROOT, folder)):
         for file in files:
-            with open(os.path.join(base, file), encoding='utf-8') as f:
-                if 'codex' in f.read().lower():
+            with open(os.path.join(base, file), 'rb') as f:  # a binary asset reads too
+                if b'codex' in f.read().lower():
                     fail(f'{folder}/{file} names Codex; it belongs in the codex plugin or '
                          'rules/codex.md, which only a Codex install loads')
 for link in LINK.findall(rules):

@@ -155,7 +155,7 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
    the issue is labelled `type:design-first`, housekeeping, the requirements stop), that it
    brings the landing branch in, during the work as at the landing, only with the core plugin's
    `merge_landing.py` (`ship-change` step 2), never a bare `git merge`, what a settings row of
-   another plugin changes for this issue (that plugin's skill says), that it pushes only on the user's yes, and that a question for the user that
+   another plugin changes for this issue (load the skill that owns that row), that it pushes only on the user's yes, and that a question for the user that
    the work waits on goes on the issue too, signed, with the question label, also when it is
    asked in plain text
    (method.md §4, *Questions for the user*).
@@ -199,8 +199,8 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
       in the turn of their word. A refusal for anything else (a red check, a review requesting
       changes) is more work of item 2.
    3. **After the merge:** the `cleanup-merged` skill for this chat's worktree, run from the
-      primary checkout, then what the skill of another plugin's settings row adds after a
-      cleanup, then a signed comment on the issue whose
+      primary checkout, then what the skill that owns another plugin's settings row adds after a
+      cleanup (load that skill), then a signed comment on the issue whose
       text after the signature opens with `merged: #<number> at <merge commit>`, with what
       cleanup removed and kept.
    4. **Archive:** end your own live work (above), rerun the worktree check (`ok` once the

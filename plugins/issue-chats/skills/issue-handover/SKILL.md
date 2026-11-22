@@ -151,9 +151,10 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
    `request_directory` with its path when a file tool refuses it; never the primary checkout.
    Then: the issue number and why it is next, its check, that this skill and method.md §4 step 1
    govern its start (read, check the claim, the design note when the claim names an overlap or
-   the issue is labelled `type:design-first`, housekeeping, the requirements stop), that it
-   pushes only on the user's yes, and that a question for the user that the work waits on goes
-   on the issue too, signed, with the question label, also when it is asked in plain text
+   the issue is labelled `type:design-first`, housekeeping, the requirements stop), that Codex
+   builds it when the issue carries the label of the settings row `codex worker` (method.md §4
+   *Codex as the worker*), that it pushes only on the user's yes, and that a question for the
+   user that the work waits on goes on the issue too, signed, with the question label, also when it is asked in plain text
    (method.md §4, *Questions for the user*).
 
    **The fallback** when the worktree tool, the start tool or the claim fails, or the message

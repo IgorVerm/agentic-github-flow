@@ -3,6 +3,54 @@
 Rulings of the maintainers named in `HANDOFF.md`, newest first, with their words. Detail lives on
 the linked issue.
 
+## Codex as the worker of a Claude issue chat, 2026-11-20
+
+**Decision (the maintainer):** the aim: "astra 6.2 is very good but apparently very bad at
+interfacing with humans. Is it possible to let the claude orchestrator also manage codex 6.2
+chats the same way it handles local chats for claude". After the source review and the trial of
+OpenAI's Codex plugin for Claude Code: "Meteen de issue-handover-route" (the issue-handover
+route right away, over a line in `docs/install.md`, an installer opt-in, or nothing). How the
+chat starts Codex: "codex exec direct" (over the plugin). The call outside Claude Code's
+sandbox: "Allow-regel voor dat commando" (an allow rule for that command, over asking each
+time). Commits: "Codex commit, Claude reviewt" (Codex commits, Claude reviews). Which issues:
+"we hebben al labels voor astra" (we already have labels for Astra). Asked against an own client
+on `codex app-server` that relays each approval: "codex exec houden, app-server later" (keep
+codex exec, the app-server client later, as its own issue).
+**What:** the settings row `codex worker` names a label and a Codex model; on an issue with that
+label the Claude issue chat stays the owner and hands the implementation to Codex through
+`plugins/issue-chats/scripts/codex_worker.py`, which runs `codex exec` in a job folder of its
+own under a permission profile: writable only that job, no network, a read deny list, approval
+`never`, with a time limit per turn. The script runs outside Claude Code's sandbox and therefore
+runs no git and opens no file that the chat or Codex wrote: the setup of a job, the reading of
+the prompt and the export of Codex's commits as a git bundle run inside Codex's sandbox
+(`codex_job.py`), and the chat imports the bundle inside its own (`codex_import.py`) and reviews
+it once before the push. The chat records the Codex thread id on the issue. The person allows
+that script alone and excludes it from the sandbox (`docs/install.md`); the team edition writes
+no allow rule. The plugin `openai/codex-plugin-cc` is not used.
+**Why:** measured on 2026-11-20: the plugin cannot run inside Claude Code's sandbox; it answers
+every approval request with an error; its app-server threads got write access to the person's
+whole projects folder; its `SessionEnd` hook drops the session's jobs; and its rescue agent may
+delegate unasked in every session. `codex exec` through one script needs no third-party
+dependency and fixes the sandbox per call. Five reviews of #105 each found git run outside every
+sandbox on a repository the chat or Codex could write; Codex's own process does the same on
+every turn (`git status` in its working folder). The maintainer on the clone design (#107): "ok
+maak de issue aan"; and on 2026-11-21, on reads, disk and who continues: "1 ok 2 nee het is
+specifiek voor pax het moet via de ontdubbelde worktree kunnen werken 3 akkoord laat fable
+kijken en indien nodig onderzoek doen": a measured read deny list for Codex is a condition to
+merge, a full checkout per issue and a size limit are refused (the job's files are APFS clones:
+pax_deorum, 13 GiB, costs 15.7 MiB), and the architecture was redone so that the class is gone
+instead of one more door closed. On what that read deny list must cover, after three reviews
+each found another source of Claude Code's read limits, the maintainer chose on 2026-11-21
+"(a)+(b)+(c), dan mergen": (a) a fixed floor, (b) the user's and the managed Claude Code
+settings, (c) the project settings of the worktree the worker is given; a project's read limits
+do not bind a chat that hands the worker another worktree, since the worker cannot know the
+chat's project. Codex commits in its job and Claude reviews after the import, so "Codex commit,
+Claude reviewt" holds.
+**Binds:** `plugins/issue-chats/skills/issue-handover/method.md` (§1 settings, §4 *Codex as the
+worker*), `SKILL.md` (the start brief), `plugins/issue-chats/scripts/codex_worker.py`,
+`codex_job.py` and `codex_import.py` beside it, `tests/codex_worker.py`, `docs/install.md`.
+**Detail:** issues #103, #107.
+
 ## Signatures name the model, 2026-11-19
 
 **Decision (the maintainer):** "bijkomend wil ik dat elke github issue niet enkel signed is als

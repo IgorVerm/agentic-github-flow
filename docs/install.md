@@ -303,6 +303,70 @@ is unmeasured on Linux and refused on Windows. The full list of what a chain nee
 `issue-handover` skill's [method.md](../plugins/issue-chats/skills/issue-handover/method.md),
 §7.
 
+### Codex as the worker (issue chats, opt-in per repository)
+
+A repository whose `## Issue chats settings` has the row `codex worker` (a label, a Codex model
+and optionally a time limit per turn) lets a Claude issue chat hand the implementation of an
+issue with that label to Codex, while the chat keeps the issue, the questions to the person, the
+review and the push (method.md §4 *Codex as the worker*). Codex must be installed and logged in
+(`codex login`); the route runs on macOS only, the one system its read deny list is measured
+on. The chat runs Codex through one script, which fixes Codex's sandbox and never passes a
+`--dangerously-*` option:
+
+- **Writes:** only a job folder of the script's own under
+  `~/.cache/agentic-github-flow/codex-worker/`, never the chat's repository. Its files are
+  copy-on-write clones of the worktree's and cost no disk.
+- **Reads:** the disk, except all of `~/.claude`, `~/.ssh`, `~/.aws`, `~/.netrc`, `~/.gnupg`,
+  `~/.config/gh`, Claude Code's folders under `/private/tmp`, and any `.env`, `.env.*`, `*.pem`,
+  `*.key` or `*.p12` file, plus, read at each run, every `Read(...)` deny rule and
+  `sandbox.filesystem.denyRead` entry of `~/.claude/settings.json`, the managed settings and the
+  project's `.claude/settings.json` and `settings.local.json` in the worktree the worker is
+  given. The floor and the person's own settings hold for every run; a project's read limits
+  bind only a run on that project's worktree, not a chat that hands the worker another one. A
+  deny rule must be written as `**/name`, `~/path` or `//path`, a denyRead entry as `~/path`,
+  `//path` or, in the person's own settings, `/path` (each with an optional trailing `/**`);
+  another form refuses the run, as do `sandbox.credentials`,
+  `permissions.blockReadsOutsideWorkingDirectories`, a plugin copy under `~/.claude`, and a
+  settings source the script does not read: an MDM profile (`com.anthropic.claudecode.plist`
+  under `/Library/Managed Preferences`), server-managed settings
+  (`~/.claude/remote-settings.json`), or `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_MANAGED_SETTINGS_PATH`
+  or `CLAUDE_CODE_REMOTE_SETTINGS_PATH` set. A session started with `--settings <file>` can add
+  read limits the script cannot see. Everything else Codex may read can go to OpenAI: send it no work on a machine whose files may
+  not.
+- **No network**, approval `never`, a time limit per turn, after which the script kills what is
+  left of it.
+- **The person's Codex configuration does not apply in these turns** (`~/.codex/config.toml`,
+  its rules, MCP servers and hooks), because each can run a command outside Codex's sandbox.
+  **Nor do the ChatGPT account's apps (connectors) and Codex plugins:** they are on whenever
+  Codex is logged in with ChatGPT, whatever the configuration, and their tools run outside
+  Codex's sandbox with the account's connections, so the script turns them off for each turn.
+
+The script itself runs outside Claude Code's sandbox (Codex needs the network and writes
+`~/.codex`). It therefore runs no git and opens no file that the chat or Codex wrote: the setup
+of a job, the reading of the prompt and the export of Codex's commits as a git bundle all run
+inside Codex's sandbox, and the chat imports the bundle inside its own with `codex_import.py`,
+which refuses submodules, hooks and hook managers' files, and changes to `.claude/`,
+`.codex/`, `.agents/`, `.mcp.json`, `CLAUDE.md`, `AGENTS.md` and `AGENTS.override.md`, and runs
+no hook while it fast-forwards. It takes no program to run (`codex` and `python3` come from
+PATH). Three conditions are the person's: Claude Code's sandbox must not make
+`~/.cache/agentic-github-flow`, the installed plugin folder or a folder on PATH before `codex`'s
+and `python3`'s writable, and the rule below is spelled with `-I`, so that Python reads no
+`PYTHONPATH`. On the person's yes, allow that script alone and exclude it from the sandbox, in
+each spelling the agents use, never `codex exec` or `codex sandbox` itself and never
+`codex_import.py` or `codex_job.py`:
+
+```json
+"Bash(python3 -I ~/.agentic-github-flow/plugins/issue-chats/scripts/codex_worker.py *)"
+```
+
+and in `sandbox.excludedCommands`
+`"python3 -I ~/.agentic-github-flow/plugins/issue-chats/scripts/codex_worker.py *"`. Without them
+each Codex turn asks. Codex's work counts against the person's Codex usage limits. OpenAI's
+Codex plugin for Claude Code (`openai/codex-plugin-cc`) was reviewed and tried for this (#103)
+and is not used: it does not run inside the sandbox either, answers every approval with an
+error, may delegate to Codex unasked in every session, and drops its jobs when the session
+ends.
+
 ### Worktree clones on macOS
 
 Each task gets its own worktree, made by the core plugin's `new_worktree.py`. On macOS (APFS)

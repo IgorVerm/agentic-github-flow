@@ -65,7 +65,7 @@ The skills read their values from it; a row left out takes its default:
 | start reading | what every chat reads at its start besides its issue: named sections, the repository's reading map | none |
 | ready extras | what the repository adds to the definition of ready of the `requirements` skill | none |
 | start extras, hand-over extras | repository steps at a chat's start and before it ends | none |
-| codex worker | the label that hands an issue's implementation to Codex, the Codex model, then optionally the time limit of a turn in minutes (a number) and the reasoning effort (`minimal`, `low`, `medium`, `high` or `xhigh`), either or both, told apart by their form, each in backticks (`` `astra`, `gpt-6.2-astra`, `90`, `xhigh` `` or `` `astra`, `gpt-6.2-astra`, `xhigh` ``; §4 *Codex as the worker*) | off: the Claude chat does the work itself; the time limit 60; no effort: the model's own |
+| codex worker | the label that hands an issue's implementation to Codex, the Codex model, then optionally the time limit of a turn in minutes (a number) and the reasoning effort (`minimal`, `low`, `medium`, `high`, `xhigh` or `max`; not every model takes every value), either or both, told apart by their form, each in backticks (`` `astra`, `gpt-6.2-astra`, `90`, `xhigh` `` or `` `astra`, `gpt-6.2-astra`, `xhigh` ``; §4 *Codex as the worker*) | off: the Claude chat does the work itself; the time limit 60; no effort: the model's own |
 
 **Chains at once is not a repository setting:** at most five issue chats work at the same time
 in a repository, counted with those already working. A chat whose branch waits for the push,

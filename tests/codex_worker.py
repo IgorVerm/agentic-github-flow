@@ -17,8 +17,9 @@ own git finding a repository in its working folder; a filter the chat planted in
 or one Codex planted in its git folder, running outside a sandbox; a process an old job left
 behind reaching a fresh job; Codex started for a primary checkout, a detached HEAD or a dirty
 worktree, with a model, a thread id or a time limit that is not a plain value, with an effort
-outside Codex's closed list (or the effort missing from a new turn or a resume), with a prompt
-that is empty, missing or a FIFO; a dangerous option, the person's configuration or rules, a
+outside the worker's closed list; an effort given that does not reach a new turn or a resume, or
+an effort sent without one being given; Codex started with a prompt that is empty, missing or a
+FIFO; a dangerous option, the person's configuration or rules, a
 hook, the shell snapshot, apps or plugins, the network, a wider writable folder or a missing
 read denial reaching `codex` (also one of the person's Read deny rules); a Read deny rule the
 profile cannot express, unreadable settings or a worker installed where Codex may not read
@@ -350,7 +351,7 @@ def main():
             result = run(args)
             check(name, result.returncode == 2, 'exit %d: %s' % (result.returncode, result.stderr))
             check(name + ' (codex exec not started)', not os.path.exists(log))
-        for value in ('max', 'XHIGH', '', 'high ', 'xhigh"',
+        for value in ('ultra', 'XHIGH', '', 'high ', 'xhigh"',
                       '--dangerously-bypass-approvals-and-sandbox'):
             usage('effort %r refused' % value, [wt] + good + ['--effort=' + value])
         usage('effort with the export refused', [wt, '--export', '--effort', 'high'])
@@ -573,7 +574,9 @@ def main():
               actions == ['settings', 'prompt', 'setup'], str(actions))
         for called in sandboxed:
             inner = [called['argv'][i + 1] for i, v in enumerate(called['argv']) if v == '-c']
-            expected = list(configs[2:5])
+            profile = [c for c in configs if not c.startswith(('model_reasoning_effort=',
+                                                               'approval_policy='))]
+            expected = profile[:3]
             if called['argv'][called['argv'].index('--') + 4] == 'settings':
                 # Read before the project's rules are known: the profile without them.
                 for entry in (', "/**/.secretrc" = "deny"',
@@ -588,14 +591,14 @@ def main():
                   called['argv'][called['argv'].index('--') + 2] == '-I', str(called))
 
         # A resume in the same job.
-        result = run([wt] + good + ['--resume', THREAD, '--effort', 'high'])
+        result = run([wt] + good + ['--resume', THREAD, '--effort', 'max'])
         call = json.load(open(log))
         argv = call['argv']
         check('resume exits 0', result.returncode == 0, result.stderr)
         configs = [argv[i + 1] for i, v in enumerate(argv) if v == '-c']
         check('the effort reaches a resume',
               [c for c in configs if c.startswith('model_reasoning_effort')] ==
-              ['model_reasoning_effort="high"'] and report_of(result).get('effort') == 'high',
+              ['model_reasoning_effort="max"'] and report_of(result).get('effort') == 'max',
               str(configs))
         check('resume passes the thread', argv[:3] == ['exec', 'resume', THREAD], str(argv))
         check('resume keeps the profile and the job',

@@ -82,12 +82,15 @@ and the prompt file (a plain file of at most 1 MiB, not empty).
 **A turn** is one `codex exec` (or `codex exec resume <thread id>`) in `<job>/work`, the prompt
 on stdin after a fixed note on the git setup, in a process session of its own, with a time limit
 (`--time-limit`, default 60 minutes). `--effort` sets Codex's reasoning effort for the turn, one
-of `minimal`, `low`, `medium`, `high` and `xhigh` (any other value exits 2): since the person's
-configuration is ignored, without it a turn runs at the model's own default (issue #112). It is
-passed on every turn it is given, a resume too: a resume does not keep the effort of the turn
-before it (measured 2026-11-22 with 0.171.0-alpha.13: `turn_context.effort` in Codex's session
-file under `~/.codex/sessions` read `xhigh`, then null on a resume without it, then `xhigh` on
-one with it; `--json` events do not carry it):
+of `minimal`, `low`, `medium`, `high`, `xhigh` and `max` (any other value exits 2): since the
+person's configuration is ignored, without it a turn runs at the model's own default (issue
+#112; `low` for gpt-6.2-astra in Codex's model catalog, which lists `low` to `max` and `ultra`
+for it, not `minimal`). `ultra` ("automatic task delegation") is left out until its sub-agents
+are measured under the profile. The effort is passed on every turn it is given, a resume too: a
+resume does not keep the effort of the turn before it (measured 2026-11-22 with
+0.171.0-alpha.13 and gpt-6.2-astra: `turn_context.effort` in Codex's session file under
+`~/.codex/sessions` read `xhigh`, then null on a resume without it, then `xhigh`, then `max` on
+resumes with it; `--json` events do not carry it):
 
   codex exec [resume <thread id>] --json -o <last message> -m <model>
              --skip-git-repo-check --ignore-user-config --ignore-rules
@@ -173,7 +176,7 @@ except ImportError:  # Windows: refused in main
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 JOB_TOOL = os.path.join(HERE, 'codex_job.py')
-EFFORTS = ('minimal', 'low', 'medium', 'high', 'xhigh')  # Codex's reasoning efforts (#112)
+EFFORTS = ('minimal', 'low', 'medium', 'high', 'xhigh', 'max')  # Codex's efforts (#112)
 MODEL_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
 THREAD_RE = re.compile(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
 SHA_RE = re.compile(r'^[0-9a-f]{40}([0-9a-f]{24})?$')

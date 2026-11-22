@@ -14,7 +14,8 @@ the chat whose claim it hands over in the worktree in flight or keeps another (#
 unreadable, a title without its GitHub issue or the repository prefix, a refused value reaching
 `claude --bg`, a session left running after a failure, or a chat opened in the app before its
 background run stopped, or a chat opened although it never answered the ready prompt or answered
-on another model than --model. On Windows, where the tool knows no form of `script`, it checks only
+on another model than --model; or the issue's labels not recorded for the context limit (#82),
+on a start and on a hand-over. On Windows, where the tool knows no form of `script`, it checks only
 that the tool refuses before starting anything. Offline.
 """
 import json
@@ -133,6 +134,14 @@ sh('git', 'worktree', 'add', '-q', '-b', 'agent/next', wt, cwd=primary)
 failures = []
 CASES = SKIPPED = 0
 NOTES = os.path.join(tmp, 'handovers')
+RECORDS = os.path.join(tmp, 'context-limits')
+
+
+def records():
+    """The label records the run left: [record]."""
+    if not os.path.isdir(RECORDS):
+        return []
+    return [json.load(open(os.path.join(RECORDS, n))) for n in os.listdir(RECORDS)]
 
 
 def notes():
@@ -174,10 +183,11 @@ def case(name, expect_code, *, args=None, logged_in=True, others=(), bg_status='
     config = os.path.join(tmp, 'config')
     shutil.rmtree(config, ignore_errors=True)
     shutil.rmtree(NOTES, ignore_errors=True)
+    shutil.rmtree(RECORDS, ignore_errors=True)
     env = dict(GENV, PATH=bindir + os.pathsep + os.environ['PATH'], STUB_STATE=state,
                AGENTIC_GITHUB_FLOW_GH=GH_CMD, CLAUDE_CODE_SESSION_ID='me', CLAUDE_EFFORT='high',
                CLAUDE_CONFIG_DIR=config, AGENTIC_GITHUB_FLOW_START_WAIT_S='8',
-               AGENTIC_GITHUB_FLOW_HANDOVER_STATE=NOTES)
+               AGENTIC_GITHUB_FLOW_HANDOVER_STATE=NOTES, AGENTIC_GITHUB_FLOW_LIMIT_RECORDS=RECORDS)
     env.pop('CLAUDE_CODE_HOST_SESSION_ID', None)
     env.update(env_extra or {})
     argv = args if args is not None else [wt, '#12 · next', '--model', 'claude-opus-5-5']
@@ -372,6 +382,31 @@ else:
          gh=claimed(OLD_CLAIM), others=old_in_wt('idle'), cwd=primary,
          check=lambda log, out: nothing_started(log, out) or no_note(log, out))
     case('a plain start notes no hand-over', 0, check=lambda log, out: order_ok(log, out) or no_note(log, out))
+
+    def recorded(*labels):
+        def check(log, out):
+            got = records()
+            want = [{'worktree': os.path.realpath(wt), 'issue': 12, 'labels': sorted(labels)}]
+            if [{k: r.get(k) for k in ('worktree', 'issue', 'labels')} for r in got] != want:
+                return 'records %s, want %s' % (got, want)
+            gh = next(c for c in log if c[0] == 'gh')
+            if 'labels' not in gh[gh.index('--json') + 1].split(','):
+                return 'labels not read in the one gh call: %s' % gh
+            return order_ok(log, out)
+        return check
+
+    LABELLED = {'state': 'OPEN', 'assignees': [],
+                'labels': [{'name': 'work: model'}, {'name': 'agent-ready'}]}
+    case('a start records the issue\'s labels for the context limit', 0, gh=LABELLED,
+         check=recorded('work: model', 'agent-ready'))
+    case('an unlabelled issue is recorded without labels', 0, check=recorded())
+    case('a hand-over records the labels anew for its successor', 0, args=HANDOVER,
+         gh=dict(claimed(OLD_CLAIM), labels=[{'name': 'work: animation'}]),
+         others=old_in_wt('busy'), env_extra={'CLAUDE_CODE_SESSION_ID': OLD},
+         check=recorded('work: animation'))
+    case('a refused start records nothing', 1, gh={'state': 'CLOSED', 'assignees': []},
+         check=lambda log, out: nothing_started(log, out) or (
+             'records %s' % records() if records() else None))
 
     def unsure_with_id(log, out):
         if not out.strip().startswith('unsure:') or 'nothing started' in out:

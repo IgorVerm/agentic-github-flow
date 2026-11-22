@@ -16,8 +16,10 @@ Each case exposes one way the route could go wrong: the worker itself running gi
 own git finding a repository in its working folder; a filter the chat planted in its repository,
 or one Codex planted in its git folder, running outside a sandbox; a process an old job left
 behind reaching a fresh job; Codex started for a primary checkout, a detached HEAD or a dirty
-worktree, with a model, a thread id or a time limit that is not a plain value, with a prompt
-that is empty, missing or a FIFO; a dangerous option, the person's configuration or rules, a
+worktree, with a model, a thread id or a time limit that is not a plain value, with an effort
+outside the worker's closed list; an effort given that does not reach a new turn or a resume, or
+an effort sent without one being given; Codex started with a prompt that is empty, missing or a
+FIFO; a dangerous option, the person's configuration or rules, a
 hook, the shell snapshot, apps or plugins, the network, a wider writable folder or a missing
 read denial reaching `codex` (also one of the person's Read deny rules); a Read deny rule the
 profile cannot express, unreadable settings or a worker installed where Codex may not read
@@ -26,8 +28,10 @@ process the turn left behind still running after it; a turn past its time limit 
 not reported; rewritten history exported; the import taking a bundle behind a link, a submodule,
 a `.claude` or `.codex` file, a `.mcp.json`, a nested `CLAUDE.md`, an `AGENTS.md`, a link that
 moves the hooks path (also in the middle of a chain of links), a merge, or a bundle whose head
-does not descend from HEAD; a job folder whose worktree is gone left behind; a system the read
-deny list is not measured on accepted. On Windows only the refusals run. Offline.
+does not descend from HEAD; a job folder whose worktree is gone left behind, with its logs, at
+the next run or by `--sweep`; `--sweep` starting codex or git, following a link out of a job, or
+removing a live or a locked job, also after a refused `--fresh`; a system the read deny list is
+not measured on accepted. On Windows only the refusals run. Offline.
 """
 import json
 import os
@@ -339,6 +343,19 @@ def main():
         refused('thread id not an id', [wt] + good + ['--resume', 'last'])
         refused('time limit zero', [wt] + good + ['--time-limit', '0'])
         refused('time limit over a day', [wt] + good + ['--time-limit', '1441'])
+
+        # The effort is a closed list of plain values: anything else is a usage error (exit 2).
+        def usage(name, args):
+            if os.path.exists(log):
+                os.remove(log)
+            result = run(args)
+            check(name, result.returncode == 2, 'exit %d: %s' % (result.returncode, result.stderr))
+            check(name + ' (codex exec not started)', not os.path.exists(log))
+        for value in ('ultra', 'XHIGH', '', 'high ', 'xhigh"',
+                      '--dangerously-bypass-approvals-and-sandbox'):
+            usage('effort %r refused' % value, [wt] + good + ['--effort=' + value])
+        usage('effort with the export refused', [wt, '--export', '--effort', 'high'])
+        usage('effort with the sweep refused', ['--sweep', '--effort', 'high'])
         check('no --codex-bin option', run([wt] + good + ['--codex-bin', 'x']).returncode == 2)
         check('--export takes no model', run([wt, '--export'] + good).returncode == 2)
         check('--fresh with --resume is usage', run([wt] + good + ['--fresh', '--resume', THREAD])
@@ -445,9 +462,11 @@ def main():
                    if n.startswith(('job-', 'gone-', 'report-'))])
         gitdir = os.path.realpath(git(wt, 'rev-parse', '--absolute-git-dir'))
         before = git(wt, 'rev-parse', 'HEAD')
-        # A job folder whose worktree is gone goes at the next run.
-        orphan = os.path.join(jobs, 'orphan')
+        # A job folder whose worktree is gone goes at the next run, with its logs.
+        orphan = os.path.join(jobs, '0123456789abcdef')
         os.makedirs(os.path.join(orphan, 'job-x'))
+        os.makedirs(os.path.join(orphan, 'logs'))
+        open(os.path.join(orphan, 'logs', 'old.jsonl'), 'w').close()
         with open(os.path.join(orphan, 'state.json'), 'w') as f:
             json.dump({'worktree': os.path.join(base, 'gone')}, f)
 
@@ -455,7 +474,8 @@ def main():
         for path in (git_log, sandbox_log):
             if os.path.exists(path):
                 os.remove(path)
-        result = run([wt] + good, GIT_DIR=os.path.join(primary, '.git'), GIT_WORK_TREE=primary)
+        result = run([wt] + good + ['--effort', 'xhigh'], GIT_DIR=os.path.join(primary, '.git'),
+                     GIT_WORK_TREE=primary)
         check('commit run exits 0', result.returncode == 0, result.stderr + result.stdout)
         report = report_of(result)
         call = json.load(open(log))
@@ -480,6 +500,10 @@ def main():
             check('option %s' % option, option in argv, str(argv))
         configs = [argv[i + 1] for i, v in enumerate(argv) if v == '-c']
         check('approval never', 'approval_policy="never"' in configs, str(configs))
+        check('the effort reaches a new turn',
+              [c for c in configs if c.startswith('model_reasoning_effort')] ==
+              ['model_reasoning_effort="xhigh"'], str(configs))
+        check('report effort', report.get('effort') == 'xhigh', str(report))
         check('the profile is selected', 'default_permissions="agf_codex_worker"' in configs)
         check('no network', 'permissions.agf_codex_worker.network.enabled=false' in configs)
         for feature in ('hooks', 'shell_snapshot', 'apps', 'plugins',
@@ -533,8 +557,8 @@ def main():
               os.access(os.path.join(work, 'tools', 'run.sh'), os.X_OK))
         check('a job folder whose worktree is gone is removed', not os.path.exists(orphan))
         events = report.get('events', '')
-        check('event log outside what Codex writes',
-              os.path.dirname(events) == os.path.dirname(jobs)
+        check('event log beside the jobs, outside what Codex writes',
+              os.path.dirname(events) == os.path.join(os.path.dirname(job), 'logs')
               and not any(events.startswith(r) for r in folders + [wt]), events)
         check('no prompt copy left', not [n for n in os.listdir(os.path.dirname(events))
                                           if n.endswith('.prompt.txt')])
@@ -550,7 +574,9 @@ def main():
               actions == ['settings', 'prompt', 'setup'], str(actions))
         for called in sandboxed:
             inner = [called['argv'][i + 1] for i, v in enumerate(called['argv']) if v == '-c']
-            expected = list(configs[1:4])
+            profile = [c for c in configs if not c.startswith(('model_reasoning_effort=',
+                                                               'approval_policy='))]
+            expected = profile[:3]
             if called['argv'][called['argv'].index('--') + 4] == 'settings':
                 # Read before the project's rules are known: the profile without them.
                 for entry in (', "/**/.secretrc" = "deny"',
@@ -565,10 +591,15 @@ def main():
                   called['argv'][called['argv'].index('--') + 2] == '-I', str(called))
 
         # A resume in the same job.
-        result = run([wt] + good + ['--resume', THREAD])
+        result = run([wt] + good + ['--resume', THREAD, '--effort', 'max'])
         call = json.load(open(log))
         argv = call['argv']
         check('resume exits 0', result.returncode == 0, result.stderr)
+        configs = [argv[i + 1] for i, v in enumerate(argv) if v == '-c']
+        check('the effort reaches a resume',
+              [c for c in configs if c.startswith('model_reasoning_effort')] ==
+              ['model_reasoning_effort="max"'] and report_of(result).get('effort') == 'max',
+              str(configs))
         check('resume passes the thread', argv[:3] == ['exec', 'resume', THREAD], str(argv))
         check('resume keeps the profile and the job',
               'default_permissions="agf_codex_worker"' in argv and
@@ -624,6 +655,10 @@ def main():
         result = run([wt] + good + ['--fresh'], STUB_MODE='retry')
         check('an error event before turn.completed is no failure', result.returncode == 0,
               result.stdout)
+        argv = json.load(open(log))['argv']
+        check('no effort without --effort: the model\'s own',
+              not [v for v in argv if 'reasoning_effort' in v] and
+              'effort' in report_of(result) and report_of(result)['effort'] is None, str(argv))
         check('--fresh makes a new job and removes the old one',
               report_of(result).get('job') not in (None, job) and not os.path.exists(job),
               result.stdout)
@@ -791,6 +826,93 @@ def main():
         check('its export works', result.returncode == 0, result.stdout + result.stderr)
         check('the chat\'s planted filter ran, inside the sandbox only',
               lines_of(planted) and set(lines_of(planted)) == {'1'}, str(lines_of(planted)))
+
+        # --sweep (#111): a gone worktree's folder goes with its jobs and logs; a live or a locked
+        # one stays; no codex and no git start; a link inside a job is not followed.
+        def key_folder(key, worktree, logs):
+            folder = os.path.join(jobs, key)
+            os.makedirs(os.path.join(folder, 'job-' + '0' * 32, 'work'))
+            os.makedirs(os.path.join(folder, 'logs'))
+            for number in range(logs):
+                open(os.path.join(folder, 'logs', '%d.jsonl' % number), 'w').close()
+            with open(os.path.join(folder, 'state.json'), 'w') as f:
+                json.dump({'worktree': worktree}, f)
+            return folder
+
+        removed_wt = os.path.join(base, 'removed-wt')
+        gone_key = key_folder('a' * 16, removed_wt, 3)
+        outside = os.path.join(base, 'outside')
+        os.makedirs(outside)
+        open(os.path.join(outside, 'keep.txt'), 'w').close()
+        os.symlink(outside, os.path.join(gone_key, 'job-' + '0' * 32, 'work', 'link'))
+        live_key = key_folder('b' * 16, wt, 1)
+        locked_wt = os.path.join(base, 'locked-wt')
+        locked_key = key_folder('c' * 16, locked_wt, 1)
+        stray = os.path.join(jobs, 'gone-' + 'd' * 32)
+        os.makedirs(os.path.join(stray, 'job-x'))
+        worker_folder = os.path.dirname(jobs)
+        old_log = os.path.join(worker_folder, '20250101T000000000000Z.jsonl')
+        new_log = os.path.join(worker_folder, '20261122T000000000000Z.jsonl')
+        for path in (old_log, new_log):
+            open(path, 'w').close()
+        os.utime(old_log, (1, 1))
+        for path in (log, sandbox_log):
+            if os.path.exists(path):
+                os.remove(path)
+        git_calls = len(lines_of(git_log))
+        holder = subprocess.Popen(
+            [sys.executable, '-c', 'import fcntl, sys, time\nh = open(sys.argv[1], "a")\n'
+             'fcntl.flock(h, fcntl.LOCK_EX)\nprint("held", flush=True)\ntime.sleep(60)',
+             os.path.join(locked_key, 'lock')], stdout=subprocess.PIPE, text=True)
+        try:
+            holder.stdout.readline()
+            result = run(['--sweep'])
+        finally:
+            holder.kill()
+            holder.wait()
+            holder.stdout.close()
+        report = report_of(result)
+        check('--sweep exits 0', result.returncode == 0 and report.get('status') == 'swept',
+              result.stdout + result.stderr)
+        check('--sweep removes a gone worktree\'s folder, jobs and logs',
+              not os.path.lexists(gone_key) and
+              {'worktree': removed_wt, 'logs': 3} in report.get('removed', []), str(report))
+        check('--sweep follows no link', os.path.exists(os.path.join(outside, 'keep.txt')))
+        check('--sweep keeps a job whose worktree exists',
+              os.path.isdir(os.path.join(live_key, 'job-' + '0' * 32)) and
+              os.listdir(os.path.join(live_key, 'logs')) == ['0.jsonl'] and
+              report.get('kept', 0) >= 3, str(report))
+        check('--sweep keeps a locked job', os.path.isdir(locked_key) and
+              report.get('busy') == [locked_wt], str(report))
+        check('--sweep removes what an interrupted sweep left', not os.path.lexists(stray))
+        check('--sweep removes old loose logs only', not os.path.exists(old_log) and
+              os.path.exists(new_log) and report.get('old_logs') == 1, str(report))
+        check('--sweep starts no codex', not os.path.exists(log) and
+              not os.path.exists(sandbox_log))
+        check('--sweep runs no git', len(lines_of(git_log)) == git_calls)
+        result = run(['--sweep'])
+        check('a sweep after the run ends removes the locked job', result.returncode == 0 and
+              not os.path.lexists(locked_key) and
+              report_of(result).get('removed') == [{'worktree': locked_wt, 'logs': 1}],
+              result.stdout + result.stderr)
+        # A --fresh that is refused after it retired the job leaves the worktree recorded, so a
+        # sweep keeps its folder and its logs while the worktree exists.
+        import hashlib
+        wt_key = os.path.join(jobs, hashlib.sha256(os.fsencode(wt)).hexdigest()[:16])
+        wt_logs = sorted(os.listdir(os.path.join(wt_key, 'logs')))
+        refused('a refused --fresh', [wt, '--model', 'm', '--prompt-file', empty, '--fresh'])
+        result = run(['--sweep'])
+        check('a sweep after a refused --fresh keeps the live worktree\'s folder and logs',
+              result.returncode == 0 and wt_logs and os.path.isdir(os.path.join(wt_key, 'logs'))
+              and sorted(os.listdir(os.path.join(wt_key, 'logs'))) == wt_logs and
+              report_of(result).get('removed') == [], result.stdout + str(wt_logs))
+        os.remove(new_log)
+        shutil.rmtree(live_key)
+        check('--sweep takes no worktree', run(['--sweep', wt]).returncode == 2)
+        check('--sweep takes no model', run(['--sweep', '--model', 'm']).returncode == 2)
+        check('--sweep takes no empty model', run(['--sweep', '--model', '']).returncode == 2)
+        check('--sweep takes no time limit', run(['--sweep', '--time-limit', '5']).returncode == 2)
+        check('a turn needs a worktree', run(good).returncode == 2)
     finally:
         shutil.rmtree(base, ignore_errors=True)
 

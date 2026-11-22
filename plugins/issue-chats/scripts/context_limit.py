@@ -28,7 +28,9 @@ Where the values come from, per tool call without a network call:
                  hand-over writes it anew). A chat started some other way has none; the hook
                  then reads the labels once with `gh issue view` and records them for later
                  sessions in that worktree. No answer: the default. A label added after the start
-                 counts from the next session (a hand-over).
+                 counts once start_issue_chat.py writes the record anew (a hand-over, a new
+                 start); a record the hook wrote stays until then.
+Cost: the hook runs at PreToolUse and PostToolUse, so a tool call pays two git calls.
 The records live in ~/.cache/agentic-github-flow/context-limits (AGENTIC_GITHUB_FLOW_LIMIT_RECORDS
 replaces it), outside CLAUDE_PLUGIN_DATA, which start_issue_chat.py does not get.
 
@@ -80,7 +82,9 @@ from question_label import chat_issue, state_dir  # noqa: E402
 
 DEFAULT_LIMIT = 300_000
 RECORDS_ENV = "AGENTIC_GITHUB_FLOW_LIMIT_RECORDS"
-LABEL_LIMIT = re.compile(r"label\s+`([^`]+)`\s*:?\s*`?([^`;|]*)`?", re.I)
+# `label `a`: `600k`` or `labels `a`, `b`: `600k``: the labels, then the colon and the count.
+LABEL_LIMIT = re.compile(r"labels?\s+((?:`[^`]+`[\s,]*(?:and\s+|or\s+)?)+?)\s*:\s*`?([^`;|]*)`?",
+                         re.I)
 STEP = 25_000          # a further note per this much growth past the limit
 TAIL = 512 * 1024      # bytes read from the transcript's end; once more at 8x when nothing is found
 ASK = "AskUserQuestion"
@@ -116,7 +120,8 @@ def limits_in(cell: str | None) -> tuple[int, dict[str, int]]:
     for m in LABEL_LIMIT.finditer(cell):
         n = tokens(m.group(2))
         if n:
-            per[m.group(1).strip().lower()] = n
+            for name in re.findall(r"`([^`]+)`", m.group(1)):
+                per[name.strip().lower()] = n
     first = LABEL_LIMIT.search(cell)
     return tokens(cell[:first.start()] if first else cell) or DEFAULT_LIMIT, per
 
@@ -128,13 +133,20 @@ def limit_of(default: int, per: dict[str, int], labels) -> int:
 
 
 def git_out(top: str, *args: str) -> str | None:
-    p = subprocess.run(["git", "-C", top, *args], stdin=subprocess.DEVNULL,
-                       capture_output=True, text=True, timeout=10)
+    """git's output as UTF-8 (HANDOFF.md, also where the locale is cp1252), None on any failure:
+    the settings then fall back to the default, never to no limit."""
+    try:
+        p = subprocess.run(["git", "-C", top, *args], stdin=subprocess.DEVNULL,
+                           capture_output=True, encoding="utf-8", errors="replace", timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
     return p.stdout if p.returncode == 0 else None
 
 
 def settings_refs(top: str) -> list[str]:
-    """origin's default branch and the local branch of the same name, as settings_text finds them."""
+    """Pairs of origin's default branch and the local branch of the same name: origin/HEAD's
+    target, else main, then master (next_issue.settings_text tries the four in another order,
+    which differs only where origin lacks main but has master and local main exists)."""
     head = (git_out(top, "symbolic-ref", "-q", "refs/remotes/origin/HEAD") or "").strip()
     if head.startswith("refs/remotes/origin/"):
         return [head, "refs/heads/" + head[len("refs/remotes/origin/"):]]

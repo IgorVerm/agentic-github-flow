@@ -257,6 +257,16 @@ class ContextLimit(unittest.TestCase):
         self.assertEqual(limits_in("`250k`; label `big`: `1M`; label `odd`: `x`"),
                          (250_000, {'big': 1_000_000}))
         self.assertEqual(limits_in("label `big`: `500k`"), (300_000, {'big': 500_000}))
+        self.assertEqual(limits_in("`300k`; labels `work: model`, `work: animation`: `600k`"),
+                         (300_000, {'work: model': 600_000, 'work: animation': 600_000}))
+        self.assertEqual(limits_in("`300k`; label `a` and `b`: `400k`; label `c`: `0.5M`"),
+                         (300_000, {'a': 400_000, 'b': 400_000, 'c': 500_000}))
+
+    def test_git_failing_falls_back_to_the_default(self):
+        sys.path.insert(0, SCRIPTS)
+        from context_limit import git_out, settings_now
+        self.assertIsNone(git_out(os.path.join(self.tmp.name, 'nowhere'), 'status'))
+        self.assertEqual(settings_now(os.path.join(self.tmp.name, 'nowhere'), {}), (300_000, {}))
 
     def test_a_labelled_issue_gets_its_label_limit_from_the_record(self):
         repo = self.per_label_repo()
@@ -349,7 +359,7 @@ class ContextLimit(unittest.TestCase):
         git(repo, 'checkout', '-q', 'agent/5-x')
         self.assertIn('limit (200k)', self.post(cwd=repo, session='chg1')[1])
 
-    def test_a_session_begun_under_the_previous_hook_keeps_its_limit(self):
+    def test_a_session_begun_under_the_previous_hook_is_still_limited(self):
         os.makedirs(self.state, exist_ok=True)
         with open(os.path.join(self.state, 'oldsess.json'), 'w') as f:
             json.dump({'issue': 7, 'limit': 300_000}, f)  # the state the hook of #77 wrote

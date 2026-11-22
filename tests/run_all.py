@@ -19,7 +19,7 @@ TESTS = ['skills_format.py', 'repo_checks.py', 'claude_permissions.py', 'git_gua
          'chat_archivable.py', 'merge_landing.py', 'merge_guard.py', 'archive_guard.py',
          'landing.py', 'promote_main.py', 'merge_pr.py', 'review_verdict.py', 'pre_push_checks.py',
          'push_branch.py', 'question_label.py', 'context_limit.py', 'codex_worker.py',
-         'codex_tools.py',
+         'codex_tools.py', 'maint_tools.py',
          'plugin_validate.py']
 
 

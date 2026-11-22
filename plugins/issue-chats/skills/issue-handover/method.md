@@ -183,7 +183,10 @@ Each issue chat runs this:
       (§3 item 4).
 2. **Work:** the one task, with its check, to a branch ready to push (`ship-change` steps 1 to
    5, the overlap check included), or in local-main mode landed on local main, in the
-   foreground of the turn the start brief began.
+   foreground of the turn the start brief began. A chat that brings the landing branch in
+   during the work does so with `merge_landing.py` (`ship-change` step 2), never a bare
+   `git merge`, which dies in the sandbox when the landing branch changed `.claude/` and leaves
+   untracked files behind (#108; the guards plugin's merge guard refuses it).
 3. **Hand over** (skill `issue-handover`), in that same turn: comment `ready to push:` on the
    issue (it stays open and assigned until the merge closes it); pick the next ready issue
    (`next_issue.py`) and run the overlap check on its paths; start the next chat on the

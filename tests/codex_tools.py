@@ -19,7 +19,9 @@ write outside the job nor read `~/.ssh` or `.env`; it has no TCP of its own but 
 `host:port` through the worker's forwarder, the way ssh's ProxyCommand does; a tool past its time
 limit is killed; and stopping the broker ends the servers.
 """
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -46,7 +48,7 @@ def check(name, condition, detail=''):
 
 
 BLENDER = '/Applications/Blender.app/Contents/MacOS/Blender'
-HOME = '/Users/someone'
+HOME = '/h/someone'
 SOCKET = HOME + '/.local/state/spark-ssh/agent.sock'
 
 
@@ -158,7 +160,7 @@ def offline():
           refused[0]['reason'], str(served))
 
     # The profile.
-    job = '/Users/someone/.cache/x/job-1'
+    job = HOME + '/.cache/x/job-1'
     folders = [job + '/' + part for part in ('work', 'git', 'tmp', 'out')]
     denied = [HOME + '/.ssh', '/**/.env']
     text = ct.profile(folders, denied)
@@ -202,6 +204,8 @@ def offline():
 
     # A call the turn does not serve, or whose server never starts.
     folder = tempfile.mkdtemp(prefix='codex-tools-test-')
+    quiet = contextlib.redirect_stderr(io.StringIO())
+    quiet.__enter__()
     try:
         saved = dict(os.environ)
         os.environ.update(AGF_CODEX_TOOLS_DIR=folder, AGF_CODEX_TOOLS='blender')
@@ -216,6 +220,7 @@ def offline():
         os.environ.pop('AGF_CODEX_TOOLS_DIR', None)
         check('outside a turn: 126', ct.call('blender', []) == ct.REFUSED)
     finally:
+        quiet.__exit__(None, None, None)
         os.environ.clear()
         os.environ.update(saved)
         shutil.rmtree(folder, ignore_errors=True)

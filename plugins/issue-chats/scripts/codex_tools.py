@@ -54,8 +54,11 @@ tool never reaches further than a Claude chat's route for the same command:
 whose program is absolute, on PATH, or a path in Codex's folder (`<job>/work`, so a project script
 runs as Codex has it: the sandbox, not the script, is the boundary); `env` values may name
 `{work}`, `{tmp}` and `{out}` of the job (a game's data folder goes there: the sandbox refuses the
-person's real one anyway); `time_limit_minutes` (default 30, at most 240) limits one call. Every
-tool also gets what Codex's commands get: `GIT_DIR`, `GIT_WORK_TREE` and `TMPDIR` of the job.
+person's real one anyway; `PATH`, `GIT_*`, `TMPDIR`, `DYLD_*`, `PYTHON*` and the route's names
+are refused); `time_limit_minutes` (default 30, at most 240) limits one call. Every tool also gets
+what Codex's commands get: `GIT_DIR`, `GIT_WORK_TREE` and `TMPDIR` of the job, and the turn's
+marker. A rule is matched against the shell-quoted command line, so a program whose path holds a
+space needs a rule that quotes it (`Bash('/a b/tool' *)`).
 
 **What runs Codex's code.** A tool runs what Codex wrote whenever its arguments name it (Blender
 runs a builder; a project script runs as Codex left it). The bound is the tool's sandbox: it
@@ -65,6 +68,8 @@ writes only the job, reads the disk except the deny list, and reaches nothing el
 `<job>/out/tools/<tool>/` and waits; `serve` (one per tool, in the tool's sandbox, started by the
 worker for the turn) reads it, checks the command line against the anchors again, runs the tool in
 `<job>/work` (or the caller's folder below it) with output to `<id>.log`, and writes `<id>.done`.
+Calls to one tool run one after another. A call waits up to 30 s for its server to start, and
+stops waiting (exit 124) when no result comes within the tool's limit and 2 minutes.
 The worker outside every sandbox opens none of these files (method.md *Codex as the worker*, issue
 #107): it starts the servers with fixed arguments and kills them, by the turn's marker, when the
 turn ends. A tool not in the list has no server, so its call is refused; a call whose command line
@@ -497,8 +502,9 @@ def note(specs, python):
     lines = ['Tools: this project lets you run these commands, each in a sandbox of its own that '
              'writes only this job\'s folders. Run one with',
              '  %s -I %s call <tool> [arguments ...]' % (python, os.path.abspath(__file__)),
-             'in place of the command itself; the call prints the tool\'s output and exits with '
-             'its code. It waits for the tool, so give the call a timeout at least as long as '
+             'in place of the command itself, passing only the arguments that follow the '
+             'command shown for the tool (it already holds them); the call prints the tool\'s '
+             'output and exits with its code. It waits for the tool, so give the call a timeout at least as long as '
              'the tool\'s limit. A command line the project does not allow is refused (exit '
              '126). The tools run while this turn runs.']
     for spec in specs:

@@ -31,7 +31,11 @@ moves the hooks path (also in the middle of a chain of links), a merge, or a bun
 does not descend from HEAD; a job folder whose worktree is gone left behind, with its logs, at
 the next run or by `--sweep`; `--sweep` starting codex or git, following a link out of a job, or
 removing a live or a locked job, also after a refused `--fresh`; a system the read deny list is
-not measured on accepted. On Windows only the refusals run. Offline.
+not measured on accepted; the project's tools (#116) served without an anchor in the settings,
+a network host only the project allows, a call outside the rules or to a tool not served
+running, Codex not told its tools, a tool's server outside its own sandbox profile or still
+running after the turn, or a tool list that is not JSON accepted (a stand-in for `sandbox-exec`;
+`tests/codex_tools.py` runs the real one). On Windows only the refusals run. Offline.
 """
 import json
 import os

@@ -38,7 +38,9 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
     outside a sandbox, `codex_job.py` does the setup and the export inside Codex's), imports
     Codex's commits from a git bundle with `codex_import.py` inside its own sandbox and reviews
     them once; macOS only; measured live on a scratch worktree, not yet in a real issue chain. Its threads are not listed in the Codex desktop
-    app.
+    app. A project may list tools in `.agents/codex-tools.json` (Blender, its QA runs, the
+    Spark scripts) that the worker serves to Codex from sandboxes of its own, anchored in the
+    Claude Code settings (#116, `codex_tools.py`).
     A hook (`question_label.py`, #75) keeps an issue's question label true in Claude Code: it
     refuses a question the work waits on while the issue lacks the label and removes the label
     at the answer and at the close. Measured live in the desktop app (#75).
@@ -122,7 +124,7 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
 | merging the landing branch in the sandbox | `plugins/core/scripts/merge_landing.py` header, `frozen_unexplained` in `plugins/core/scripts/work_proof.py`, `plugins/core/skills/ship-change/SKILL.md` step 2, `DESIGN_DECISIONS.md`, `tests/merge_landing.py` |
 | the security scanners | `plugins/security/scripts/*.py` headers, `plugins/security/skills/review-security/sources.md`, `tests/scan_secrets.py`, `tests/audit_dependencies.py` |
 | the pre-push hook | `templates/pre-push` header, `plugins/core/scripts/push_paths.py`, the push check in `plugins/guards/scripts/pre_tool_personal_data.py`, `tests/pre_push_checks.py`, its older refusals in `tests/worktree_tools.py` (`PrePushTests`) |
-| issue chats | `plugins/issue-chats/skills/issue-handover/method.md`, `plugins/issue-chats/scripts/*.py` headers, `tests/next_issue.py`, `tests/start_issue_chat.py`, `tests/chat_archivable.py`, `tests/archive_guard.py`, `tests/question_label.py`, `tests/context_limit.py`, `tests/codex_worker.py` |
+| issue chats | `plugins/issue-chats/skills/issue-handover/method.md`, `plugins/issue-chats/scripts/*.py` headers, `tests/next_issue.py`, `tests/start_issue_chat.py`, `tests/chat_archivable.py`, `tests/archive_guard.py`, `tests/question_label.py`, `tests/context_limit.py`, `tests/codex_worker.py`, `tests/codex_tools.py` (live part outside Claude Code's sandbox only) |
 
 ## Landing settings
 

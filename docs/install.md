@@ -336,6 +336,18 @@ sandbox and never passes a `--dangerously-*` option:
   not.
 - **No network**, approval `never`, a time limit per turn, after which the script kills what is
   left of it.
+- **The project's tools** (opt-in per project, #116): commands a project lists in
+  `.agents/codex-tools.json` (Blender headless, its game or QA runs, a script that reaches one
+  LAN host), which Codex's own sandbox cannot run. Each runs in a sandbox the script makes with
+  `sandbox-exec`: writes only the job, the same read deny list, and only the tool's grants on top
+  (`gpu`: the Metal device; a network `host:port`: through a forwarder of the script's to that
+  one address; a unix socket such as a dedicated ssh agent). The person's settings are the
+  anchor: a tool runs only if a `Bash(...)` allow rule of the person's, the managed or the
+  project's Claude Code settings covers its command line (no deny or ask rule), and its network
+  hosts and sockets only if `sandbox.network.allowedDomains` and `allowUnixSockets` of
+  `~/.claude/settings.json` or the managed settings hold them; a project's settings never widen
+  these. So a project grants Codex nothing its sandboxed Claude chats may not run themselves.
+  The format: `codex_tools.py`'s header; how a chat uses it: method.md §4.
 - **The person's Codex configuration does not apply in these turns** (`~/.codex/config.toml`,
   its rules, MCP servers and hooks), because each can run a command outside Codex's sandbox.
   **Nor do the ChatGPT account's apps (connectors) and Codex plugins:** they are on whenever

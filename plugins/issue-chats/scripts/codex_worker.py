@@ -102,6 +102,18 @@ resumes with it; `--json` events do not carry it):
              -c features.hooks=false -c features.shell_snapshot=false -c features.apps=false
              -c features.plugins=false -c features.skill_mcp_dependency_install=false -
 
+**The project's tools** (issue #116; `codex_tools.py`'s header owns them): when the worktree
+holds `.agents/codex-tools.json`, it and the project's `Bash(...)` rules are read inside Codex's
+sandbox (`codex_job.py tools`), and each tool is anchored in the Claude Code settings: its command
+in a `Bash(...)` allow rule (no deny or ask rule) of the person's, the managed or the project's
+settings, its network hosts and unix sockets in `sandbox.network` of the person's or the managed
+settings, read here, outside. For the turn the worker starts one server per anchored tool with
+`sandbox-exec`, in a profile of its own making (the job writable, the deny list, the tool's
+grants), with fixed arguments, and for a network grant a forwarder (`/usr/bin/nc`) to that one
+`host:port`; it opens none of the tools' files. Codex gets `AGF_CODEX_TOOLS_DIR` and
+`AGF_CODEX_TOOLS` and a line per tool in the note. The servers stop when `codex` ends, before
+the kill by the marker, which every tool carries too. A list that cannot be read refuses the turn.
+
 Codex is never asked for an approval and cannot ask one: a question belongs in its final
 message. When `codex` ends, or the time limit kills it, the worker kills what is left of the
 turn: the process group, then every process of this user whose environment holds the turn's
@@ -110,7 +122,8 @@ environment survives inside Codex's sandbox; the kill is hygiene, not the bounda
 `status`, `thread_id` (for `--resume` and `codex resume`), `model`, `effort` (null without
 `--effort`), `branch`, `job`,
 `time_limit_minutes`, `timed_out`, `group_left`, `marked_killed`, `last_message` (Codex's final
-message: all the Claude chat reads of a turn), `events` (the JSONL event log, kept with the last
+message: all the Claude chat reads of a turn), `tools` (`served`: names; `refused`: name and
+reason; `ended_early`: a server that ended before the turn, with its exit), `events` (the JSONL event log, kept with the last
 message and Codex's stderr in `jobs/<key>/logs/`, beside the jobs and outside every folder Codex
 writes, removed after 30 days or with the worktree's jobs, whichever comes first);
 on a new job also `setup` (`apfs_clones`, `files`, `withheld`: tracked files that cannot exist in

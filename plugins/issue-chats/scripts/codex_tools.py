@@ -623,7 +623,7 @@ def run_call(spec, job, folder, ident):
     try:
         try:
             args, cwd = read_request(claimed)
-        except (OSError, ValueError) as error:
+        except (OSError, ValueError, RecursionError) as error:
             os.write(log, ('codex_tools: refused: %s\n' % error).encode())
             return {'exit': REFUSED, 'refused': str(error)}
         line = shlex.join(spec['command'] + args)
@@ -699,8 +699,8 @@ def serve(job, turn, spec_text):
             if name.endswith('.req') and ID_RE.match(ident):
                 try:
                     result = run_call(spec, job, folder, ident)
-                except (OSError, ValueError, TypeError) as error:
-                    result = {'exit': REFUSED, 'refused': str(error)}
+                except Exception as error:  # noqa: BLE001 - one request never ends the server
+                    result = {'exit': REFUSED, 'refused': '%s: %s' % (type(error).__name__, error)}
                 try:
                     write_done(folder, ident, result)
                 except OSError:
@@ -743,10 +743,16 @@ def call(name, args):
     deadline = None
     offset = 0
     out = sys.stdout.buffer
+    # The heartbeat counted on this call's own monotonic clock: it stops while the Mac sleeps,
+    # as the server's does, so a wake is no gap.
+    beat, beat_seen = None, time.monotonic()
     while True:
         finished = os.path.exists(done_path)
         try:
-            gone = time.time() - os.stat(ready).st_mtime > STALE_SECONDS
+            mtime = os.stat(ready).st_mtime
+            if mtime != beat:
+                beat, beat_seen = mtime, time.monotonic()
+            gone = time.monotonic() - beat_seen > STALE_SECONDS
         except OSError:
             gone = True
         try:

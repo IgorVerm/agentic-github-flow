@@ -113,6 +113,9 @@ grants), with fixed arguments, and for a network grant a forwarder (`/usr/bin/nc
 `host:port`; it opens none of the tools' files. Codex gets `AGF_CODEX_TOOLS_DIR` and
 `AGF_CODEX_TOOLS` and a line per tool in the note. The servers stop when `codex` ends, before
 the kill by the marker, which every tool carries too. A list that cannot be read refuses the turn.
+Claude Code's hooks see the tools' runs no more than Codex's commands. For the chat: the list is
+changed as the repository is, not for one issue; a tool the report's `tools` shows `refused` that
+the issue needs is a question for the user, not a command to run for Codex.
 
 Codex is never asked for an approval and cannot ask one: a question belongs in its final
 message. When `codex` ends, or the time limit kills it, the worker kills what is left of the

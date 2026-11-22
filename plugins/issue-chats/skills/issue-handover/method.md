@@ -452,14 +452,8 @@ by the path that the person's allow rule names (`docs/install.md`, *Codex as the
    the branch. Once the worktree is removed (`cleanup-merged`), `<worker> --sweep` removes its
    jobs and their logs; it starts no Codex (the worker's header has what it removes and keeps).
 
-**The project's tools** (#116): commands Codex's sandbox cannot run, which a project lists in
-`.agents/codex-tools.json`; the worker serves each from a sandbox of its own, only where Claude
-Code's own settings allow the same command (`codex_tools.py`'s header; setup: `docs/install.md`).
-The list is changed as the repository is, not for one issue. A tool the report's `tools` shows
-`refused` that the issue needs is a question for the user, not a command to run for Codex.
-
 What the route does not give: Codex's commands are not seen by Claude Code's hooks, only the
-`codex_worker.py` call is; neither are the tools' runs. Inside a worker turn the person's Codex configuration, execpolicy
+`codex_worker.py` call is. Inside a worker turn the person's Codex configuration, execpolicy
 rules, MCP servers and hooks do not apply, nor do the ChatGPT account's apps (connectors) and
 Codex plugins, because each of them can run a command or a tool outside Codex's sandbox;
 `~/.codex/AGENTS.md` still loads, and without an effort in the settings row the reasoning effort

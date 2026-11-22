@@ -302,20 +302,30 @@ def route():
         deadline = time.time() + 30
         while not os.path.exists(os.path.join(folder, ident + '.done')) and time.time() < deadline:
             time.sleep(0.1)
+        deep = 'e' * 32  # nesting past Python's recursion limit, under REQUEST_MAX
+        with open(os.path.join(folder, deep + '.tmp'), 'w') as handle:
+            handle.write('{"args": ' + '[' * 120000 + ']' * 120000 + '}')
+        os.replace(os.path.join(folder, deep + '.tmp'), os.path.join(folder, deep + '.req'))
+        deadline = time.time() + 30
+        while not os.path.exists(os.path.join(folder, deep + '.done')) and time.time() < deadline:
+            time.sleep(0.1)
         result = subprocess.run([sys.executable, '-I', SCRIPT, 'call', 'echo', 'hi', 'again'],
                                 env=env, cwd=os.path.join(job, 'work'), capture_output=True,
                                 text=True, timeout=60)
-        check('route: a folder with a NUL byte does not stop the server',
+        check('route: a folder with a NUL byte or a deeply nested request does not stop it',
               server.poll() is None and result.returncode == 0 and
               result.stdout == 'hi again\n', repr(result))
         server.kill()
         server.wait()
-        old = time.time() - 60
-        os.utime(os.path.join(folder, 'ready'), (old, old))
         os.environ.update(AGF_CODEX_TOOLS_DIR=tools_dir, AGF_CODEX_TOOLS='echo')
+        stale = ct.STALE_SECONDS
+        ct.STALE_SECONDS = 1
         started = time.time()
-        with contextlib.redirect_stderr(io.StringIO()) as err:
-            code = ct.call('echo', ['hi'])
+        try:
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                code = ct.call('echo', ['hi'])
+        finally:
+            ct.STALE_SECONDS = stale
         check('route: a call whose server is gone stops waiting (125)',
               code == ct.GONE and time.time() - started < 5 and 'gone' in err.getvalue(),
               '%r %s' % (code, err.getvalue()))

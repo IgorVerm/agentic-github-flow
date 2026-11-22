@@ -31,8 +31,13 @@ moves the hooks path (also in the middle of a chain of links), a merge, or a bun
 does not descend from HEAD; a job folder whose worktree is gone left behind, with its logs, at
 the next run or by `--sweep`; `--sweep` starting codex or git, following a link out of a job, or
 removing a live or a locked job, also after a refused `--fresh`; a system the read deny list is
-not measured on accepted. On Windows only the refusals run. Offline.
+not measured on accepted; the project's tools (#116) served without an anchor in the settings,
+a network host only the project allows, a call outside the rules or to a tool not served
+running, Codex not told its tools, a tool's server outside its own sandbox profile or still
+running after the turn, or a tool list that is not JSON accepted (a stand-in for `sandbox-exec`;
+`tests/codex_tools.py` runs the real one). On Windows only the refusals run. Offline.
 """
+import glob
 import json
 import os
 import shutil
@@ -60,6 +65,25 @@ worker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(worker)
 worker.MEASURED += (sys.platform,)
 sys.exit(worker.main(sys.argv[2:]))
+'''
+
+# The project's tools run each in a sandbox the worker makes with `sandbox-exec`, which cannot run
+# inside another sandbox. This launcher puts a stand-in in its place: it logs the profile and runs
+# the server with STUB_SANDBOX=1.
+TOOLS_LAUNCHER = r'''import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location('codex_worker', sys.argv[1])
+worker = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(worker)
+worker.MEASURED += (sys.platform,)
+worker.codex_tools.SANDBOX_EXEC = os.environ['STUB_SANDBOX_EXEC']
+worker.codex_tools.ENV_KEEP += ('STUB_FLAGS',)  # the stand-in's log folder, nothing else
+sys.exit(worker.main(sys.argv[2:]))
+'''
+
+SANDBOX_EXEC_STUB = r'''#!/bin/sh
+printf '%s\n' "$2" > "$STUB_FLAGS/tool-profile-$$"
+shift 2
+STUB_SANDBOX=1 exec "$@"
 '''
 
 GIT_SHIM = r'''#!/bin/sh
@@ -238,6 +262,15 @@ if mode == 'rewrite':
     commit()
     git('reset', '-q', '--hard', 'HEAD~2')
     commit('work.txt', 'rewritten\n', 'rewritten (#1)')
+if mode == 'tool':
+    # The model's calls of the project's tools, from inside its sandbox.
+    calls = []
+    for args in (['echo', 'there'], ['echo', 'bad', 'idea'], ['other'], ['net']):
+        r = subprocess.run([sys.executable, '-I', os.environ['STUB_TOOLS_SCRIPT'], 'call'] + args,
+                           capture_output=True, text=True, timeout=60)
+        calls.append({'args': args, 'exit': r.returncode, 'stdout': r.stdout})
+    with open(os.path.join(flags, 'tool-calls'), 'w') as f:
+        json.dump(calls, f)
 with open(last, 'w') as f:
     f.write('done; question: none')
 print(json.dumps({'type': 'turn.completed', 'usage': {}}))
@@ -500,6 +533,10 @@ def main():
             check('option %s' % option, option in argv, str(argv))
         configs = [argv[i + 1] for i, v in enumerate(argv) if v == '-c']
         check('approval never', 'approval_policy="never"' in configs, str(configs))
+        check('no tool list: no tools, no tool variables',
+              report.get('tools') == {'served': [], 'refused': [], 'ended_early': {}} and
+              not [c for c in configs if 'AGF_CODEX_TOOLS' in c] and
+              'call <tool>' not in call['stdin'], str(report.get('tools')))
         check('the effort reaches a new turn',
               [c for c in configs if c.startswith('model_reasoning_effort')] ==
               ['model_reasoning_effort="xhigh"'], str(configs))
@@ -570,8 +607,8 @@ def main():
               str(outside))
         sandboxed = [json.loads(line) for line in lines_of(sandbox_log)]
         actions = [c['argv'][c['argv'].index('--') + 4] for c in sandboxed]
-        check('the project settings, the prompt and the setup are read inside the sandbox',
-              actions == ['settings', 'prompt', 'setup'], str(actions))
+        check('the project settings, the prompt, the tool list and the setup are read inside '
+              'the sandbox', actions == ['settings', 'prompt', 'tools', 'setup'], str(actions))
         for called in sandboxed:
             inner = [called['argv'][i + 1] for i, v in enumerate(called['argv']) if v == '-c']
             profile = [c for c in configs if not c.startswith(('model_reasoning_effort=',
@@ -895,6 +932,111 @@ def main():
               not os.path.lexists(locked_key) and
               report_of(result).get('removed') == [{'worktree': locked_wt, 'logs': 1}],
               result.stdout + result.stderr)
+        # The project's tools (issue #116): the list in the worktree, anchored in the settings.
+        tools_launcher = os.path.join(base, 'tools_launcher.py')
+        stub_exec = os.path.join(bindir, 'sandbox-exec-stub')
+        for path, text in ((tools_launcher, TOOLS_LAUNCHER), (stub_exec, SANDBOX_EXEC_STUB)):
+            with open(path, 'w') as f:
+                f.write(text)
+        os.chmod(stub_exec, 0o755)
+
+        def run_tools(args, **extra):
+            return subprocess.run(
+                [sys.executable, tools_launcher, TOOL] + args, capture_output=True, text=True,
+                env=dict(env, STUB_SANDBOX_EXEC=stub_exec, STUB_TOOLS_SCRIPT=os.path.join(
+                    SCRIPTS, 'codex_tools.py'), SECRET_TOKEN='leak', **extra))
+        with open(settings) as f:
+            person = json.load(f)
+        person['permissions']['allow'] = ['Bash(/bin/echo hi *)', 'Bash(/bin/cat:*)']
+        person['permissions']['ask'] = ['Bash(/bin/cat *)']
+        person['permissions']['deny'].append('Bash(/bin/echo hi bad*)')
+        with open(settings, 'w') as f:
+            json.dump(person, f)
+        with open(local) as f:
+            saved_local = f.read()
+        project_local = json.loads(saved_local)
+        # A project may not widen the network: the host only in its own settings is refused.
+        project_local['sandbox'] = dict(project_local.get('sandbox') or {},
+                                        network={'allowedDomains': ['h.example']})
+        project_local.setdefault('permissions', {})['allow'] = ['Bash(/bin/echo *)']
+        with open(local, 'w') as f:
+            json.dump(project_local, f)
+        listed = os.path.join(wt, '.agents', 'codex-tools.json')
+        os.makedirs(os.path.dirname(listed), exist_ok=True)
+        with open(listed, 'w') as f:
+            json.dump({'tools': [
+                {'name': 'echo', 'command': ['/bin/echo', 'hi'], 'description': 'says hi'},
+                {'name': 'other', 'command': ['/bin/cat']},
+                {'name': 'net', 'command': ['/bin/echo', 'hi'], 'network': ['h.example:22']}]}, f)
+        git(wt, 'add', '.agents/codex-tools.json')
+        git(wt, 'commit', '-q', '-m', 'tools (#1)')
+        for name in os.listdir(flags):
+            if name.startswith('tool-'):
+                os.remove(os.path.join(flags, name))
+        result = run_tools([wt] + good + ['--fresh'], STUB_MODE='tool')
+        report = report_of(result)
+        call = json.load(open(log))
+        tools = report.get('tools') or {}
+        check('tools: the turn completes', result.returncode == 0, result.stderr + result.stdout)
+        check('tools: the covered tool is served, the others refused with their reasons',
+              tools.get('served') == ['echo'] and [r.get('name') for r in tools.get('refused', [])]
+              == ['other', 'net'] and 'ask rule' in tools['refused'][0]['reason'] and
+              'allowedDomains' in tools['refused'][1]['reason'] and tools.get('ended_early') == {},
+              str(tools))
+        try:
+            calls = json.load(open(os.path.join(flags, 'tool-calls')))
+        except (OSError, ValueError):
+            calls = []
+        check('tools: an allowed call runs and returns the output',
+              calls[:1] == [{'args': ['echo', 'there'], 'exit': 0,
+                             'stdout': 'hi there\n'}], str(calls[:1]))
+        check('tools: a command line a deny rule covers, and tools not served: 126',
+              [c['exit'] for c in calls[1:]] == [126, 126, 126], str(calls[1:]))
+        configs = [call['argv'][i + 1] for i, v in enumerate(call['argv']) if v == '-c']
+        check('tools: Codex is told its tools', 'call <tool>' in call['stdin'] and
+              '- echo: /bin/echo hi' in call['stdin'] and
+              'shell_environment_policy.set.AGF_CODEX_TOOLS="echo"' in configs, call['stdin'])
+        profiles = [n for n in os.listdir(flags) if n.startswith('tool-profile-')]
+        text = open(os.path.join(flags, profiles[0])).read() if profiles else ''
+        job = report.get('job', '')
+        check('tools: one server, in a profile that writes only the job and denies the list',
+              len(profiles) == 1 and '(deny default)' in text and
+              '(allow file-write* (subpath "%s"))' % os.path.join(job, 'out') in text and
+              os.path.join(os.path.realpath(home), '.ssh') in text and
+              os.path.join(os.path.realpath(home), 'vault') in text and
+              'network-outbound' not in text, str(profiles) + text[-300:])
+        try:
+            ready = glob.glob(os.path.join(job, 'out', 'tools', '*', 'echo', 'ready'))
+            server = json.load(open(ready[0]))['pid']
+            os.kill(server, 0)
+            alive = True
+        except (OSError, ValueError, KeyError):
+            alive = False
+        check('tools: the server is gone after the turn', not alive)
+        # A link put in place of one of the job's folders refuses the next turn (and the export).
+        out_folder = os.path.join(job, 'out')
+        os.rename(out_folder, out_folder + '.moved')
+        os.symlink(home, out_folder)
+        result = run_tools([wt] + good + ['--resume', THREAD])
+        check('tools: a link in place of a job folder refuses the turn', result.returncode == 3 and
+              'no longer a folder of the job' in result.stderr, result.stderr)
+        result = run_tools([wt, '--export'])
+        check('tools: ... and the export', result.returncode == 3, result.stderr)
+        os.remove(out_folder)
+        os.rename(out_folder + '.moved', out_folder)
+        with open(listed, 'w') as f:
+            f.write('{"tools": ')
+        git(wt, 'commit', '-q', '-am', 'broken tools (#1)')
+        if os.path.exists(log):
+            os.remove(log)
+        result = run_tools([wt] + good)
+        check('tools: a list that is not JSON refuses the turn', result.returncode == 3 and
+              'not valid JSON' in result.stderr and not os.path.exists(log), result.stderr)
+        git(wt, 'rm', '-q', '.agents/codex-tools.json')
+        git(wt, 'commit', '-q', '-m', 'no tools (#1)')
+        with open(local, 'w') as f:
+            f.write(saved_local)
+
         # A --fresh that is refused after it retired the job leaves the worktree recorded, so a
         # sweep keeps its folder and its logs while the worktree exists.
         import hashlib

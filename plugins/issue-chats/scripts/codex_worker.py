@@ -102,6 +102,21 @@ resumes with it; `--json` events do not carry it):
              -c features.hooks=false -c features.shell_snapshot=false -c features.apps=false
              -c features.plugins=false -c features.skill_mcp_dependency_install=false -
 
+**The project's tools** (issue #116; `codex_tools.py`'s header owns them): when the worktree
+holds `.agents/codex-tools.json`, it and the project's `Bash(...)` rules are read inside Codex's
+sandbox (`codex_job.py tools`), and each tool is anchored in the Claude Code settings: its command
+in a `Bash(...)` allow rule (no deny or ask rule) of the person's, the managed or the project's
+settings, its network hosts and unix sockets in `sandbox.network` of the person's or the managed
+settings, read here, outside. For the turn the worker starts one server per anchored tool with
+`sandbox-exec`, in a profile of its own making (the job writable, the deny list, the tool's
+grants), with fixed arguments, and for a network grant a forwarder (`/usr/bin/nc`) to that one
+`host:port`; it opens none of the tools' files. Codex gets `AGF_CODEX_TOOLS_DIR` and
+`AGF_CODEX_TOOLS` and a line per tool in the note. The servers stop when `codex` ends, before
+the kill by the marker, which every tool carries too. A list that cannot be read refuses the turn.
+Claude Code's hooks see the tools' runs no more than Codex's commands. For the chat: the list is
+changed as the repository is, not for one issue; a tool the report's `tools` shows `refused` that
+the issue needs is a question for the user, not a command to run for Codex.
+
 Codex is never asked for an approval and cannot ask one: a question belongs in its final
 message. When `codex` ends, or the time limit kills it, the worker kills what is left of the
 turn: the process group, then every process of this user whose environment holds the turn's
@@ -110,7 +125,8 @@ environment survives inside Codex's sandbox; the kill is hygiene, not the bounda
 `status`, `thread_id` (for `--resume` and `codex resume`), `model`, `effort` (null without
 `--effort`), `branch`, `job`,
 `time_limit_minutes`, `timed_out`, `group_left`, `marked_killed`, `last_message` (Codex's final
-message: all the Claude chat reads of a turn), `events` (the JSONL event log, kept with the last
+message: all the Claude chat reads of a turn), `tools` (`served`: names; `refused`: name and
+reason; `ended_early`: a server that ended before the turn, with its exit), `events` (the JSONL event log, kept with the last
 message and Codex's stderr in `jobs/<key>/logs/`, beside the jobs and outside every folder Codex
 writes, removed after 30 days or with the worktree's jobs, whichever comes first);
 on a new job also `setup` (`apfs_clones`, `files`, `withheld`: tracked files that cannot exist in
@@ -136,7 +152,7 @@ stays, and so does one whose worktree still exists. Loose log files that older v
 the worker's folder go after 30 days. `--sweep` takes nothing else, starts no `codex`, reads no
 settings and runs no git. Its report: `status` (`swept`, `failed` with `failure`), `removed`
 (each with its `worktree`, None when no run recorded one, and its number of log files, `logs`:
-three per turn), `kept`, `busy` (a gone worktree's folder that a run holds), `old_logs`. Every
+three per turn, and one `tool-<name>.txt` per listed tool), `kept`, `busy` (a gone worktree's folder that a run holds), `old_logs`. Every
 run records its worktree in `state.json` when it takes the lock, so a live worktree's folder is
 never taken for a gone one. A worktree whose path is missing for a while (an unmounted volume)
 loses its jobs and logs at a sweep in that time. Exit: 0 swept; 1 failed; 2 usage; 3 refused.
@@ -158,6 +174,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -176,6 +193,18 @@ except ImportError:  # Windows: refused in main
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 JOB_TOOL = os.path.join(HERE, 'codex_job.py')
+TOOLS_TOOL = os.path.join(HERE, 'codex_tools.py')
+
+
+def _load(path):
+    # By its path: under `python3 -I` this script's folder is not on sys.path.
+    spec = importlib.util.spec_from_file_location('codex_tools', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+codex_tools = _load(TOOLS_TOOL)
 EFFORTS = ('minimal', 'low', 'medium', 'high', 'xhigh', 'max')  # Codex's efforts (#112)
 MODEL_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
 THREAD_RE = re.compile(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
@@ -208,7 +237,7 @@ FEATURES_OFF = ('hooks', 'shell_snapshot', 'apps', 'plugins', 'skill_mcp_depende
 REPORT_MAX = 8 * 1024 * 1024  # a 1 MiB prompt, JSON-escaped
 LOG_DAYS = 30
 MARKER = 'CODEX_WORKER_TURN'
-SECONDS = {'setup': 3600, 'prompt': 30, 'settings': 30, 'export': 600}
+SECONDS = {'setup': 3600, 'prompt': 30, 'settings': 30, 'tools': 30, 'export': 600}
 NOTE = '''[Note from the worker that started you]
 You work in %(work)s on branch %(branch)s. It is a git repository, but it has no .git folder:
 git reaches it through the GIT_DIR and GIT_WORK_TREE variables that every command of yours
@@ -529,6 +558,81 @@ def unread_sources():
     return found
 
 
+def settings_files(home):
+    """The person's and the managed Claude Code settings: files the chat's sandbox cannot write."""
+    files = [os.path.join(home, USER_SETTINGS), os.path.join(MANAGED_SETTINGS,
+                                                             'managed-settings.json')]
+    drop_in = os.path.join(MANAGED_SETTINGS, 'managed-settings.d')
+    if os.path.isdir(drop_in):
+        files += sorted(os.path.join(drop_in, name) for name in os.listdir(drop_in)
+                        if name.endswith('.json'))
+    return files
+
+
+def strings(value):
+    return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
+
+
+def tool_anchors(home):
+    """The anchors of the project's tools (codex_tools.py's header) in the person's and the
+    managed settings: their Bash allow rules, their Bash ask and deny rules (an ask counts as a
+    deny: no one can be asked), and their sandbox's allowed domains and unix sockets."""
+    rules, network = {'allow': [], 'deny': []}, {'domains': [], 'sockets': []}
+    managed = {'allow': [], 'domains': []}
+    only = {'rules': False, 'domains': False}
+    person = os.path.join(home, USER_SETTINGS)
+    for path in settings_files(home):
+        settings = read_settings(path)
+        if not isinstance(settings, dict):
+            continue
+        permissions, sandbox = settings.get('permissions') or {}, settings.get('sandbox') or {}
+        net = sandbox.get('network') or {} if isinstance(sandbox, dict) else {}
+        if not isinstance(permissions, dict) or not isinstance(net, dict):
+            refuse('%s: permissions or sandbox.network is not an object' % path)
+        allow = codex_tools.bash_patterns(strings(permissions.get('allow')))
+        rules['allow'] += allow
+        rules['deny'] += codex_tools.bash_patterns(strings(permissions.get('ask')) +
+                                                   strings(permissions.get('deny')))
+        network['domains'] += strings(net.get('allowedDomains'))
+        network['sockets'] += strings(net.get('allowUnixSockets'))
+        if path != person:
+            # Managed settings may let only their own rules or domains count (Claude Code's
+            # allowManagedPermissionRulesOnly and allowManagedDomainsOnly): then so here.
+            managed['allow'] += allow
+            managed['domains'] += strings(net.get('allowedDomains'))
+            only['rules'] |= bool(settings.get('allowManagedPermissionRulesOnly') or
+                                  permissions.get('allowManagedPermissionRulesOnly'))
+            only['domains'] |= bool(net.get('allowManagedDomainsOnly') or
+                                    settings.get('allowManagedDomainsOnly'))
+    if only['domains']:
+        network['domains'] = managed['domains']
+    if only['rules']:
+        rules['allow'] = managed['allow']
+    rules['managed_only'] = only['rules']
+    return rules, network
+
+
+def turn_tools(codex, job, worktree):
+    """The project's tools for this turn: (served specs, refused [{name, reason}]). The list and
+    the project's Bash rules are the chat's files, read inside Codex's sandbox; the network
+    anchors only from the person's and the managed settings, which a project never widens."""
+    code, read = in_sandbox(codex, job, 'tools', worktree)
+    if code != 0 or read.get('status') != 'read':
+        return None, text_of(read, 'failure') or 'the project\'s tool list could not be read ' \
+            '(exit %d)' % code
+    if read.get('list') is None:
+        return ([], []), None
+    home = os.path.realpath(os.path.expanduser('~'))
+    rules, network = tool_anchors(home)
+    project = read.get('rules') if isinstance(read.get('rules'), dict) else {}
+    allow = rules['allow'] + ([] if rules['managed_only'] else
+                              codex_tools.bash_patterns(strings(project.get('allow'))))
+    deny = rules['deny'] + codex_tools.bash_patterns(strings(project.get('ask')) +
+                                                     strings(project.get('deny')))
+    return codex_tools.check_tools(read['list'], {'allow': allow, 'deny': deny}, network,
+                                   home), None
+
+
 def deny_list():
     """The read deny list: the floor above, and what the person's settings and the managed
     settings deny, read now so that no copy drifts. The project's settings in the worktree are
@@ -539,13 +643,7 @@ def deny_list():
     denied = [os.path.join(home, name) for name in DENY_HOME] + list(DENY_GLOBS)
     if hasattr(os, 'getuid'):
         denied += [pattern % os.getuid() for pattern in DENY_TMP]
-    files = [os.path.join(home, USER_SETTINGS), os.path.join(MANAGED_SETTINGS,
-                                                             'managed-settings.json')]
-    drop_in = os.path.join(MANAGED_SETTINGS, 'managed-settings.d')
-    if os.path.isdir(drop_in):
-        files += sorted(os.path.join(drop_in, name) for name in os.listdir(drop_in)
-                        if name.endswith('.json'))
-    for path in files:
+    for path in settings_files(home):
         for entry in settings_denials(read_settings(path), path, home):
             if entry not in denied:
                 denied.append(entry)
@@ -679,13 +777,14 @@ def log_folder(where):
     return folder
 
 
-def codex_command(codex, model, effort, resume, job, last_message, marker):
+def codex_command(codex, model, effort, resume, job, last_message, marker, extra=None):
     command = [codex, 'exec']
     if resume:
         command += ['resume', resume]
     work, tmp = os.path.join(job, 'work'), os.path.join(job, 'tmp')
     variables = {'GIT_DIR': os.path.join(job, 'git'), 'GIT_WORK_TREE': work, 'TMPDIR': tmp,
                  'TMP': tmp, 'TEMP': tmp, MARKER: marker}
+    variables.update(extra or {})
     values = ['model_reasoning_effort=%s' % toml_string(effort)] if effort else []
     values += ['approval_policy="never"'] + profile_config(job)
     values += ['shell_environment_policy.set.%s=%s' % (name, toml_string(value))
@@ -827,6 +926,17 @@ def current_job(where, state):
     if isinstance(name, str) and JOB_RE.match(name):
         job = os.path.join(where['folder'], name)
         if os.path.isdir(job) and not os.path.islink(job):
+            for folder in job_folders(job):
+                # Codex and the tools write these four folders: a link put in place of one (or
+                # anything but a folder) refuses the job, since a profile would name its target.
+                # lstat only: nothing in them is opened.
+                try:
+                    info = os.lstat(folder)
+                except OSError:
+                    info = None
+                if info is None or not stat.S_ISDIR(info.st_mode):
+                    refuse('%s is no longer a folder of the job (a link or a file put in its '
+                           'place); start again with --fresh' % folder)
             return job
     return None
 
@@ -851,6 +961,15 @@ def run_turn(args, codex, where):
             retire(where['folder'], name)
         refuse(text_of(read, 'failure') or 'the prompt file could not be read (exit %d); is '
                'Codex installed?' % code)
+    try:
+        found, problem = turn_tools(codex, job, where['worktree'])
+        if found is None:
+            refuse(problem)
+    except SystemExit:
+        if name:
+            retire(where['folder'], name)
+        raise
+    served, refused_tools = found
     if name:
         code, setup = in_sandbox(codex, job, 'setup', where['worktree'], job)
         branch, base = setup.get('branch'), setup.get('base')
@@ -863,7 +982,8 @@ def run_turn(args, codex, where):
     state['project_denied'] = project
     write_state(where, state)
     branch = state.get('branch') if isinstance(state.get('branch'), str) else ''
-    prompt = NOTE % {'work': os.path.join(job, 'work'), 'branch': branch} + prompt
+    prompt = NOTE % {'work': os.path.join(job, 'work'), 'branch': branch} + \
+        codex_tools.note(served, sys.executable) + prompt
 
     marker = secrets.token_hex(16)
     state['marker'] = marker
@@ -877,31 +997,49 @@ def run_turn(args, codex, where):
     with open(prompt_path, 'w', encoding='utf-8') as handle:
         handle.write(prompt)
 
+    # The tools' servers: each in a sandbox of its own, with the job's variables and the marker,
+    # so that the kill below also finds what a tool left behind.
+    tmp = os.path.join(job, 'tmp')
+    broker = codex_tools.Broker(job, DENIED, served, os.environ, {
+        'GIT_DIR': os.path.join(job, 'git'), 'GIT_WORK_TREE': os.path.join(job, 'work'),
+        'TMPDIR': tmp, 'TMP': tmp, 'TEMP': tmp, MARKER: marker})
+    extra = {}
+    if served:
+        extra = {'AGF_CODEX_TOOLS_DIR': broker.tools_dir,
+                 'AGF_CODEX_TOOLS': ','.join(spec['name'] for spec in served)}
     command = codex_command(codex, args.model, args.effort, args.resume, job, last_message,
-                            marker)
+                            marker, extra)
     limit = args.time_limit * 60
     timed_out = False
     # Files, not pipes, for stdin, stdout and stderr: a process that outlives codex and keeps a
     # pipe open would make this script wait for it.
-    with open(prompt_path, 'rb') as stdin, open(events, 'wb') as out, \
-            open(stderr_path, 'wb') as err:
-        os.remove(prompt_path)
-        process = subprocess.Popen(command, cwd=os.path.join(job, 'work'), stdin=stdin,
-                                   stdout=out, stderr=err, start_new_session=True,
-                                   env=dict(clean_environment(job), **{MARKER: marker}))
-        try:
-            returncode = process.wait(timeout=limit)
-        except subprocess.TimeoutExpired:
-            timed_out = True
+    try:
+        broker.start(folder)
+    except OSError as error:
+        broker.stop()
+        refuse('the project\'s tools could not be started: %s' % error)
+    try:
+        with open(prompt_path, 'rb') as stdin, open(events, 'wb') as out, \
+                open(stderr_path, 'wb') as err:
+            os.remove(prompt_path)
+            process = subprocess.Popen(command, cwd=os.path.join(job, 'work'), stdin=stdin,
+                                       stdout=out, stderr=err, start_new_session=True,
+                                       env=dict(clean_environment(job), **{MARKER: marker}))
             try:
-                os.killpg(process.pid, signal.SIGTERM)
-            except OSError:
-                pass
-            try:
-                returncode = process.wait(timeout=10)
+                returncode = process.wait(timeout=limit)
             except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                returncode = process.wait()
+                timed_out = True
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                except OSError:
+                    pass
+                try:
+                    returncode = process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    returncode = process.wait()
+    finally:
+        broker.stop()
     group_left, marked_killed = kill_leftovers(process.pid, marker)
 
     thread_id, completed, failure = read_events(events)
@@ -914,7 +1052,9 @@ def run_turn(args, codex, where):
               'effort': args.effort, 'branch': branch, 'job': job,
               'time_limit_minutes': args.time_limit, 'timed_out': timed_out,
               'group_left': group_left,
-              'marked_killed': marked_killed, 'last_message': last, 'events': events}
+              'marked_killed': marked_killed, 'last_message': last, 'events': events,
+              'tools': {'served': [spec['name'] for spec in served], 'refused': refused_tools,
+                        'ended_early': broker.ended}}
     if setup is not None:
         report['setup'] = {key: setup.get(key) for key in
                            ('apfs_clones', 'files', 'withheld', 'withheld_count', 'seconds')}
@@ -1036,7 +1176,7 @@ def main(argv=None):
         refuse('Claude Code settings this worker does not read may limit reads here (%s); '
                'Codex\'s deny list could miss them' % ', '.join(unread))
     DENIED[:] = deny_list()
-    for program in (JOB_TOOL, sys.executable):
+    for program in (JOB_TOOL, TOOLS_TOOL, sys.executable):
         if not outside_denied(program):
             refuse('%s lies in a folder Codex may not read; install the plugin outside ~/.claude'
                    % program)

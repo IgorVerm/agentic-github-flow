@@ -323,7 +323,10 @@ notification began. So:
 - **Commands run as single calls,** not chained with other steps: `git commit -m "…" --
   <paths>` on its own, each script on its own, without `cd`. An ask or deny rule applies if any
   part of a chained command matches, and a chain with a part no allow rule covers goes to the
-  classifier; a single call that a narrow allow rule covers resolves before it.
+  classifier; a single call that a narrow allow rule covers resolves before it. git's network
+  commands run as a lone call from the chat's own worktree with an explicit remote and ref
+  (`git push origin <branch>`, `git fetch origin`), never with `-C`, and gh as its own call
+  with `-R owner/repo`: only those forms match a sandbox's excluded commands.
 - **The work runs in the foreground of the turn the start brief began:** a long run is waited
   for by a blocking wait command, called again when the tool's timeout ends it, never by ending
   the turn for a notification. The hand-over happens in that same turn, so nothing of the chat

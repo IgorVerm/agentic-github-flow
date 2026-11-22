@@ -22,7 +22,9 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
     Codex rules files installed as copies, because Codex skips a symlinked rules file; the
     personal-data guard's settings `exempt-dirs` and `local-mcp`, and its Codex hook installed by
     `--guards` (#15); the opt-in sandbox-network guard for Claude Code (`--guards sandbox`,
-    #20), wired by the installer in `~/.claude/settings.json`, not by the plugin's hooks; the
+    #20), wired by the installer in `~/.claude/settings.json`, not by the plugin's hooks, which
+    also turns `git -C <dir> push|fetch|pull|ls-remote` into the lone call from the session's
+    own worktree where that does the same (#122; replayed over three days of transcripts); the
     opt-in Google Cloud guard (`--guards gcloud`, #89): ask rules for `gcloud`, `gsutil`, `bq`
     and `cloud-sql-proxy`, the gcloud configuration folder closed to reads, and Codex prompt
     rules (`plugins/guards/policy/gcloud.rules`); permission rules only, no hook.

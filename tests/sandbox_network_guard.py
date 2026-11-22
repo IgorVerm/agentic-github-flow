@@ -76,6 +76,102 @@ def make_repo(path, remotes, branch='agent/x'):
         git('-C', path, 'remote', 'add', name, url)
 
 
+def git_worktrees(tmp, run, claude, failures):
+    """`git -C <dir> push|fetch|pull|ls-remote` and its `--git-dir`/`cd` spellings: refused with
+    the lone call where that does the same from the session's worktree, passed otherwise."""
+    base = os.path.join(tmp, 'wt space')
+    main_co = os.path.join(base, 'main')
+    make_repo(main_co, [('origin', 'git@github.com:example-org/demo.git')], branch='main')
+    git('-C', main_co, '-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q',
+        '--allow-empty', '-m', 'start')
+    wt_a, wt_b, wt_c = (os.path.join(base, n) for n in ('wt-a', 'wt-b', 'wt-c'))
+    for path, branch in ((wt_a, 'agent/a'), (wt_b, 'agent/b'), (wt_c, 'agent/c')):
+        git('-C', main_co, 'worktree', 'add', '-q', '-b', branch, path)
+    os.makedirs(os.path.join(wt_a, 'sub'))
+    with open(os.path.join(wt_c, '.gitmodules'), 'w') as handle:  # submodules: not the same
+        handle.write('[submodule "x"]\n\tpath = x\n\turl = ../x\n')
+    other = os.path.join(base, 'other')
+    make_repo(other, [('origin', 'git@github.com:example-org/demo.git')], branch='main')
+    cfg = os.path.join(base, 'cfg')  # per-worktree configuration switched on
+    make_repo(cfg, [('origin', 'git@github.com:example-org/demo.git')], branch='main')
+    git('-C', cfg, '-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q',
+        '--allow-empty', '-m', 'start')
+    cfg_y, cfg_z = os.path.join(base, 'cfg-y'), os.path.join(base, 'cfg-z')
+    git('-C', cfg, 'worktree', 'add', '-q', '-b', 'agent/y', cfg_y)
+    git('-C', cfg, 'worktree', 'add', '-q', '-b', 'agent/z', cfg_z)
+    git('-C', cfg, 'config', 'extensions.worktreeConfig', 'true')
+    git('-C', cfg_y, 'config', '--worktree', 'core.sparseCheckout', 'false')  # as merge_landing
+    git('-C', cfg_z, 'config', '--worktree', 'remote.origin.url', 'git@github.com:a/fork.git')
+    gitdir_b = os.path.join(main_co, '.git', 'worktrees', 'wt-b')
+    a, b = '"%s"' % wt_a, '"%s"' % wt_b
+    block = [
+        ('git -C %s push origin main' % b, '    git push origin main\n'),
+        ('git -C %s push -u origin agent/b' % b, '    git push -u origin agent/b\n'),
+        ('git -C %s push origin agent/b:agent/b' % b, '    git push origin agent/b:agent/b\n'),
+        ('git -C %s push origin --delete agent/old' % b,
+         '    git push origin --delete agent/old\n'),
+        ('git -C %s push --tags origin' % b, '    git push --tags origin\n'),
+        ('git -C %s fetch origin' % b, '    git fetch origin\n'),
+        ('git -C %s fetch --prune origin main' % b, '    git fetch --prune origin main\n'),
+        ('git -C %s fetch --all' % b, '    git fetch --all\n'),
+        ('git -C %s ls-remote origin' % b, '    git ls-remote origin\n'),
+        ('git -C "%s" fetch origin' % main_co, '    git fetch origin\n'),
+        ('git --git-dir="%s/.git" push origin agent/b' % main_co,
+         '    git push origin agent/b\n'),
+        ('git --git-dir "%s" fetch origin' % gitdir_b, '    git fetch origin\n'),
+        ('cd %s && git push origin agent/b' % b, '    git push origin agent/b\n'),
+        ('git -C %s push origin main 2>&1 | tail -3' % b, '    git push origin main\n'),
+        ('git -C %s fetch origin && git -C %s log -1' % (b, b), '    git fetch origin\n'),
+        # the session's own worktree: everything git does there is the same as a lone call
+        ('git -C %s push' % a, '    git push\n'),
+        ('git -C %s pull --ff-only' % a, '    git pull --ff-only\n'),
+        ('git -C "%s/sub" push origin agent/a' % wt_a, '    git push origin agent/a\n'),
+        ('git -C "%s/sub" push' % wt_a, '    git push\n'),
+    ]
+    passing = [
+        # what is pushed or fetched depends on the other worktree's HEAD or upstream
+        'git -C %s push' % b, 'git -C %s push origin' % b, 'git -C %s push origin HEAD' % b,
+        'git -C %s push origin HEAD:main' % b, 'git -C %s push origin @:main' % b,
+        'git -C %s push --follow-tags origin' % b, 'git -C %s fetch' % b,
+        'git -C %s ls-remote' % b, 'git -C %s fetch --set-upstream origin main' % b,
+        # pull changes the other worktree's files; a local branch as a fetch target
+        'git -C %s pull origin main' % b, 'git -C %s fetch origin main:main' % b,
+        'git --work-tree=%s --git-dir="%s" pull' % (b, gitdir_b),
+        # FETCH_HEAD is each worktree's own
+        'git -C %s fetch origin && git -C %s merge FETCH_HEAD' % (b, b),
+        # options git reads in the folder, or that this guard does not know
+        'git -c core.sshCommand=x -C %s push origin main' % b,
+        'git -C %s -c push.default=current push origin main' % b,
+        'git --no-pager -C %s push origin main' % b,
+        'git -C %s push --receive-pack=x origin main' % b,
+        'git -C %s push --frobnicate origin main' % b,
+        # a path relative to the other folder
+        'git -C %s push ../other main' % b, 'git -C "%s/sub" push ../x main' % wt_a,
+        # another repository, submodules, a computed or missing folder
+        'git -C "%s" push origin main' % other, 'git -C "%s" push origin agent/c' % wt_c,
+        'git -C "$W" push origin main', 'git -C "%s/missing" push origin main' % base,
+    ]
+    for command, expected in block:
+        result = run(['--check', command, '--cwd', wt_a], claude)
+        if result.returncode != 2 or expected not in result.stdout:
+            failures.append('worktree BLOCK %r: rc %d, wanted %r in:\n%s%s' % (
+                command, result.returncode, expected, result.stdout, result.stderr))
+    for command in passing:
+        result = run(['--check', command, '--cwd', wt_a], claude)
+        if result.returncode != 0:
+            failures.append('worktree PASS %r: rc %d:\n%s%s' % (
+                command, result.returncode, result.stdout, result.stderr))
+    # per-worktree configuration: a sparse-checkout key changes nothing for the network, a
+    # remote of its own does
+    result = run(['--check', 'git -C "%s" push origin agent/y' % cfg_y, '--cwd', cfg], claude)
+    if result.returncode != 2 or '    git push origin agent/y\n' not in result.stdout:
+        failures.append('sparse per-worktree key, not refused: %s' % result.stdout)
+    result = run(['--check', 'git -C "%s" push origin agent/z' % cfg_z, '--cwd', cfg], claude)
+    if result.returncode != 0:
+        failures.append('own remote in config.worktree, refused: %s' % result.stdout)
+    return len(block) + len(passing) + 2
+
+
 def run_all(tmp):
     root = os.path.join(tmp, 'with space')
     proj = os.path.join(root, 'proj')            # a project with remote-run scripts
@@ -421,6 +517,11 @@ def run_all(tmp):
         if result.returncode != 2 or expected not in result.stdout:
             failures.append('same folder %r: %s%s' % (command, result.stdout, result.stderr))
     checks += len(same)
+
+    # git's network commands through -C, --git-dir or a cd, from a worktree of the same
+    # repository (#122): the session works in `wt_a`; `wt_b` and the main checkout share its
+    # branches and remotes
+    checks += git_worktrees(tmp, run, full, failures)
 
     # nothing is refused where the sandbox is off, unset, has no entries, or has no settings
     sample = [c for c, _ in block[:5] + block[-8:]]

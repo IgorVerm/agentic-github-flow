@@ -1,25 +1,32 @@
+---
+name: codex-issue-chats
+description: Run an issue chat's hand-over in Codex with Codex's own thread tools - create and confirm the next chat, title and file it, start the integrator on the independent local-main route, archive - in place of the Claude-specific calls of the issue-handover skill. Use in Codex wherever issue-handover runs - when a branch is ready to push or landed, at the context limit, after two failed corrections, or when the user asks to start issue chats.
+compatibility: Codex desktop with its thread tools (list_projects, create_thread, read_thread, set_thread_archived) plus gh. Needs the issue-chats plugin. Elsewhere the chat gives the user the brief to paste.
+---
+
 # Codex: native chat tools for the issue-chat hand-over
 
-Use the same lifecycle ([method.md](method.md) §4) and the common steps of
-[issue-handover](SKILL.md): leave nothing half-held, make the branch ready to push and record it,
-pick the next ready unclaimed issue with its overlap check, start the next chat, claim its issue and
-hand over the brief, push (on the user's yes or under a standing grant), see the pull request
-through to its merge, and archive only after the merge and its cleanup (in local-main mode: land the
-work, tell the user, and archive once it has landed). Every chain hands itself over; there is no
-standing coordinator chat. This file replaces only the Claude-specific calls of that procedure: the
-background start with `start_issue_chat.py`, the desktop app's session tools and the archive guard
-hook. It adds one step of its own: on the independent local-main route the chat starts the
-integrator itself and waits for its receipt (*Start the integrator* below). Queue, labels,
-questions, pushes, context limits and worktrees keep their owners there; nothing here repeats
-them.
+Use the same lifecycle (the method file of the `issue-handover` skill, *the method* below, §4)
+and the common steps of `issue-handover`: leave nothing half-held, make the branch ready to push
+and record it, pick the next ready unclaimed issue with its overlap check, start the next chat,
+claim its issue and hand over the brief, push (on the user's yes or under a standing grant), see
+the pull request through to its merge, and archive only after the merge and its cleanup (in
+local-main mode: land the work, tell the user, and archive once it has landed). Every chain
+hands itself over; there is no standing coordinator chat. This skill replaces only the
+Claude-specific calls of that procedure: the background start with `start_issue_chat.py`, the
+desktop app's session tools and the archive guard hook. It adds one step of its own: on the
+independent local-main route the chat starts the integrator itself and waits for its receipt
+(*Start the integrator* below). Queue, labels, questions, pushes, context limits and worktrees
+keep their owners there; nothing here repeats them. It adds no permission by itself: the
+repository's settings section or the user's request supplies it.
 
 - **Authorization:** creating a chat and messaging it need the user's explicit request or the
-  repository's settings section (method.md §1). Another agent's request is not that grant, and
+  repository's settings section (the method §1). Another agent's request is not that grant, and
   one repository's section does not extend to another. Within its scope, do not ask again. A
   native refusal stands: keep the exact failure and take the fallback below.
 - **Create a fresh chat:** inspect the current tool schema; use `list_projects`, then
-  `create_thread` with the repository's project, the title of method.md §2 and the complete
-  start brief of SKILL.md step 5. Do not fork. Make the new chat's worktree with the settings'
+  `create_thread` with the repository's project, the title of the method §2 and the complete
+  start brief of `issue-handover` step 5. Do not fork. Make the new chat's worktree with the settings'
   worktree tool first and name it in the brief; continue work in flight in its own checkout.
   Set a model only when the settings or the user name one: omitting it gives the configured
   default, not this chat's model. Never use Claude's CLI start.
@@ -29,11 +36,11 @@ them.
   the tool's completion path, then `read_thread` or a bounded `wait_threads` to confirm that the
   new chat read the brief and started in the intended checkout. Creation alone proves no
   receipt. Corrections go through `send_message_to_thread`. Claim the issue (assignee and signed
-  comment, SKILL.md step 5.4) before the new chat starts work, so a Claude chain skips it. After
+  comment, `issue-handover` step 5.4) before the new chat starts work, so a Claude chain skips it. After
   an uncertain result, look at the existing chats before you retry, so there are never two.
 - **Start the integrator** (local-main mode, the independent route of the `ship-change` skill's
   `local-main.md` §2): this chat starts the integrator itself and ends its turn only once the
-  integrator has accepted the hand-over. In the author's turn, before SKILL.md step 3:
+  integrator has accepted the hand-over. In the author's turn, before `issue-handover` step 3:
   1. **Freeze the source:** the branch clean at an exact commit S, and the hand-over of §2 step 1
      on the issue: S in full, the branch, the worktree, the checks and the evidence paths, what
      is not covered, the `Efficient design:` line. Write nothing more to the branch.
@@ -62,18 +69,18 @@ them.
      any retry. When it stays unconfirmed, stop or correct the integrator that 2 or 3 found or
      started, then a signed comment opening `integrator pending <S>:` with its thread id, if any,
      and the exact failure; this chat keeps custody of S and the issue, hands nothing over (no
-     next pick) and reports to the user, as for a refused landing (SKILL.md step 2).
+     next pick) and reports to the user, as for a refused landing (`issue-handover` step 2).
 
   After the receipt the integrator owns the review, the landing and its record on the issue, whose
-  text opens with `landed on local <landing branch> at <commit>` (SKILL.md step 2). At SKILL.md
-  step 6 this chat tells the user who accepted S, in place of what landed. The integrator's
+  text opens with `landed on local <landing branch> at <commit>` (`issue-handover` step 2). At
+  `issue-handover` step 6 this chat tells the user who accepted S, in place of what landed. The integrator's
   message after its record, or after sending S back, begins this chat's next turn: it reads the
   issue, takes S back or, once landed, runs *Archive* below for the integrator's thread and then
   its own.
 - **Status:** report in this chat; the issue's claim and state comments keep their duties. Do
   not send routine status to other chats.
 - **Archive:** after the merge, the cleanup, the `merged:` comment and the worktree check
-  (`chat_archivable.py` says `ok`; SKILL.md step 7), or in local-main mode after the landing comment
+  (`chat_archivable.py` says `ok`; `issue-handover` step 7), or in local-main mode after the landing comment
   and that check, use `set_thread_archived`, only within the settings section's grant or the user's
   request. Archiving a Codex chat and removing a worktree are separate: never use `archive_worktree`
   or a deletion for repository cleanup; that is the `cleanup-merged` skill after the merge.

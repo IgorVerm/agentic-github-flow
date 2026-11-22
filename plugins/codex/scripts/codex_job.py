@@ -9,7 +9,7 @@ Usage (by codex_worker.py only, as `codex sandbox … -- python3 -I codex_job.py
        codex_job.py export <job> <base>
 
 `codex_worker.py` runs outside every sandbox, so it runs no git and opens no file that the
-Claude chat or Codex wrote (method.md *Codex as the worker*, issue #107). Everything that has to
+Claude chat or Codex wrote (the `codex-worker` skill, issue #107). Everything that has to
 read such data runs here instead, under the same permission profile as Codex's own commands: it
 writes only the job's folders, has no network and reads the disk minus the worker's deny list.
 So a filter, hook or fsmonitor that the chat's repository or Codex's git folder names runs with

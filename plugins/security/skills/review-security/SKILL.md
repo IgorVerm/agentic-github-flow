@@ -55,8 +55,9 @@ were read, are in [sources.md](sources.md).
    outside every checkout with `git archive -o <folder>/base.tar origin/HEAD -- <those paths>`
    and `tar -xf <folder>/base.tar -C <folder>`, and run the audit there with `--no-npm`. A worktree of the default branch instead would have
    to be removed again, and in a large repository it copies every asset.
-4. **The client's own review.** In Claude Code, `/security-review` on the branch. In Codex,
-   `/review` with the focus text in `checklist.md` §Focus for a client review. Their findings
+4. **The client's own review.** In Claude Code, `/security-review` on the branch. In another
+   client, its own review command with the focus text in `checklist.md` §Focus for a client
+   review. Their findings
    are input: check each against the code before it becomes yours, and keep the ones they
    missed.
 5. **The checks** of `checklist.md`, area by area, for the files in scope (access control and

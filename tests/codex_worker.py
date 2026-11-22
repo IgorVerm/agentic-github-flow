@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Checks plugins/issue-chats/scripts/codex_worker.py, codex_job.py and codex_import.py against
+"""Checks plugins/codex/scripts/codex_worker.py, codex_job.py and codex_import.py against
 a stand-in `codex`: python3 tests/codex_worker.py.
 
 No real Codex runs, and no real sandbox. A temporary repository with a linked worktree on
@@ -47,7 +47,7 @@ import tempfile
 import time
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
-SCRIPTS = os.path.join(ROOT, 'plugins', 'issue-chats', 'scripts')
+SCRIPTS = os.path.join(ROOT, 'plugins', 'codex', 'scripts')
 TOOL = os.path.join(SCRIPTS, 'codex_worker.py')
 IMPORT = os.path.join(SCRIPTS, 'codex_import.py')
 THREAD = '01a1f914-a724-7ab3-8ad0-ce1133d3c4f7'

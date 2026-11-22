@@ -163,7 +163,7 @@ if base.returncode == 0:
 # installer commands in the user documents (#91)
 installer = read('tools/installer.py')
 accepted = set(re.findall(r"add_argument\('(--[\w-]+)'", installer)) - {'--resume-update'}
-known = {'--with': set(re.findall(r"'([\w-]+)': 'agentic-github-flow-", installer)) - {'core', 'guards'},
+known = {'--with': set(re.findall(r"'([\w-]+)': 'agentic-github-flow-", installer)) - {'core', 'guards', 'codex'},
          '--guards': set(re.findall(r"'(\w+)'", re.search(r'GUARD_EXTRAS = \(([^)]*)\)',
                                                          installer).group(1)))}
 OPTION = re.compile(r'(?<![\w-])(--[a-z][\w-]*)(?: ([a-z][\w,-]*))?')

@@ -3,7 +3,7 @@
 
 Usage: python3 codex_import.py <worktree> <bundle>
 
-The last step of method.md *Codex as the worker* (issue #107). `codex_worker.py --export` had
+The last step of the `codex-worker` skill (issue #107). `codex_worker.py --export` had
 the bundle cut inside Codex's sandbox and reports its path, in the worker's job folder: Codex's
 commits on top of the commit it started from. This script runs inside Claude Code's sandbox,
 like any git command of the chat, and needs no allow rule. It refuses (exit 3) unless <worktree>

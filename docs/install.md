@@ -17,7 +17,7 @@ Run each check and tell the person what is missing. Stop until the hard requirem
 |---|---|---|
 | git | `git --version` | hard requirement; on Windows Git for Windows (`winget install Git.Git`) |
 | Python 3.8 or newer | `python3 --version` (Windows: `py -3 --version`) | hard requirement; on Windows for example `winget install Python.Python.3.12` |
-| Claude Code, Codex or both | `claude --version`, `codex --version` | at least one; a client that is missing is skipped |
+| Claude Code, Codex or both | `claude --version`, `codex --version` | at least one; a client that is missing is skipped. Codex counts only when its command is found: a `~/.codex` folder alone does not (`--codex` sets it up anyway) |
 | the GitHub CLI, signed in | `gh auth status` | optional: without it agents cannot open pull requests or check merges and hand the person the text instead |
 
 macOS, Linux and Windows are supported. The repositories it works on must be on github.com:
@@ -57,8 +57,13 @@ Ask these in one message, with your recommendation, and wait for the answers.
      its Bash sandbox (step 5);
    - `--guards gcloud`: the guards plus the Google Cloud guard, for people who are signed in to
      Google Cloud on this machine (step 5); `--guards sandbox,gcloud` for both.
-4. **Which clients?** Both by default; `--no-claude` or `--no-codex` leaves one alone. A client
-   that is not on `PATH`: `--claude-bin <path>` or `--codex-bin <path>`.
+4. **Which clients?** Ask which clients the person uses: Claude Code, Codex or both. Recommend
+   only the ones they use: for a Claude-only person or team, `--no-codex`, so that nothing of
+   Codex is installed (no Codex rules block, no Codex plugin, no Codex text in what Claude
+   loads). Without that answer the installer sets up each client whose command it finds; a
+   `~/.codex` folder without the `codex` command is skipped with a note, and `--codex` sets
+   Codex up anyway. A client that is not on `PATH`: `--claude-bin <path>` or
+   `--codex-bin <path>`.
 5. **Their work identity** (for `--guards`): the personal-data guard knows the person's
    `git config --global` identity, the gh login of github.com and the local account name. Ask
    whether they use another name or e-mail address at work (set per repository, for example);
@@ -92,6 +97,7 @@ The options, all optional, combined as the person decided:
 | `--guards gcloud` | the guards plus the opt-in Google Cloud guard (both clients) |
 | `--overlay <git-url-or-path>` | add a company or personal overlay (repeatable) |
 | `--no-claude`, `--no-codex` | leave one client alone |
+| `--codex` | set up Codex even when the `codex` command is not found (its plugins wait for the command) |
 | `--claude-bin <path>`, `--codex-bin <path>` | a client that is not on `PATH` |
 
 For example, a work machine: `~/.agentic-github-flow/install.sh --guards --overlay <company-overlay>`.
@@ -123,9 +129,13 @@ always the same version. Tell the person what changed:
   `<!-- <<< agentic-github-flow <<< -->` that imports `rules/core.md` and each overlay's
   `AGENTS.md`. Lines outside the block are never touched.
 - `~/.codex/AGENTS.md`: the same block with the text written out, because Codex does not follow
-  imports there; `--update` rewrites it.
+  imports there, and with `rules/codex.md` after the core rules: Codex's side of the shared
+  skills, which only the Codex block carries; `--update` rewrites it.
 - Both clients: the clone registered as the plugin marketplace `agentic-github-flow`, and the
-  chosen plugins installed from it.
+  chosen plugins installed from it. With `--with issue-chats` and Codex set up, also the codex
+  plugin, in both clients: the Codex worker for Claude issue chats and the Codex adapter for
+  Codex issue chats. Without Codex nothing of it is installed, and an install or `--update`
+  without Codex removes it from Claude Code again.
 - With `--guards`: the guards plugin in Claude Code (Codex has no guards plugin: its guards are
   the rules and hooks that follow); the ask and deny rules merged into
   `~/.claude/settings.json` (merged, never replaced); the Codex
@@ -309,7 +319,8 @@ is unmeasured on Linux and refused on Windows. The full list of what a chain nee
 A repository whose `## Issue chats settings` has the row `codex worker` (a label, a Codex model
 and optionally a time limit per turn and a reasoning effort) lets a Claude issue chat hand the
 implementation of an issue with that label to Codex, while the chat keeps the issue, the
-questions to the person, the review and the push (method.md §4 *Codex as the worker*). Codex
+questions to the person, the review and the push (the codex plugin's `codex-worker` skill). The
+codex plugin comes with `--with issue-chats` once Codex is set up (step 2). Codex
 must be installed and logged in (`codex login`); the route runs on macOS only, the one system
 its read deny list is measured on. The chat runs Codex through one script, which fixes Codex's
 sandbox and never passes a `--dangerously-*` option:
@@ -352,7 +363,7 @@ sandbox and never passes a `--dangerously-*` option:
   command rule binds an honest chat only, since a chat can write the project settings of a
   worktree it makes: against a hostile chat the bound is the tool's sandbox, the person's deny
   rules and the person's network grants.
-  The format: `codex_tools.py`'s header; how a chat uses it: method.md §4.
+  The format: `codex_tools.py`'s header; how a chat uses it: the `codex-worker` skill.
 - **The person's Codex configuration does not apply in these turns** (`~/.codex/config.toml`,
   its rules, MCP servers and hooks), because each can run a command outside Codex's sandbox.
   **Nor do the ChatGPT account's apps (connectors) and Codex plugins:** they are on whenever
@@ -374,12 +385,14 @@ each spelling the agents use, never `codex exec` or `codex sandbox` itself and n
 `codex_import.py` or `codex_job.py`:
 
 ```json
-"Bash(python3 -I ~/.agentic-github-flow/plugins/issue-chats/scripts/codex_worker.py *)"
+"Bash(python3 -I ~/.agentic-github-flow/plugins/codex/scripts/codex_worker.py *)"
 ```
 
 and in `sandbox.excludedCommands`
-`"python3 -I ~/.agentic-github-flow/plugins/issue-chats/scripts/codex_worker.py *"`. Without them
-each Codex turn asks. Codex's work counts against the person's Codex usage limits. OpenAI's
+`"python3 -I ~/.agentic-github-flow/plugins/codex/scripts/codex_worker.py *"`. Without them
+each Codex turn asks. Until #98 the script lived in the issue-chats plugin: an entry that still
+names `plugins/issue-chats/scripts/codex_worker.py` no longer matches, and the installer names
+it with the new path (it changes no permission). Codex's work counts against the person's Codex usage limits. OpenAI's
 Codex plugin for Claude Code (`openai/codex-plugin-cc`) was reviewed and tried for this (#103)
 and is not used: it does not run inside the sandbox either, answers every approval with an
 error, may delegate to Codex unasked in every session, and drops its jobs when the session

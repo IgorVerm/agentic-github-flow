@@ -3,6 +3,35 @@
 Rulings of the maintainers named in `HANDOFF.md`, newest first, with their words. Detail lives on
 the linked issue.
 
+## Codex only where Codex is chosen: its own plugin, 2026-11-22
+
+**Decision (the maintainer):** first, on #98: "het codex deel moet ook optioneel zijn op het werk
+zijn er enkel claude users. Dit zou nutteloze tokenkost/overhead creeren" (the Codex part must be
+optional too: at work there are only Claude users, and it would create useless token cost and
+overhead). Then: "alles wat we hier toegevoegd hebben ivm met codex mag niet meekomen op een
+andere user als die geen codex heeft enkel enkel de claude versie wil ga dit na" and "er mag
+niets ivm codex meekomen in dat geval wat dat is verspilde context" (nothing added here for
+Codex may come along for a user who has no Codex and wants only the Claude version; that is
+wasted context). And: "alle info moet er wel zijn maar enkel geladen worden als je codex kiest"
+(all the information must still be there, but loaded only when you choose Codex).
+**What:** Codex counts in the installer only when the `codex` command is found, or `--codex`
+asks for it; a bare `~/.codex` is skipped with a note. The plugin `agentic-github-flow-codex`
+(`plugins/codex/`) holds the worker's scripts, the `codex-worker` skill (the route and the
+settings row `codex worker`) and the `codex-issue-chats` skill (the Codex adapter); the installer
+adds it to both clients only with issue-chats and Codex in the plan, and removes it from Claude
+Code when Codex leaves the plan. Codex's side of the shared skills is `rules/codex.md`, inlined
+into the Codex block only. No skill file of the other plugins and not `rules/core.md` names
+Codex; where the issue-chats method needs a seam it is client-neutral ("another client's adapter
+skill", "a row an installed plugin adds"). `tests/skills_format.py` and `tests/installer.py`
+check both.
+**Why:** a Claude-only install carried 11.3 KB of Codex lines in its skill files, 7.3 KB of
+them method.md §4 *Codex as the worker*, read at every issue chat's start, besides the 7 KB
+Codex adapter and 126 KB of Codex scripts (measured on a9dae85, #98).
+**Binds:** `tools/installer.py`, `rules/codex.md`, `plugins/codex/`, the client-neutral seams in
+`issue-handover` (`SKILL.md`, `method.md` §1, §4, §6), `requirements`, `review-change`,
+`review-security`, `repo-docs/skill-standard.md`, `tests/skills_format.py`, `tests/installer.py`.
+**Detail:** issue #98.
+
 ## Codex as the worker of a Claude issue chat, 2026-11-20
 
 **Decision (the maintainer):** the aim: "astra 6.2 is very good but apparently very bad at
@@ -18,7 +47,7 @@ on `codex app-server` that relays each approval: "codex exec houden, app-server 
 codex exec, the app-server client later, as its own issue).
 **What:** the settings row `codex worker` names a label and a Codex model; on an issue with that
 label the Claude issue chat stays the owner and hands the implementation to Codex through
-`plugins/issue-chats/scripts/codex_worker.py`, which runs `codex exec` in a job folder of its
+`codex_worker.py` (since #98 in `plugins/codex/scripts/`), which runs `codex exec` in a job folder of its
 own under a permission profile: writable only that job, no network, a read deny list, approval
 `never`, with a time limit per turn. The script runs outside Claude Code's sandbox and therefore
 runs no git and opens no file that the chat or Codex wrote: the setup of a job, the reading of
@@ -46,9 +75,9 @@ settings, (c) the project settings of the worktree the worker is given; a projec
 do not bind a chat that hands the worker another worktree, since the worker cannot know the
 chat's project. Codex commits in its job and Claude reviews after the import, so "Codex commit,
 Claude reviewt" holds.
-**Binds:** `plugins/issue-chats/skills/issue-handover/method.md` (§1 settings, §4 *Codex as the
-worker*), `SKILL.md` (the start brief), `plugins/issue-chats/scripts/codex_worker.py`,
-`codex_job.py` and `codex_import.py` beside it, `tests/codex_worker.py`, `docs/install.md`.
+**Binds:** `plugins/codex/skills/codex-worker/SKILL.md` (the settings row, the route; until
+#98 method.md §1 and §4), `plugins/codex/scripts/codex_worker.py`, `codex_job.py` and
+`codex_import.py` beside it, `tests/codex_worker.py`, `docs/install.md`.
 **Detail:** issues #103, #107.
 
 ## Signatures name the model, 2026-11-19
@@ -91,8 +120,8 @@ integrator in its own turn, and ends the turn or hands over only after the integ
 accepted that exact commit with access to the worktree and evidence, recorded on the issue;
 before a retry it looks for an existing integrator, and without a receipt it keeps custody and
 reports. Which changes take the independent route is unchanged. **Binds:**
-`plugins/issue-chats/skills/issue-handover/codex.md` *Start the integrator*, the reference in
-`SKILL.md` step 2. **Detail:** issue #85.
+`plugins/codex/skills/codex-issue-chats/SKILL.md` *Start the integrator* (until #98
+`issue-handover/codex.md`), the client-neutral reference in `issue-handover` step 2. **Detail:** issue #85.
 
 ## Issue chats hand over at 300k context; past 600k the user decides, 2026-11-17
 

@@ -26,7 +26,7 @@ settings' sidebar section (`list_sections`, `create_section` only if it is missi
 the settings' worktree tool for `<n>-requirements` from issue `<n>`, otherwise
 `requirements-<short topic>`, never in the primary checkout, so any file change below is made
 there. It renames itself at step 5 and archives itself at step 6.
-Elsewhere (without that plugin or section, outside the desktop app, in Codex) these steps do
+Elsewhere (without that plugin or section, outside the desktop app, in another client) these steps do
 not apply and the chat ends with its report.
 
 **The issues hold the work.** The specification and the packages live on GitHub: the parent
@@ -44,7 +44,7 @@ repository's landing mode), with the user's yes before any push.
    the user as one, because re-opening it is theirs.
 2. **Interview in rounds** (`spec-first` step 2) until nothing material is open. Claude Code:
    its question tool, at most four questions a round, each multiple choice with the
-   recommended option first and its reason. Codex: plain questions, in plan mode (`/plan`).
+   recommended option first and its reason. Another client: its own way to ask, as its rules say.
    Ask the hard parts: behaviour, edge cases, trade-offs, what must not change, how done is
    seen. What is immaterial becomes a stated assumption.
 3. **Draft the specification and the split,** nothing on GitHub yet:

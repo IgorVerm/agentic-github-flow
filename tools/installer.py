@@ -7,18 +7,25 @@ the clone exists in ~/.agentic-github-flow and start this file from it.
 Usage:
   installer.py [--with security,web-deploy,issue-chats] [--guards [sandbox,gcloud]]
                [--overlay <git-url-or-path>]...
-               [--no-claude] [--no-codex] [--claude-bin <path>] [--codex-bin <path>]
+               [--no-claude] [--no-codex] [--codex] [--claude-bin <path>] [--codex-bin <path>]
   installer.py --update      pull the clone, then repeat the recorded install
   installer.py --uninstall   undo what the record says this installer added
 
 What it does, per client (Claude Code, Codex):
+- Clients: Claude Code counts when its command or its folder is found. Codex counts only when
+  the `codex` command is found (or --codex-bin names it), or when --codex asks for it; a bare
+  ~/.codex folder is skipped with a note, so a Claude-only machine gets nothing of Codex (#98).
+  --codex is recorded, so --update repeats it.
 - Rules: one marked block in ~/.claude/CLAUDE.md that imports rules/core.md and each overlay's
-  AGENTS.md, and one in ~/.codex/AGENTS.md with the same text inlined (Codex does not follow
+  AGENTS.md, and one in ~/.codex/AGENTS.md with core.md, rules/codex.md (Codex's side of the
+  shared skills, in the Codex block only) and the overlays inlined (Codex does not follow
   imports there: measured with `codex debug prompt-input`, codex-cli 0.164). Lines outside the
   block are never touched. A symlinked file is refused, before anything changes.
 - Plugins: registers this clone as the `agentic-github-flow` marketplace and installs the core
   plugin, plus those named with --with (web-deploy brings security; issue-chats builds on core,
-  which is always installed, and brings a Claude Code hook that guards archiving a chat).
+  which is always installed, and brings a Claude Code hook that guards archiving a chat). With
+  issue-chats and Codex in the plan, the codex plugin (the Codex worker and the Codex adapter)
+  goes into both clients; an install or --update without Codex in the plan removes it again.
 - Guards (--guards): the guards plugin (Claude hooks), the ask and deny lists merged into
   ~/.claude/settings.json (a backup is kept), the Codex execpolicy rules (git safety and delete
   prompts) copied into ~/.codex/rules/, and the git guard and the personal-data guard (`--codex`:
@@ -45,11 +52,12 @@ What it does, per client (Claude Code, Codex):
 - Versioned paths (Claude Code, read-only): each install and --update names every permission
   rule and sandbox exclusion in ~/.claude/settings.json that points into the plugin cache, whose
   folder names the version, and gives the same entry with this clone's path, which stays the
-  same across versions. It changes none of them.
+  same across versions; and each that names a script at a path it moved from (the Codex worker
+  left the issue-chats plugin for the codex plugin, #98), with the new path. It changes none.
 - Overlays (--overlay): a folder with an AGENTS.md, or a git URL cloned into overlays/ here
   (a second URL with the same name gets a suffix); their text follows the core rules in both
   blocks.
-A client whose command and folder are both missing is skipped, and the installer says so.
+A client that does not count is skipped, and the installer says so.
 Everything it adds is recorded in .state/install.json in the clone, so --update repeats it and
 --uninstall removes exactly that; a file that became a symlink since is skipped, with a note. Nothing is sent anywhere except the git and plugin fetches.
 Exit: 0 done; 1 a step failed (the rest ran); 2 usage; 3 refused before any change.
@@ -71,8 +79,12 @@ CLONE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MARKET = 'agentic-github-flow'
 PLUGINS = {'core': 'agentic-github-flow-core', 'security': 'agentic-github-flow-security',
            'web-deploy': 'agentic-github-flow-web-deploy',
-           'issue-chats': 'agentic-github-flow-issue-chats', 'guards': 'agentic-github-flow-guards'}
+           'issue-chats': 'agentic-github-flow-issue-chats', 'guards': 'agentic-github-flow-guards',
+           'codex': 'agentic-github-flow-codex'}
 NEEDS = {'web-deploy': ['security']}
+INSTALLER_ONLY = ('guards', 'codex')  # chosen by --guards and the plan, never by --with
+# Scripts that moved between plugins: an allow rule naming the old path stops matching (#98).
+MOVED = (('plugins/issue-chats/scripts/codex_', 'plugins/codex/scripts/codex_'),)
 GUARD_EXTRAS = ('sandbox', 'gcloud')  # opt-in guards named after --guards
 BEGIN = '<!-- >>> agentic-github-flow >>> -->'
 END = '<!-- <<< agentic-github-flow <<< -->'
@@ -156,7 +168,8 @@ def claude_block(overlays):
 
 
 def codex_block(overlays):
-    parts = [read_text(os.path.join(CLONE, 'rules', 'core.md')).strip('\n')]
+    parts = [read_text(os.path.join(CLONE, 'rules', name)).strip('\n')
+             for name in ('core.md', 'codex.md')]
     for o in overlays:
         parts.append(read_text(os.path.join(o['path'], 'AGENTS.md')).strip('\n'))
     return '\n'.join([BEGIN, NOTE, '\n\n'.join(parts), END]) + '\n'
@@ -239,9 +252,17 @@ def client_plan(args, state):
             ('claude', claude_dir(), args.no_claude, args.claude_bin or state.get('claude_bin')),
             ('codex', codex_dir(), args.no_codex, args.codex_bin or state.get('codex_bin'))):
         if skip:
-            say('skip', '%s: --no-%s' % (name, name))
+            say('skip', '%s: %s' % (name, 'not in the recorded install' if getattr(
+                args, 'resume_update', False) else '--no-' + name))
             continue
         binary = find_client(name, override)
+        if name == 'codex' and not binary and not args.codex:
+            if os.path.isdir(folder):
+                say('skip', 'codex: %s exists, but the `codex` command was not found; nothing of '
+                            'Codex is installed (--codex sets it up anyway)' % folder)
+            else:
+                say('skip', 'codex: the `codex` command was not found')
+            continue
         if not binary and not os.path.isdir(folder):
             say('skip', '%s: neither the `%s` command nor %s was found' % (name, name, folder))
             continue
@@ -291,6 +312,20 @@ def install_plugins(client, binary, wanted, state, failures, updating):
         else:
             failures.append('%s: %s: %s' % (client, plugin, out))
             say('FAIL', '%s: %s %s: %s' % (client, command[2], plugin, out))
+
+
+def drop_unwanted(client, binary, keys, state, failures):
+    """Uninstall an installer-chosen plugin (the codex plugin) that this run no longer wants."""
+    record = state.get('plugins', {}).get(client, [])
+    for key in [k for k in record if k == 'codex' and k not in keys]:
+        plugin = '%s@%s' % (PLUGINS[key], MARKET)
+        ok, out = run([binary, 'plugin', 'uninstall' if client == 'claude' else 'remove', plugin])
+        if ok:
+            record.remove(key)
+            say('ok', '%s: removed %s: Codex is not in the plan' % (client, plugin))
+        else:
+            failures.append('%s: remove %s: %s' % (client, plugin, out))
+            say('FAIL', '%s: remove %s: %s' % (client, plugin, out))
 
 
 def remove_plugins(client, binary, state):
@@ -511,6 +546,14 @@ def report_versioned_paths():
         for entry in entries:
             if not isinstance(entry, str):
                 continue
+            for old, new in MOVED:
+                for sep in ('/', '\\'):
+                    if old.replace('/', sep) in entry:
+                        say('warn', 'claude: %s in %s names a script that moved, so it no longer '
+                                    'matches: %s' % (where, path, entry))
+                        print('      The same at the new path: %s'
+                              % entry.replace(old.replace('/', sep), new.replace('/', sep)))
+                        found = True
             for match in CACHED.finditer(entry):
                 name, version = match.group(1), match.group(2)
                 if name not in keys:
@@ -803,7 +846,7 @@ def install(args, state, updating=False):
     overlays = resolve_overlays(args.overlay, updating, failures)
     state.update({'with': [w for w in wanted if w != 'core'], 'guards': args.guards,
                   'sandbox_guard': args.sandbox, 'gcloud_guard': args.gcloud,
-                  'overlays': overlays, 'clients': sorted(plan),
+                  'overlays': overlays, 'clients': sorted(plan), 'codex_asked': args.codex,
                   'claude_bin': args.claude_bin or state.get('claude_bin'),
                   'codex_bin': args.codex_bin or state.get('codex_bin')})
     blocks = state.setdefault('blocks', {})
@@ -827,6 +870,9 @@ def install(args, state, updating=False):
                         '--update once it is on PATH)' % (client, client))
             continue
         keys = wanted + (['guards'] if args.guards and client == 'claude' else [])
+        if 'codex' in plan and 'issue-chats' in wanted:
+            keys.append('codex')
+        drop_unwanted(client, info['bin'], keys, state, failures)
         install_plugins(client, info['bin'], keys, state, failures, updating)
         save_state(state)
     if args.guards:
@@ -912,6 +958,7 @@ def resume_update(args, state):
     clients = state.get('clients', ['claude', 'codex'])
     args.no_claude = 'claude' not in clients
     args.no_codex = 'codex' not in clients
+    args.codex = state.get('codex_asked', False)
     return install(args, state, updating=True)
 
 
@@ -930,6 +977,8 @@ def main(argv=None):
     parser.add_argument('--uninstall', action='store_true', help='undo the install')
     parser.add_argument('--no-claude', action='store_true', help='leave Claude Code alone')
     parser.add_argument('--no-codex', action='store_true', help='leave Codex alone')
+    parser.add_argument('--codex', action='store_true',
+                        help='set up Codex even when the codex command is not found')
     parser.add_argument('--claude-bin', help='path to the claude command')
     parser.add_argument('--codex-bin', help='path to the codex command')
     parser.add_argument('--resume-update', action='store_true', help=argparse.SUPPRESS)
@@ -942,14 +991,17 @@ def main(argv=None):
     args.guards, args.sandbox = args.guards is not None, 'sandbox' in extras
     args.gcloud = 'gcloud' in extras
     args.with_plugins = [w.strip() for w in args.with_plugins.split(',') if w.strip()]
-    unknown = [w for w in args.with_plugins if w not in PLUGINS or w == 'guards']
+    unknown = [w for w in args.with_plugins if w not in PLUGINS or w in INSTALLER_ONLY]
     if unknown:
         parser.error('unknown plugin(s) for --with: %s (choose from security, web-deploy, '
-                     'issue-chats; '
-                     'guards come with --guards)' % ', '.join(unknown))
+                     'issue-chats; guards come with --guards, and the codex plugin with '
+                     'issue-chats where Codex is set up)' % ', '.join(unknown))
+    if args.codex and args.no_codex:
+        parser.error('--codex and --no-codex do not combine')
     if sum(map(bool, (args.update, args.uninstall))) > 1:
         parser.error('--update and --uninstall do not combine')
-    if (args.update or args.uninstall) and (args.with_plugins or args.guards or args.overlay):
+    if (args.update or args.uninstall) and (args.with_plugins or args.guards or args.overlay
+                                            or args.codex):
         parser.error('--update and --uninstall repeat or undo the recorded install; '
                      'run the installer without them to change what is installed')
     state = load_state()
@@ -966,6 +1018,7 @@ def main(argv=None):
             args.guards = args.guards or state.get('guards', False)
             args.sandbox = args.sandbox or state.get('sandbox_guard', False)
             args.gcloud = args.gcloud or state.get('gcloud_guard', False)
+            args.codex = (args.codex or state.get('codex_asked', False)) and not args.no_codex
             known = [o['source'] for o in state.get('overlays', [])]
             args.overlay = known + [o for o in args.overlay if o not in known]
         return install(args, state)

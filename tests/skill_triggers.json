@@ -94,5 +94,21 @@
     "should_not": [
       "Remove the worktrees and branches of the pull requests that were merged yesterday."
     ]
+  },
+  "codex-worker": {
+    "should": [
+      "This repository's issue chats settings have a codex worker row and issue 31 carries its label. Hand the implementation to Codex and bring its commits back."
+    ],
+    "should_not": [
+      "Review the pull request that Codex's work became, as the independent reviewer."
+    ]
+  },
+  "codex-issue-chats": {
+    "should": [
+      "We are in Codex. The branch for issue 14 passes its checks; hand this chat over to the next ready issue with Codex's thread tools."
+    ],
+    "should_not": [
+      "Install Codex on this machine and log it in."
+    ]
   }
 }

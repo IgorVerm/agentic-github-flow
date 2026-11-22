@@ -10,7 +10,12 @@ point at them), still in the temporary homes, and checks the plugins they report
 
 Cases: install over existing files, an idempotent second run, --update after a change in the
 source, --uninstall leaving CLAUDE.md and AGENTS.md byte-identical (or absent when they were),
-a symlinked ~/.codex/AGENTS.md refused before any change, a missing client skipped, --guards
+a symlinked ~/.codex/AGENTS.md refused before any change, a missing client skipped, a bare
+~/.codex without the codex command getting nothing of Codex (no block, no codex plugin, no Codex
+text in any installed Claude skill or the core rules; #98), --codex setting it up anyway and
+--update repeating that, the codex plugin in both clients only with issue-chats and Codex in the
+plan and removed from Claude when Codex leaves it, settings naming the worker's old path reported
+but left unchanged, --guards
 merging and removing the settings, rules and hooks (the git guard and the personal-data hook in
 ~/.codex/hooks.json beside the user's own entries, the latter added by --update to an older
 install), the opt-in sandbox-network guard (only with --guards sandbox, kept by a rerun and
@@ -40,6 +45,7 @@ if REAL:
     sys.argv.remove('--real')
 BEGIN = '<!-- >>> agentic-github-flow >>> -->'
 CORE_TITLE = '# agentic-github-flow: rules for every session'
+CODEX_TITLE = '## In Codex'  # rules/codex.md, in the Codex block only (#98)
 PD_MATCHER = r'^(Bash|webrun|web\.run|mcp__.*)$'  # what the personal-data hook judges in Codex
 BUNDLED_CODEX = '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex'
 
@@ -360,9 +366,101 @@ class InstallerTests(unittest.TestCase):
     def test_missing_client_is_skipped(self):
         code, out = self.install(clients=['claude'])
         self.assertEqual(code, 0, out)
-        self.assertIn('codex: neither the `codex` command', out)
+        self.assertIn('codex: the `codex` command was not found', out)
         self.assertIsNone(self.read('.codex', 'AGENTS.md'))
         self.assertIn('agentic-github-flow-core', self.plugins('claude'))
+
+    def claude_installed_files(self):
+        """The files of every plugin the Claude client holds, as the clone has them."""
+        found = []
+        for name in self.plugins('claude'):
+            folder = os.path.join(ROOT, 'plugins', name.replace('agentic-github-flow-', ''))
+            for base, _, files in os.walk(folder):
+                found += [os.path.join(base, f) for f in files]
+        return found
+
+    @unittest.skipIf(REAL, 'needs the codex command to be absent')
+    def test_bare_codex_folder_gets_nothing_of_codex(self):
+        # #98: a ~/.codex folder without the codex command is no Codex install
+        self.write(b'mine\n', '.codex', 'AGENTS.md')
+        for args in (('--with', 'issue-chats', '--guards'), ('--update',), ()):
+            code, out = self.install(*args, clients=['claude'])
+            self.assertEqual(code, 0, out)
+            self.assertIn('the `codex` command was not found; nothing of Codex is installed'
+                          if args != ('--update',) else 'codex: not in the recorded install', out)
+            self.assertEqual(self.read('.codex', 'AGENTS.md'), b'mine\n')
+            self.assertEqual(sorted(os.listdir(self.path('.codex'))), ['AGENTS.md'])
+            self.assertNotIn('agentic-github-flow-codex', self.plugins('claude'))
+            self.assertIn('agentic-github-flow-issue-chats', self.plugins('claude'))
+        self.assertNotIn(b'codex', self.read('.claude', 'CLAUDE.md').lower())
+        installed = self.claude_installed_files()
+        self.assertTrue(any(f.endswith('SKILL.md') for f in installed))
+        self.assertFalse([f for f in installed if os.path.basename(f).startswith('codex_')])
+        skill_files = [f for f in installed if os.sep + 'skills' + os.sep in f]
+        with open(os.path.join(ROOT, 'rules', 'core.md'), encoding='utf-8') as f:
+            core = f.read()
+        texts = {f: open(f, encoding='utf-8').read() for f in skill_files}
+        self.assertEqual([f for f, text in texts.items() if 'codex' in text.lower()], [])
+        self.assertNotIn('codex', core.lower())
+
+    @unittest.skipIf(REAL, 'needs the codex command to be absent')
+    def test_codex_flag_sets_codex_up_without_its_command_and_update_repeats_it(self):
+        os.makedirs(self.path('.codex'))
+        code, out = self.install('--codex', clients=['claude'])
+        self.assertEqual(code, 0, out)
+        block = self.read('.codex', 'AGENTS.md').decode()
+        self.assertIn(CORE_TITLE, block)
+        self.assertIn(CODEX_TITLE, block)
+        self.assertIn('codex: plugins not installed', out)
+        os.remove(self.path('.codex', 'AGENTS.md'))
+        code, out = self.install('--update', clients=['claude'])
+        self.assertEqual(code, 0, out)
+        self.assertIn(CODEX_TITLE, self.read('.codex', 'AGENTS.md').decode())
+        code, out = self.install('--codex', '--no-codex', clients=['claude'])
+        self.assertEqual(code, 2, out)
+        # a record from before #98, when a bare folder counted: --update no longer repeats it
+        record = self.path('.agentic-github-flow', '.state', 'install.json')
+        with open(record, encoding='utf-8') as f:
+            state = json.load(f)
+        del state['codex_asked']
+        with open(record, 'w', encoding='utf-8') as f:
+            json.dump(state, f)
+        os.remove(self.path('.codex', 'AGENTS.md'))
+        code, out = self.install('--update', clients=['claude'])
+        self.assertEqual(code, 0, out)
+        self.assertIn('nothing of Codex is installed', out)
+        self.assertIsNone(self.read('.codex', 'AGENTS.md'))
+
+    def test_codex_plugin_follows_codex_in_the_plan(self):
+        code, out = self.install()
+        self.assertEqual(code, 0, out)
+        for client in ('claude', 'codex'):  # without issue-chats it has nothing to do
+            self.assertNotIn('agentic-github-flow-codex', self.plugins(client), out)
+        self.assertIn(CODEX_TITLE, self.read('.codex', 'AGENTS.md').decode())
+        self.assertNotIn(b'codex.md', self.read('.claude', 'CLAUDE.md'))
+        code, out = self.install('--with', 'issue-chats')
+        self.assertEqual(code, 0, out)
+        for client in ('claude', 'codex'):
+            self.assertIn('agentic-github-flow-codex', self.plugins(client), out)
+        code, out = self.install('--no-codex')  # Codex leaves the plan: Claude drops the plugin
+        self.assertEqual(code, 0, out)
+        self.assertNotIn('agentic-github-flow-codex', self.plugins('claude'), out)
+        self.assertIn('agentic-github-flow-issue-chats', self.plugins('claude'), out)
+        code, out = self.install('--with', 'codex')
+        self.assertEqual(code, 2, out)
+
+    def test_settings_naming_the_old_worker_path_are_reported_not_changed(self):
+        old = 'python3 -I ~/.agentic-github-flow/plugins/issue-chats/scripts/codex_worker.py *'
+        settings = json.dumps({'permissions': {'allow': ['Bash(%s)' % old]},
+                               'sandbox': {'excludedCommands': [old]}}).encode()
+        self.write(settings, '.claude', 'settings.json')
+        code, out = self.install('--with', 'issue-chats', clients=['claude'])
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out.count('names a script that moved'), 2, out)
+        self.assertIn('plugins/codex/scripts/codex_worker.py *', out)
+        after = json.loads(self.read('.claude', 'settings.json'))
+        self.assertEqual({k: after.get(k) for k in ('permissions', 'sandbox')},
+                         json.loads(settings), 'read-only')
 
     def test_guards_merge_and_unmerge(self):
         settings = {'model': 'example', 'permissions': {'deny': ['Bash(git reset --hard*)'],

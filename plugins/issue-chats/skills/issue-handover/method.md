@@ -61,7 +61,7 @@ The skills read their values from it; a row left out takes its default:
 | sidebar section | the desktop app sidebar section the chats file themselves under | the repository's name |
 | worktree tool | the command, run from the primary checkout, that makes a new worktree for `<issue>-<short name>` | the core plugin's `new_worktree.py <issue>-<short name>`, as the `ship-change` skill names it (in local-main mode it starts from landings not pushed yet); or, in pull-request mode, `git worktree add -b agent/<issue>-<short name> ../<repo>-worktrees/<issue>-<short name> origin/<default branch>` |
 | title prefix | what the chat title puts before `#<issue>` (§2), and older title forms that still count as this repository's issue chats when archiving | none |
-| context limit | the context size in tokens at which a chat hands over (`300000`, `300,000`, `300k`), then optionally a limit per label: `` `300k`; label `work: model`: `600k`; label `work: animation`: `600k` ``; a chat whose issue carries such a label gets the largest of them, every other chat the first value; twice it, the user decides whether the chat works on (§4, `context_limit.py`) | 300,000, no label limits (`DESIGN_DECISIONS.md` owns the values and their review date) |
+| context limit | the context size in tokens at which a chat hands over (`300000`, `300,000`, `300k`), then optionally a limit per label: `` `300k`; label `work: model`: `600k`; label `work: animation`: `600k` ``; a chat whose issue carries such a label gets the largest of them, every other chat the first value; at twice it, at most 900k, the user decides whether the chat works on (§4, `context_limit.py`) | 300,000, no label limits (`DESIGN_DECISIONS.md` owns the values and their review date) |
 | start reading | what every chat reads at its start besides its issue: named sections, the repository's reading map | none |
 | ready extras | what the repository adds to the definition of ready of the `requirements` skill | none |
 | start extras, hand-over extras | repository steps at a chat's start and before it ends | none |
@@ -127,9 +127,9 @@ goes once its worktree passes the worktree check.
    and context down*: every request re-reads the whole conversation). Inside the task the context
    may grow; at the context limit (§1) the chat finishes the step it is on and hands over instead
    of starting a new step, unless it judges it is close to a solution: then it finishes that
-   first. At twice the limit the user decides whether it works on. In Claude Code the plugin's
+   first. At twice the limit, at most 900k, the user decides whether it works on. In Claude Code the plugin's
    hook `context_limit.py` enforces this (#77; its header owns the details): it tells the chat
-   past the limit, and past twice the limit it lets only asking the user, the session tools and
+   past the limit, and past that decision point it lets only asking the user, the session tools and
    the hand-over commands run until the user answers; the answer allows another half limit. A
    subagent has the same limit and reports back at it.
 2. **Every brief carries its check:** the end state and the command that proves it, so the agent

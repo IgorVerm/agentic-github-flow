@@ -286,9 +286,19 @@ class ContextLimit(unittest.TestCase):
         self.at(610_000)
         self.assertIn('past the limit (600k)', self.post(cwd=repo, session='lab1')[1])
         self.assertEqual(self.pre('Edit', cwd=repo, session='lab1')[0], 0)
-        self.at(1_210_000)
-        self.assertEqual(self.pre('Edit', cwd=repo, session='lab1')[0], 2)
+        self.at(890_000)
+        self.assertEqual(self.pre('Edit', cwd=repo, session='lab1')[0], 0)
+        self.at(905_000)  # the decision point: twice 600k, at most 900k (#82)
+        code, _, err = self.pre('Edit', cwd=repo, session='lab1')
+        self.assertEqual(code, 2)
+        self.assertIn('900k', err)
         self.assertEqual(self.gh_calls(), 0)
+
+    def test_the_decision_point_is_twice_the_limit_at_most_900k(self):
+        sys.path.insert(0, SCRIPTS)
+        from context_limit import decision_point
+        self.assertEqual([decision_point(n) for n in (150_000, 300_000, 450_000, 600_000, 1_000_000)],
+                         [300_000, 600_000, 900_000, 900_000, 1_000_000])
 
     def test_an_unlabelled_issue_keeps_the_default(self):
         repo = self.per_label_repo()

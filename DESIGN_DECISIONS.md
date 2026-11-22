@@ -129,8 +129,9 @@ the kind of work, not by the model. `start_issue_chat.py` records the issue's la
 chat starts (a hand-over too), so the hook reads no network per tool call; a chat started
 otherwise reads them once. The settings are read again whenever origin's default branch or the
 local branch moves, the local one when it is ahead (a setting landed in local-main mode). The
-decision point stays at twice the limit; measured: a 1M context window and automatic compaction
-at about 967k–977k keep a 600k chat from reaching 1.2M, asked on #82. Measured before (issue
+decision point is twice the limit, at most 900k: measured, a 1M context window and automatic
+compaction at about 967k–977k kept a 600k chat from reaching 1.2M; asked on #82, the maintainer
+chose "optie 1, plafond op 900k" (option 1, a ceiling at 900k). Measured before (issue
 #82): Fable building chats reached 190–280k before their first model code, so they handed over
 at 300k at or just after their first write. **Binds:** `context_limit.py`,
 `start_issue_chat.py`, `skills/issue-handover/method.md` §1 and §4, `tests/context_limit.py`,

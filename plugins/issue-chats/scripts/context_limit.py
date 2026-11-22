@@ -34,11 +34,15 @@ Cost: the hook runs at PreToolUse and PostToolUse, so a tool call pays two git c
 The records live in ~/.cache/agentic-github-flow/context-limits (AGENTIC_GITHUB_FLOW_LIMIT_RECORDS
 replaces it), outside CLAUDE_PLUGIN_DATA, which start_issue_chat.py does not get.
 
+The decision point D is twice the limit, at most 900k (Igor, 2026-11-22: "optie 1, plafond op
+900k"): 600k for a 300k chat, 900k for a 600k chat, below the automatic compaction at about
+967k-977k that would otherwise come first (a limit above 900k is its own decision point).
+
   PostToolUse, context >= L      note to the chat, again per further 25k: finish the step you
                                  are on and hand over, unless you judge you are close to a
-                                 solution, then finish it first; at 2L the user decides.
+                                 solution, then finish it first; at D the user decides.
                                  A subagent (agent_id): wrap up and report back now.
-  PreToolUse, context >= 2L      main thread: refuse every tool but asking the user
+  PreToolUse, context >= D       main thread: refuse every tool but asking the user
   and no grant covering it       (AskUserQuestion, a blocked wrap_up), loading a skill, stopping
                                  a task, the desktop app's session and turn tools, ToolSearch,
                                  and Bash whose every command (split outside quotes, heredoc
@@ -81,6 +85,7 @@ from next_issue import row_in  # noqa: E402
 from question_label import chat_issue, state_dir  # noqa: E402
 
 DEFAULT_LIMIT = 300_000
+CEILING = 900_000      # the decision point: twice the limit, at most this (Igor, 2026-11-22, #82)
 RECORDS_ENV = "AGENTIC_GITHUB_FLOW_LIMIT_RECORDS"
 # `label `a`: `600k`` or `labels `a`, `b`: `600k``: the labels, then the colon and the count.
 LABEL_LIMIT = re.compile(r"labels?\s+((?:`[^`]+`[\s,]*(?:and\s+|or\s+)?)+?)\s*:\s*`?([^`;|]*)`?",
@@ -100,6 +105,13 @@ SCRIPT = re.compile(r"(?:^|/)(?:" + SCRIPTS + r")\.py$")
 HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n.*?\n\s*\2\s*(?=\n|$)", re.S)
 CAT_HEREDOC = re.compile(r"\$\(\s*cat\s*<<-?\s*(['\"]?)(\w+)\1[^\n]*\n.*?\n\s*\2\s*\)", re.S)
 OPERATORS = {";", "&&", "||", "|", "&", "\n"}
+
+
+def decision_point(lim: int) -> int:
+    """Where the user decides whether a chat works on: twice the limit, at most CEILING, which
+    stays below Claude Code's automatic compaction (about 967k-977k with a 1M window, measured
+    2026-11-22), so a 600k chat reaches it."""
+    return min(2 * lim, max(CEILING, lim))
 
 
 def tokens(text: str) -> int | None:
@@ -422,7 +434,7 @@ def main() -> int:
         ctx = context_now(transcript, sidechain=False)
     if ctx is None:
         return 0
-    hard = 2 * lim
+    hard = decision_point(lim)
 
     if ctx < lim and any(key in state for key in ("noted", "stopped_at", "stopped_time", "granted_until")):
         for key in ("noted", "stopped_at", "stopped_time", "granted_until"):
@@ -445,12 +457,12 @@ def main() -> int:
         if allowed_when_stopped(tool, args, sub):
             return 0
         if sub:
-            print(f"context limit: this subagent's context is {k(ctx)}, past twice the limit "
-                  f"({k(hard)}). Stop and report what you found and did to the chat that started "
+            print(f"context limit: this subagent's context is {k(ctx)}, past the point "
+                  f"where it must stop ({k(hard)}). Stop and report what you found and did to the chat that started "
                   f"you; no other tool runs.", file=sys.stderr)
             return 2
-        print(f"context limit: the chat for issue #{issue} is at {k(ctx)} context, past twice the "
-              f"limit ({k(hard)}). From here the user decides whether this chat works on. Ask the "
+        print(f"context limit: the chat for issue #{issue} is at {k(ctx)} context, past the "
+              f"decision point ({k(hard)}). From here the user decides whether this chat works on. Ask the "
               f"user now, with AskUserQuestion or wrap_up with blocked: true (the question goes on "
               f"#{issue} with the question label first), whether to continue or hand over. Until "
               f"the user answers, only asking, skills, the session tools, and git, gh and the "
@@ -468,7 +480,7 @@ def main() -> int:
     if state.pop("grant_note", None):
         save(spath, state)
         return note("PostToolUse", f"context limit: the user answered while this chat was stopped "
-                                   f"at twice the limit. Follow that answer: to hand over, or to "
+                                   f"at the decision point. Follow that answer: to hand over, or to "
                                    f"work on; working on is allowed until "
                                    f"{k(state['granted_until'])}, then ask again.")
     if ctx < lim or ctx < state.get("noted", 0) + STEP:

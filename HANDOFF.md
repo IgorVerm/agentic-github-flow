@@ -44,7 +44,7 @@ Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard o
     at the answer and at the close. Measured live in the desktop app (#75).
     A second hook (`context_limit.py`, #77) enforces `context limit` (default 300,000; per label,
     #82, e.g. 600k for `work: model` and `work: animation`): past it a note to hand over, past
-    twice it only asking the user and the hand-over run until the user answers. Measured
+    twice it (at most 900k) only asking the user and the hand-over run until the user answers. Measured
     offline; not yet in a live chat.
 - Efficient design (#37): the core skill `efficient-design` is a checklist at design and review
   (work per frame, request or job run grows with what changed, not with all data), and the core

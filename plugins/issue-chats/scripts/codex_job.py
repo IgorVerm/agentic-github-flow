@@ -5,6 +5,7 @@ Usage (by codex_worker.py only, as `codex sandbox … -- python3 -I codex_job.py
        codex_job.py setup <worktree> <job>
        codex_job.py prompt <file>
        codex_job.py settings <worktree>
+       codex_job.py tools <worktree>
        codex_job.py export <job> <base>
 
 `codex_worker.py` runs outside every sandbox, so it runs no git and opens no file that the
@@ -32,6 +33,10 @@ in <worktree> say about reads (`permissions.deny` Read rules,
 `permissions.blockReadsOutsideWorkingDirectories`, `sandbox.filesystem.denyRead`,
 `sandbox.credentials`), for the worker to add to the deny list. A file that is missing counts as
 empty; one that is not a plain file of at most 1 MiB of JSON is refused.
+
+`tools` prints the project's tool list `.agents/codex-tools.json` in <worktree> (`list`, None
+without one; codex_tools.py's header owns it) and the `Bash(...)` allow, ask and deny rules of
+the project's two settings files, for the worker to anchor each tool.
 
 `export` cuts `<job>/out/codex.bundle`: Codex's commits on its branch on top of <base>, with
 `log.showSignature` and `core.fsmonitor` off, since Codex wrote the git folder's config (a
@@ -243,6 +248,39 @@ def settings(worktree):
     return {'status': 'read', 'settings': found}
 
 
+TOOLS_LIST = os.path.join('.agents', 'codex-tools.json')
+TOOLS_MAX = 64 * 1024
+
+
+def tools(worktree):
+    """The project's tool list (codex_tools.py's header) and the Bash rules of its Claude Code
+    settings in <worktree>: the chat's files, so read here. No list: `list` is None."""
+    data = read_plain(os.path.join(worktree, TOOLS_LIST), TOOLS_MAX, TOOLS_LIST)
+    listed = None
+    if data is not None:
+        try:
+            listed = json.loads(data.decode('utf-8'))
+        except ValueError:
+            raise Refused('%s is not valid JSON' % TOOLS_LIST)
+    rules = {'allow': [], 'ask': [], 'deny': []}
+    for name in ('settings.json', 'settings.local.json'):
+        path = os.path.join(worktree, '.claude', name)
+        raw = read_plain(path, PROMPT_MAX, path)
+        if raw is None:
+            continue
+        try:
+            whole = json.loads(raw.decode('utf-8'))
+        except ValueError:
+            raise Refused('%s is not valid JSON, so its Bash rules are unknown' % path)
+        permissions = whole.get('permissions') if isinstance(whole, dict) else None
+        for kind in rules:
+            found = permissions.get(kind) if isinstance(permissions, dict) else None
+            rules[kind] += [rule for rule in found if isinstance(rule, str) and
+                            (rule == 'Bash' or rule.startswith('Bash('))] \
+                if isinstance(found, list) else []
+    return {'status': 'read', 'list': listed, 'rules': rules}
+
+
 def export(job, base):
     env = job_env(job)
     env.pop('GIT_WORK_TREE')
@@ -273,7 +311,7 @@ def export(job, base):
 
 def main(argv):
     actions = {'setup': (setup, 2), 'prompt': (prompt, 1), 'settings': (settings, 1),
-               'export': (export, 2)}
+               'tools': (tools, 1), 'export': (export, 2)}
     if not argv or argv[0] not in actions or len(argv) - 1 != actions[argv[0]][1]:
         print(__doc__.split('\n\n')[1], file=sys.stderr)
         return 2

@@ -6,7 +6,10 @@ newest API call carries a chosen context. Each case is a way the limit could fai
 past the limit or repeated on every call, a chat working on past twice the limit without the
 user's word, the hand-over itself blocked, the user's answer not letting it go on, a grant that
 never ends, a subagent running on, another repository or branch touched, the gate starting Python
-where it should not, or the hook's own failure stopping work. Offline; no network, no gh.
+where it should not, or the hook's own failure stopping work; and for the limit per label (#82):
+a labelled issue kept at the default or an unlabelled one raised, a hand-over's successor losing
+the label, a setting landed on local main or changed in a running session not counting, a
+network call per tool call. Offline; a stand-in `gh` (AGENTIC_GITHUB_FLOW_GH) logs its calls.
 """
 import json
 import os
@@ -20,6 +23,16 @@ SCRIPTS = os.path.join(ROOT, 'plugins', 'issue-chats', 'scripts')
 HOOK = os.path.join(SCRIPTS, 'context_limit.py')
 GATE = os.path.join(SCRIPTS, 'context-gate.sh')
 HANDOFF = '# Handoff\n\n## Issue chats settings\n\n| Setting | Value |\n|---|---|\n%s\n## Next\n'
+PER_LABEL = ('| context limit | `300k`; label `work: model`: `600k`; label `work: animation`: '
+             '`600k` |')
+GH = r'''import json, os, sys
+with open(os.environ['GH_LOG'], 'a') as f:
+    f.write(json.dumps(sys.argv[1:]) + '\n')
+labels = os.environ.get('GH_LABELS')
+if labels is None:
+    sys.exit(1)
+print(json.dumps({'labels': [{'name': n} for n in json.loads(labels)]}))
+'''
 
 
 def git(cwd, *args):
@@ -37,7 +50,15 @@ class ContextLimit(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.state = os.path.join(self.tmp.name, 'state')
-        self.env = dict(os.environ, AGENTIC_GITHUB_FLOW_CONTEXT_STATE=self.state)
+        self.records = os.path.join(self.tmp.name, 'records')
+        self.gh_log = os.path.join(self.tmp.name, 'gh.log')
+        gh = os.path.join(self.tmp.name, 'gh.py')
+        with open(gh, 'w') as f:
+            f.write(GH)
+        self.env = dict(os.environ, AGENTIC_GITHUB_FLOW_CONTEXT_STATE=self.state,
+                        AGENTIC_GITHUB_FLOW_LIMIT_RECORDS=self.records, GH_LOG=self.gh_log,
+                        AGENTIC_GITHUB_FLOW_GH=json.dumps([sys.executable, gh]))
+        self.env.pop('GH_LABELS', None)
         self.repo = self.make_repo('repo', '| ready label | `agent-ready` |')
         git(self.repo, 'checkout', '-q', '-b', 'agent/7-fix-it')
         self.transcript = os.path.join(self.tmp.name, 'sess.jsonl')
@@ -199,6 +220,157 @@ class ContextLimit(unittest.TestCase):
         self.assertIn('report', err)
         self.assertEqual(self.pre('SubagentHandback', agent_id='ab1')[0], 0)  # its report goes
         self.assertEqual(self.pre('Edit')[0], 0)  # the main chat is still at 100k
+
+    # the limit per label (#82)
+    def per_label_repo(self, name='lab'):
+        repo = self.make_repo(name, PER_LABEL)
+        git(repo, 'checkout', '-q', '-b', 'agent/82-x')
+        return repo
+
+    def record(self, repo, labels, issue=82):
+        sys.path.insert(0, SCRIPTS)
+        import context_limit
+        os.environ[context_limit.RECORDS_ENV] = self.records
+        try:
+            context_limit.record_labels(repo, issue, labels, 'test')
+        finally:
+            os.environ.pop(context_limit.RECORDS_ENV, None)
+
+    def gh_calls(self):
+        if not os.path.exists(self.gh_log):
+            return 0
+        with open(self.gh_log) as f:
+            return len(f.read().splitlines())
+
+    def limit_in_state(self, session):
+        with open(os.path.join(self.state, session + '.json')) as f:
+            return json.load(f)['limit']
+
+    def test_the_cell_form_per_label(self):
+        sys.path.insert(0, SCRIPTS)
+        from context_limit import limit_of, limits_in
+        default, per = limits_in(PER_LABEL.split('|')[2])
+        self.assertEqual((default, per), (300_000, {'work: model': 600_000,
+                                                    'work: animation': 600_000}))
+        self.assertEqual(limit_of(default, per, ['bug', 'Work: Model']), 600_000)
+        self.assertEqual(limit_of(default, per, ['bug']), 300_000)
+        self.assertEqual(limits_in("`250k`; label `big`: `1M`; label `odd`: `x`"),
+                         (250_000, {'big': 1_000_000}))
+        self.assertEqual(limits_in("label `big`: `500k`"), (300_000, {'big': 500_000}))
+
+    def test_a_labelled_issue_gets_its_label_limit_from_the_record(self):
+        repo = self.per_label_repo()
+        self.record(repo, ['work: model', 'agent-ready'])
+        self.at(400_000)
+        self.assertEqual(self.post(cwd=repo, session='lab1'), (0, '', ''))
+        self.assertEqual(self.limit_in_state('lab1'), 600_000)
+        self.at(610_000)
+        self.assertIn('past the limit (600k)', self.post(cwd=repo, session='lab1')[1])
+        self.assertEqual(self.pre('Edit', cwd=repo, session='lab1')[0], 0)
+        self.at(1_210_000)
+        self.assertEqual(self.pre('Edit', cwd=repo, session='lab1')[0], 2)
+        self.assertEqual(self.gh_calls(), 0)
+
+    def test_an_unlabelled_issue_keeps_the_default(self):
+        repo = self.per_label_repo()
+        self.record(repo, ['agent-ready'])
+        self.at(310_000)
+        self.assertIn('past the limit (300k)', self.post(cwd=repo, session='un1')[1])
+        self.assertEqual(self.gh_calls(), 0)
+
+    def test_the_successor_of_a_hand_over_keeps_the_label_limit(self):
+        repo = self.per_label_repo()
+        self.record(repo, ['work: animation'])
+        self.at(400_000)
+        self.post(cwd=repo, session='old')
+        self.assertEqual(self.limit_in_state('old'), 600_000)
+        self.post(cwd=repo, session='successor')  # a new session id in the same worktree
+        self.assertEqual(self.limit_in_state('successor'), 600_000)
+        self.assertEqual(self.gh_calls(), 0)
+
+    def test_a_chat_started_otherwise_reads_its_labels_once(self):
+        repo = self.per_label_repo()
+        self.env['GH_LABELS'] = json.dumps(['work: model'])
+        self.at(400_000)
+        for _ in range(3):
+            self.post(cwd=repo, session='other1')
+            self.pre('Edit', cwd=repo, session='other1')
+        self.assertEqual(self.limit_in_state('other1'), 600_000)
+        self.assertEqual(self.gh_calls(), 1)
+        self.post(cwd=repo, session='other2')  # the record serves the next session
+        self.assertEqual(self.gh_calls(), 1)
+        self.assertEqual(self.limit_in_state('other2'), 600_000)
+
+    def test_no_answer_from_github_gives_the_default_and_no_retry_per_call(self):
+        repo = self.per_label_repo()
+        self.at(310_000)
+        self.assertIn('limit (300k)', self.post(cwd=repo, session='nogh')[1])
+        self.post(cwd=repo, session='nogh')
+        self.assertEqual(self.gh_calls(), 1)
+
+    def test_no_label_rows_no_labels_read(self):
+        self.at(310_000)
+        self.post(session='plain1')
+        self.assertEqual(self.gh_calls(), 0)
+
+    def test_a_setting_landed_on_local_main_counts_before_the_push(self):
+        repo = self.make_repo('lm', '| context limit | `300k` |')
+        git(repo, 'checkout', '-q', '-b', 'agent/5-x')
+        self.at(350_000)
+        self.assertIn('limit (300k)', self.post(cwd=repo, session='lm1')[1])
+        git(repo, 'checkout', '-q', 'main')
+        with open(os.path.join(repo, 'HANDOFF.md'), 'w') as f:
+            f.write(HANDOFF % '| context limit | `400k` |')
+        git(repo, 'commit', '-q', '-am', 'raise the limit')  # landed on local main, not pushed
+        git(repo, 'checkout', '-q', 'agent/5-x')
+        self.assertEqual(self.post(cwd=repo, session='lm1')[1], '')
+        self.assertEqual(self.limit_in_state('lm1'), 400_000)
+
+    def test_local_main_behind_origin_does_not_count(self):
+        repo = self.make_repo('behind', '| context limit | `300k` |')
+        git(repo, 'checkout', '-q', '-b', 'agent/5-x')
+        with open(os.path.join(repo, 'HANDOFF.md'), 'w') as f:
+            f.write(HANDOFF % '| context limit | `200k` |')
+        git(repo, 'commit', '-q', '-am', 'fetched from origin')
+        git(repo, 'update-ref', 'refs/remotes/origin/main', 'HEAD')  # origin ahead of local main
+        self.at(250_000)
+        self.assertIn('limit (200k)', self.post(cwd=repo, session='bh')[1])
+
+    def test_a_changed_setting_counts_in_a_running_session(self):
+        repo = self.make_repo('chg', '| context limit | `300k` |')
+        git(repo, 'checkout', '-q', '-b', 'agent/5-x')
+        self.at(250_000)
+        self.assertEqual(self.post(cwd=repo, session='chg1')[1], '')
+        git(repo, 'checkout', '-q', 'main')
+        with open(os.path.join(repo, 'HANDOFF.md'), 'w') as f:
+            f.write(HANDOFF % '| context limit | `200k` |')
+        git(repo, 'commit', '-q', '-am', 'lower the limit')
+        git(repo, 'update-ref', 'refs/remotes/origin/main', 'HEAD')  # fetched
+        git(repo, 'checkout', '-q', 'agent/5-x')
+        self.assertIn('limit (200k)', self.post(cwd=repo, session='chg1')[1])
+
+    def test_a_session_begun_under_the_previous_hook_keeps_its_limit(self):
+        os.makedirs(self.state, exist_ok=True)
+        with open(os.path.join(self.state, 'oldsess.json'), 'w') as f:
+            json.dump({'issue': 7, 'limit': 300_000}, f)  # the state the hook of #77 wrote
+        self.at(310_000)
+        self.assertIn('past the limit (300k)', self.post(session='oldsess')[1])
+
+    def test_a_label_limit_set_in_a_running_session_counts(self):
+        repo = self.make_repo('later', '| context limit | `300k` |')
+        git(repo, 'checkout', '-q', '-b', 'agent/82-x')
+        self.record(repo, ['work: model'])
+        self.at(400_000)
+        self.assertIn('limit (300k)', self.post(cwd=repo, session='lt')[1])
+        git(repo, 'checkout', '-q', 'main')
+        with open(os.path.join(repo, 'HANDOFF.md'), 'w') as f:
+            f.write(HANDOFF % PER_LABEL)
+        git(repo, 'commit', '-q', '-am', 'per label')
+        git(repo, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
+        git(repo, 'checkout', '-q', 'agent/82-x')
+        self.post(cwd=repo, session='lt')
+        self.assertEqual(self.limit_in_state('lt'), 600_000)
+        self.assertEqual(self.gh_calls(), 0)
 
     # where it does nothing
     def test_other_branch_or_repository_is_left_alone(self):

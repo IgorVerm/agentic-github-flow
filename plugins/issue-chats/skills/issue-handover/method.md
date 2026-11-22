@@ -61,7 +61,7 @@ The skills read their values from it; a row left out takes its default:
 | sidebar section | the desktop app sidebar section the chats file themselves under | the repository's name |
 | worktree tool | the command, run from the primary checkout, that makes a new worktree for `<issue>-<short name>` | the core plugin's `new_worktree.py <issue>-<short name>`, as the `ship-change` skill names it (in local-main mode it starts from landings not pushed yet); or, in pull-request mode, `git worktree add -b agent/<issue>-<short name> ../<repo>-worktrees/<issue>-<short name> origin/<default branch>` |
 | title prefix | what the chat title puts before `#<issue>` (§2), and older title forms that still count as this repository's issue chats when archiving | none |
-| context limit | the context size in tokens at which a chat hands over (`300000`, `300,000`, `300k`); twice it, the user decides whether the chat works on (§4, `context_limit.py`) | 300,000 (`DESIGN_DECISIONS.md` owns the value and its review date) |
+| context limit | the context size in tokens at which a chat hands over (`300000`, `300,000`, `300k`), then optionally a limit per label: `` `300k`; label `work: model`: `600k`; label `work: animation`: `600k` ``; a chat whose issue carries such a label gets the largest of them, every other chat the first value; twice it, the user decides whether the chat works on (§4, `context_limit.py`) | 300,000, no label limits (`DESIGN_DECISIONS.md` owns the values and their review date) |
 | start reading | what every chat reads at its start besides its issue: named sections, the repository's reading map | none |
 | ready extras | what the repository adds to the definition of ready of the `requirements` skill | none |
 | start extras, hand-over extras | repository steps at a chat's start and before it ends | none |
@@ -249,6 +249,8 @@ once the brief came back "delivered", this chat archives itself (`get_session "s
 wake it to work beside its successor: an archived chat takes no message. The archive leaves the
 worktree in place, since the app did not make it (no `worktreePath`; measured, #80), and the
 guard hook lets it pass on the note although the commits are not on GitHub.
+`start_issue_chat.py` records the issue's labels for the worktree before the successor starts,
+with `--handover` too, so the successor keeps a label's context limit (§1 `context limit`).
 
 **For an idle chat**, another chat such as an orchestrator hands over the same way, in place
 only: first `get_session <that chat's id>` must show no `worktreePath`; `--handover` accepts a

@@ -134,18 +134,31 @@ BLOCK += ["git -C /r stash drop # don't", "git -C /r tag -d v1 # it's gone",
           "echo hi # it's\nx=\"$(git -C /r reset --hard)\"",
           "# it's\ngit -C /r log --format=\"$(git -C /r tag -d v1)\"",
           'git commit -m x --no-verify # a message is not this flag', 'git commit -nm x',
-          'git commit --all -m x', 'git -C /r commit -q --all -m "a clean step"']
+          'git commit --all -m x', 'git -C /r commit -q --all -m "a clean step"',
+          # the review of #33: quoting starts over inside $(…) and backticks; <<\EOF opens a
+          # here-document; an alias still cannot skip a hook; an option value is no subcommand
+          'echo "$(echo \'"\')\' # " ; git -C r clean -fdx',
+          'echo "$(echo \'"\')\' # " ; git -C r reset --hard',
+          'echo "`echo \'"\'`\' # " ; git -C r clean -fdx',
+          "cat <<\\EOF\n'\nEOF\necho ' # ' ; git -C r clean -fdx",
+          'git ci --no-verify -m x', 'git -C r ci --no-verify -m x',
+          'git -C r --attr-source HEAD clean -fdx', 'git --attr-source HEAD reset --hard',
+          'git --some-new-option HEAD clean -fdx', 'git -C r --no-pager clean -n']
 # Claude Code (--claude): exit 3 asks the user, 0 passes, 2 blocks (a block beats an earlier ask)
 ASK = ['git push origin main', 'git -C /r push origin main', 'git -C /r commit --amend --no-edit',
        'git update-ref refs/heads/x HEAD', 'git -C /r remote add up https://x', 'ssh box git push',
        'timeout 60 git -C /r push', "git -C /r push origin main # it's ready",
        'git -C /r remote set-url origin https://x', 'git -C /r remote rename a b',
        'git -c user.name=x -C /r commit -m x --amend', 'bash -lc "git -C /r push"',
+       'echo "$(echo \'"\')\' # " ; git -C r push origin main',
+       'git -C r --attr-source HEAD push origin main', 'git --some-new-option x push',
        'git -C /r commit -m "an open quote']  # what the guard cannot read is asked
 CLAUDE_PASS = ["# don't\ngit -C /r commit -F - <<'EOF'\nit's done # here\nEOF",
                'git -C /r commit -m "push it, then --amend"', 'git -C /r commit -m "--amend"',
                'git log --grep push', 'git -C /r remote -v', 'git -C /r status',
-               'git -C /r commit --allow-empty -m "push, clean, update-ref"', 'git push --help']
+               'git -C /r commit --allow-empty -m "push, clean, update-ref"', 'git push --help',
+               'git -C /r commit -m "$(echo \'a "clean" step\')" # don\'t push it', 'git --no-pager log -1',
+               "cat <<\\EOF\nit's # push\nEOF"]
 
 
 def run(command):

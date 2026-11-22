@@ -18,7 +18,9 @@ cannot decode (`$'…'` strings are decoded first), or is nested deeper than MAX
 eval in …). Hook input that is JSON but not an object is blocked too. A command the user asks for
 by name the user runs in their own terminal. Shell comments are removed before anything is
 judged (`strip_comments`), and a commit's option values are never read as flags
-(`commit_flags`): `git commit -m "--no-verify"` is a message, not a hook bypass.
+(`commit_flags`): `git commit -m "--no-verify"` is a message, not a hook bypass. An option
+before the subcommand that is in neither GIT_VALUE_OPTS nor GIT_FLAG_OPTS is judged both ways,
+as a flag and as `<option> <value>`, so a new git option cannot hide the subcommand.
 
 Claude Code (`--claude`, #33): the same blocks, plus "ask" for what the user approves per call:
 a push, `commit --amend`, `update-ref` and changing a remote, in any spelling. It replaces the
@@ -51,11 +53,17 @@ WRAPPERS = {'env', 'command', 'builtin', 'exec', 'nohup', 'time', 'sudo', 'timeo
             'caffeinate', 'stdbuf', 'noglob', 'export', 'xargs', 'find'}
 SEPARATORS = set(';&|(){}\n')
 GIT_VALUE_OPTS = {'-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path',
-                  '--super-prefix', '--config-env'}
+                  '--super-prefix', '--config-env', '--attr-source'}
+# git's options before the subcommand that take no separate value; any other one is read both
+# ways, as a flag and as an option with a value, so a new option cannot hide the subcommand
+GIT_FLAG_OPTS = {'-p', '--paginate', '-P', '--no-pager', '--bare', '--no-replace-objects',
+                 '--no-lazy-fetch', '--no-optional-locks', '--no-advice', '--literal-pathspecs',
+                 '--glob-pathspecs', '--noglob-pathspecs', '--icase-pathspecs', '-v',
+                 '--version', '-h', '--help', '--html-path', '--man-path', '--info-path'}
 CONFIG_KEYS = ('core.hookspath', 'alias.', 'pull.rebase')
 BLIND_PATHS = {'.', './', '*', ':/', ':/.', ':(top)', '..', '../'}
 ASSIGN = re.compile(r'[A-Za-z_][A-Za-z0-9_]*=.*', re.S)
-HEREDOC = re.compile(r'<<(-?)\s*["\']?([A-Za-z_][A-Za-z0-9_]*)["\']?')
+HEREDOC = re.compile(r'<<(-?)\s*\\?["\']?([A-Za-z_][A-Za-z0-9_]*)["\']?')  # also <<\EOF
 EXEC_HINT = re.compile(r'subprocess|system|popen|exec|spawn|check_output|check_call|`|%x')
 MAX_INPUT = 32_000  # characters; a longer command that may run git is blocked, not parsed
 MAX_DEPTH = 8
@@ -69,8 +77,10 @@ COMMIT_VALUE_LONG = ('--message', '--file', '--reuse-message', '--reedit-message
                      '--author', '--date', '--trailer', '--fixup', '--squash', '--cleanup',
                      '--pathspec-from-file')
 COMMIT_FLAG_LONG = ('--amend', '--all', '--allow-empty', '--allow-empty-message', '--no-verify')
-HOOK_RUNNERS = {'commit', 'push', 'merge', 'am', 'pull', 'rebase', 'cherry-pick', 'revert',
-                'send-email'}  # the subcommands where --no-verify skips a hook
+# reads whose option values may be the word --no-verify (`git log --grep --no-verify`); on any
+# other subcommand, an alias included (`git ci --no-verify`), the flag is refused
+NO_HOOKS = {'log', 'show', 'grep', 'shortlog', 'rev-list', 'whatchanged', 'blame', 'diff',
+            'status', 'describe', 'for-each-ref', 'ls-files', 'cat-file', 'rev-parse', 'help'}
 
 
 def split_commands(text):
@@ -96,45 +106,65 @@ def strip_comments(text):
     its line. Here-document bodies are copied as they are, without reading quotes in them. It
     runs before the here-document and substitution passes, so they see the same quoting as the
     shell: an apostrophe in `git -C r stash drop # don't` once left them an open quote, which
-    hid the command (#33)."""
-    lines, out, quote, i = text.split('\n'), [], None, 0
-    while i < len(lines):
-        line, kept, marks, k = lines[i], [], [], 0
-        while k < len(line):
-            c = line[k]
-            if quote:
-                kept.append(c)
-                if c == '\\' and quote == '"' and k + 1 < len(line):
-                    kept.append(line[k + 1])
-                    k += 1
-                elif c == quote:
-                    quote = None
-            elif c == '\\' and k + 1 < len(line):
-                kept.append(line[k:k + 2])
-                k += 1
-            elif c in '"\'':
-                quote = c
-                kept.append(c)
-            elif c == '#' and (k == 0 or line[k - 1] in ' \t;&|()'):
-                break
-            elif line.startswith('<<', k) and not line.startswith('<<<', k) and HEREDOC.match(line, k):
-                m = HEREDOC.match(line, k)
-                marks.append(m.groups())
-                kept.append(line[k:m.end()])
-                k = m.end()
-                continue
-            else:
-                kept.append(c)
-            k += 1
-        out.append(''.join(kept))
+    hid the command (#33). Quoting starts over inside `$(…)` and backticks, also within double
+    quotes, as in the shell: `"$(echo '"')' # "` holds no comment (#33 review)."""
+    out, stack, marks, i, n = [], [], [], 0, len(text)
+    while i < n:
+        c, top = text[i], stack[-1] if stack else None
+        if top == "'":
+            out.append(c)
+            stack.pop() if c == "'" else None
+            i += 1
+            continue
+        if c == '\\' and i + 1 < n:
+            out.append(text[i:i + 2])
+            i += 2
+            continue
+        if c == '\n':
+            out.append(c)
+            i += 1
+            if marks and top not in ('"', "'"):
+                for dash, word in marks:  # the body, verbatim, up to its closing line
+                    while i < n:
+                        j = text.find('\n', i)
+                        line = text[i:n if j < 0 else j]
+                        out.append(line + ('' if j < 0 else '\n'))
+                        i = n if j < 0 else j + 1
+                        if (line.lstrip('\t') if dash else line) == word:
+                            break
+                marks = []
+            continue
+        if text.startswith('$(', i):
+            stack.append(')')
+            out.append('$(')
+            i += 2
+            continue
+        if top == '"':
+            if c == '"':
+                stack.pop()
+            elif c == '`':
+                stack.append('`')
+        elif c in '"\'':
+            stack.append(c)
+        elif c == '`':
+            stack.pop() if top == '`' else stack.append('`')
+        elif c == '(' and top == ')':
+            stack.append(')')
+        elif c == ')' and top == ')':
+            stack.pop()
+        elif c == '#' and (i == 0 or text[i - 1] in ' \t\n;&|()`'):
+            j = text.find('\n', i)
+            i = n if j < 0 else j
+            continue
+        elif text.startswith('<<', i) and not text.startswith('<<<', i) and HEREDOC.match(text, i):
+            m = HEREDOC.match(text, i)
+            marks.append(m.groups())
+            out.append(text[i:m.end()])
+            i = m.end()
+            continue
+        out.append(c)
         i += 1
-        for dash, word in marks:  # the body, verbatim, up to its closing line
-            while i < len(lines):
-                out.append(lines[i])
-                i += 1
-                if (lines[i - 1].lstrip('\t') if dash else lines[i - 1]) == word:
-                    break
-    return '\n'.join(out)
+    return ''.join(out)
 
 
 def strip_heredocs(text):
@@ -350,6 +380,10 @@ def judge_git(args):
         else:
             if opt.startswith('--config-env='):
                 config.append(opt.split('=', 1)[1])
+            if opt not in GIT_FLAG_OPTS and '=' not in opt:
+                other = judge_git(args[:i] + args[i + 2:])  # read as `<opt> <value>`
+                if other:
+                    return other
             i += 1
     for c in config:
         if c.lower().startswith(CONFIG_KEYS):
@@ -364,7 +398,7 @@ def judge_git(args):
     flags = commit_flags(rest) if sub == 'commit' else [a for a in before_dd if a.startswith('-')]
     words = [a for a in before_dd if not a.startswith('-')]
 
-    if sub in HOOK_RUNNERS and any(f.startswith('--no-v') and '--no-verify'.startswith(f)
+    if sub not in NO_HOOKS and any(f.startswith('--no-v') and '--no-verify'.startswith(f)
                                    for f in flags):
         return 'bypasses a hook (--no-verify)'
     if sub == 'push':
@@ -460,7 +494,12 @@ def ask_git(args):
     """args: tokens after `git`. The reason the user is asked first (Claude Code), or None."""
     i = 0
     while i < len(args) and args[i].startswith('-'):
-        i += 2 if args[i] in GIT_VALUE_OPTS else 1
+        opt = args[i]
+        if opt not in GIT_VALUE_OPTS and opt not in GIT_FLAG_OPTS and '=' not in opt:
+            other = ask_git(args[:i] + args[i + 2:])  # read as `<opt> <value>`
+            if other:
+                return other
+        i += 2 if opt in GIT_VALUE_OPTS else 1
     if i >= len(args):
         return None
     sub, rest = args[i], args[i + 1:]

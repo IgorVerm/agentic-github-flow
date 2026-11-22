@@ -281,7 +281,8 @@ not stopped); split off as #33: "Yes, open it" (2026-11-10).
 **What:** `plugins/guards/policy/claude-permissions.json` holds no git rule whose `*` can reach
 into a commit message (`git -C * …`, `git -c * …`, `git * …`, `git commit * …`; 69 deny and 10
 ask rules dropped, `git commit --all*` became `git commit --all *`). The git guard's `--claude`
-mode judges those spellings by parsing instead: it blocks what they denied and asks for a push,
+mode judges those spellings by parsing instead: it blocks the commands they denied (checked on
+an example of every former rule, `tests/claude_git_rules.py`) and asks for a push,
 `commit --amend`, `update-ref` and a remote change; a commit's option values are never flags and
 shell comments are removed first. The hook also covers the terminal tool. The installer removes
 the rules it added that the policy dropped, and names the user's own such rules without

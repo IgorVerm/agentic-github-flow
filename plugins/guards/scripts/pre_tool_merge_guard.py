@@ -31,8 +31,9 @@ and `sh -c '…'`; `@{u}` and `main@{0}` are refs, and a merge without a ref is 
 `--no-commit` are not honoured. It passes `--abort`, `--continue`, `--quit`, a ref git cannot
 resolve (git then fails on its own), a computed `cd` or `-C`, `--git-dir`/`--work-tree`, and
 `git pull`, whose merge target is known only after its fetch. For the same reason a merge in
-the session's worktree that follows a `git fetch` or `git pull` in the same call is refused
-(the ref is judged before the fetch runs): fetch in a call of its own, then merge. It never
+the session's worktree that follows a `git fetch`, `git pull` or `git remote update` in the
+same call is refused (the ref is judged before the fetch runs): fetch in a call of its own,
+then merge. A merge from a subfolder is judged from the worktree's top level. It never
 answers "allow" or "ask", so it lets nothing run that would not run without it; a fault in
 it, or a git call that fails or takes longer than GIT_TIMEOUT seconds, lets the call pass.
 Work: one `rev-parse` per folder and one `merge-tree` and `diff` per merged ref, which grow
@@ -67,9 +68,9 @@ MARKER = "merge guard"
 WRAPPERS = {"env", "command", "builtin", "exec", "nohup", "time", "timeout", "nice", "noglob",
             "caffeinate", "stdbuf"}
 SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
-WRAPPER_VALUE_OPTS = {"-u", "--unset", "-s", "--signal", "-k", "--kill-after", "-n",
-                      "--adjustment", "-C", "--chdir"}  # env, timeout, nice: option and value
-FETCHES = {"fetch", "pull"}
+WRAPPER_VALUE_OPTS = {  # the options that take a separate value, per wrapper
+    "env": {"-u", "--unset", "-C", "--chdir"}, "timeout": {"-s", "--signal", "-k", "--kill-after"},
+    "nice": {"-n", "--adjustment"}}
 MERGE_VALUE_OPTS = {"-m", "-F", "-s", "-X", "--file", "--strategy", "--strategy-option",
                     "--into-name", "--cleanup"}  # -S takes its key id only attached
 STOP = {"--abort", "--continue", "--quit", "--skip"}
@@ -194,9 +195,18 @@ def subcommand(args: list[str]) -> str | None:
     return args[i] if i < len(args) else None
 
 
+def fetches(args: list[str]) -> bool:
+    """True for `git fetch`, `git pull` and `git remote update`: they move remote refs."""
+    name = subcommand(args)
+    if name in ("fetch", "pull"):
+        return True
+    rest = args[args.index(name) + 1:] if name == "remote" else []
+    return bool(rest) and rest[0] == "update"
+
+
 def merges(text: str, directory: str | None, depth: int = 0, seen: list | None = None):
     """Yield git_merge's answer for each `git merge` in a command run from `directory`, with
-    True added when a `git fetch` or `git pull` runs before it in the same command."""
+    True added when fetches() found a command before it in the same command."""
     if depth > 4:
         return
     seen = [] if seen is None else seen  # a fetch or pull seen so far
@@ -205,12 +215,13 @@ def merges(text: str, directory: str | None, depth: int = 0, seen: list | None =
         while tokens and (ASSIGN.match(tokens[0]) or tokens[0] in LEAD):
             tokens = tokens[1:]
         while tokens and gg.base(tokens[0]) in WRAPPERS:
+            valued = WRAPPER_VALUE_OPTS.get(gg.base(tokens[0]), set())
             tokens = tokens[1:]
             while tokens and (tokens[0].startswith("-") or ASSIGN.match(tokens[0])
                               or re.fullmatch(r"[0-9.]+[smhd]?", tokens[0])):
-                if tokens[0] in ("-C", "--chdir") and len(tokens) > 1:
+                if tokens[0] in ("-C", "--chdir") and "-C" in valued and len(tokens) > 1:
                     directory = literal_dir(tokens[1], directory)  # env -C <dir>
-                tokens = tokens[2:] if tokens[0] in WRAPPER_VALUE_OPTS else tokens[1:]
+                tokens = tokens[2:] if tokens[0] in valued else tokens[1:]
         if not tokens:
             continue
         name = gg.base(tokens[0])
@@ -218,7 +229,7 @@ def merges(text: str, directory: str | None, depth: int = 0, seen: list | None =
             found = git_merge(tokens[1:], directory)
             if found:
                 yield (*found, bool(seen))
-            elif subcommand(tokens[1:]) in FETCHES:
+            elif fetches(tokens[1:]):
                 seen.append(True)
         elif name in SHELLS:
             for j, tok in enumerate(tokens[1:], 1):
@@ -271,7 +282,7 @@ def judge(command: str, cwd: str, project: str | None) -> str | None:
         if fetched and after_fetch is None:
             after_fetch = refs[0]
         for ref in refs:
-            paths = touched(folder, ref)
+            paths = touched(tops[folder], ref)  # pathspecs are read from the top level
             if paths:
                 shown = ", ".join(paths[:5]) + (f" and {len(paths) - 5} more"
                                                 if len(paths) > 5 else "")

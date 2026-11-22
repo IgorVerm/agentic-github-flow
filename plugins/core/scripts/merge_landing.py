@@ -174,8 +174,10 @@ def in_the_way(tree, result, changed):
     settings would overwrite without a word, and any other change to a path the merge changes
     is one git would refuse: both are refused. Ignored files, and changes to paths the merge
     leaves alone, are git's to handle, as in a plain `git merge`."""
-    added = zlist(git(tree, 'diff', '--name-only', '-z', '--no-renames', '--diff-filter=A',
-                      'HEAD', result).stdout)
+    run = git(tree, 'diff', '--name-only', '-z', '--no-renames', '--diff-filter=A', 'HEAD', result)
+    if run.returncode:
+        raise GitFailed('git diff failed: ' + run.stderr.strip()[:200])
+    added = zlist(run.stdout)
     full = lambda p: os.path.join(tree, *p.split('/'))  # noqa: E731
     isdir = lambda p: os.path.isdir(full(p)) and not os.path.islink(full(p))  # noqa: E731
     files, parents, folders = [], set(), []

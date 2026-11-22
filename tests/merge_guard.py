@@ -41,6 +41,10 @@ BLOCK = [
     # wrapper options with a value (third review of #109)
     'env -u GIT_DIR git merge main', 'timeout -s KILL 10 git merge main',
     'nice -n 5 git merge main', 'timeout -k 5 30 git merge main',
+    # a value option of one wrapper is not one of another (fourth review of #109)
+    'caffeinate -s git merge main', 'caffeinate -u git merge main',
+    # from a subfolder: judged from the top level (fourth review of #109)
+    'cd src && git merge main', 'git -C src merge adds', 'cd {wt}/src && git merge main',
 ]
 ALLOW = [
     'git merge readme', 'git merge --abort', 'git merge --continue', 'git merge no-such-ref',
@@ -58,7 +62,7 @@ AFTER_FETCH = [
     'git fetch && git merge readme', 'git fetch origin && git merge origin/main',
     'git fetch -q origin main && git merge --no-edit FETCH_HEAD',
     'git pull --ff-only; git merge readme', 'bash -c "git fetch -q" && git merge readme',
-    'git -C {wt} fetch && cd {wt} && git merge readme',
+    'git -C {wt} fetch && cd {wt} && git merge readme', 'git remote update && git merge readme',
 ]
 
 
@@ -98,6 +102,7 @@ class MergeGuard(unittest.TestCase):
         cls.git(repo, 'worktree', 'add', '-q', cls.wt, 'task')
         cls.git(repo, 'worktree', 'add', '-q', cls.other, 'other')
         cls.git(cls.wt, 'branch', '-q', '--set-upstream-to=main')
+        os.makedirs(os.path.join(cls.wt, 'src'))  # a subfolder of the session's worktree
         # the task changed the agent too: merging main or `conflict` conflicts in .claude/
         cls.write(cls.wt, '.claude/agents/a.md', 'agent, the task way\n')
         cls.git(cls.wt, 'commit', '-q', '-am', 'task changes the agent')
@@ -172,6 +177,16 @@ class MergeGuard(unittest.TestCase):
         code, out = self.check('git merge main')
         self.assertNotIn(' -C ', out)
         self.assertNotIn('does not honour', out)
+
+    @skip_no_sandbox
+    def test_a_merge_run_in_a_subfolder_is_judged_from_the_top_level(self):
+        src = os.path.join(self.wt, 'src')
+        for command in ('git merge adds', 'git merge main', 'git merge @{{u}}'):
+            with self.subTest(command=command):
+                code, out = self.check(command, cwd=src)
+                self.assertEqual(code, 2, out)
+                self.assertIn('.claude/agents/', out)
+        self.assertEqual(self.check('git merge readme', cwd=src)[0], 0)
 
     @skip_no_sandbox
     def test_a_merge_after_a_fetch_in_the_same_call_is_refused(self):

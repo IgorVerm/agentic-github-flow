@@ -409,8 +409,8 @@ by the path that the person's allow rule names (`docs/install.md`, *Codex as the
    the worktree it is given deny reads of, read at each run); approval `never`, the person's
    Codex configuration and rules ignored, no hooks, no apps or plugins. The time limit is the
    settings row's third value, else 60 minutes. The effort is its fourth value, passed on every
-   turn, a resume too; without it a turn runs at the model's default effort, since the person's
-   Codex configuration is ignored; at the limit, or when Codex ends, the worker
+   turn, a resume too (a resume does not keep the effort of the turn before it); without it a
+   turn runs at the model's default effort, since the person's Codex configuration is ignored; at the limit, or when Codex ends, the worker
    kills what is left of the turn. Of the report the chat reads `status` and Codex's
    `last_message`, nothing else: a few hundred tokens per turn.
 4. **Record it:** a signed comment on the issue whose text after the signature opens with

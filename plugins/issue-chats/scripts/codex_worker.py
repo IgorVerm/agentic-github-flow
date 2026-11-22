@@ -83,7 +83,10 @@ on stdin after a fixed note on the git setup, in a process session of its own, w
 (`--time-limit`, default 60 minutes). `--effort` sets Codex's reasoning effort for the turn, one
 of `minimal`, `low`, `medium`, `high` and `xhigh` (any other value exits 2): since the person's
 configuration is ignored, without it a turn runs at the model's own default (issue #112). It is
-passed on every turn it is given, a resume too:
+passed on every turn it is given, a resume too: a resume does not keep the effort of the turn
+before it (measured 2026-11-22 with 0.171.0-alpha.13: `turn_context.effort` in Codex's session
+file under `~/.codex/sessions` read `xhigh`, then null on a resume without it, then `xhigh` on
+one with it; `--json` events do not carry it):
 
   codex exec [resume <thread id>] --json -o <last message> -m <model>
              --skip-git-repo-check --ignore-user-config --ignore-rules

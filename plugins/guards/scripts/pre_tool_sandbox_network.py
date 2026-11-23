@@ -63,8 +63,12 @@ nothing. Three kinds of call are refused:
      `refs/remotes/` or `refs/tags/` and never when the call names FETCH_HEAD, only the
      options in GIT_FLAGS, no submodules, no relative `core.hooksPath`, no per-worktree
      configuration beyond the sparse-checkout keys (WORKTREE_LOCAL_KEYS), and no configuration
-     included per branch or folder (`includeIf "onbranch:"`, `"gitdir:"`). A pre-push hook then
-     runs in the session's worktree instead of the other one.
+     included per branch or folder (`includeIf "onbranch:"`, `"gitdir:"`). Hooks run in the
+     session's worktree instead of the other one (`hooks_alike()`, the maintainer's choice (b) on the
+     review of #140): no `reference-transaction` hook, and for a push no `pre-push` hook or the
+     agentic-github-flow one, byte for byte a version of `templates/pre-push` in this clone's
+     history, with both worktrees alike in its personal-data check's `exempt-dirs`; a push with
+     `--work-tree` passes.
    Any other global option (`-c`, `--no-pager`), a `..` in a `-C` folder (git follows a symlink
    before it, unlike `cd`), or a `~` the shell leaves literal (`--git-dir=~/x`, a quoted `~`)
    passes the call. Where no lone call exists, a
@@ -125,6 +129,7 @@ from __future__ import annotations
 
 import fnmatch
 import functools
+import hashlib
 import importlib.util
 import json
 import os
@@ -1235,6 +1240,64 @@ def git_remote(value: str, session: str) -> bool:
     return all(fixed_url(u) for u in urls) if urls else fixed_url(value)
 
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+@functools.lru_cache(maxsize=1)
+def template_blobs() -> frozenset[str]:
+    """The git blob ids of every version of templates/pre-push in the clone this script lives
+    in (its history, and the file as it is now): an installed hook equal to one of them is the
+    agentic-github-flow pre-push hook, whatever version the repository copied."""
+    root = os.path.normpath(os.path.join(HERE, "..", "..", ".."))
+    blobs = set()
+    try:
+        with open(os.path.join(root, "templates", "pre-push"), "rb") as handle:
+            blobs.add(blob_id(handle.read()))
+    except OSError:
+        pass
+    for line in git_out(root, "log", "--format=", "--raw", "--no-abbrev", "--",
+                        "templates/pre-push").splitlines():
+        parts = line.split()
+        if len(parts) >= 5 and parts[0].startswith(":"):
+            blobs.update(p for p in parts[2:4] if p.strip("0"))
+    return frozenset(blobs)
+
+
+def blob_id(data: bytes) -> str:
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+@functools.lru_cache(maxsize=1)
+def personal_data():
+    """The personal-data guard beside this file, the owner of `exempt-dirs`."""
+    spec = importlib.util.spec_from_file_location(
+        "pre_tool_personal_data", os.path.join(HERE, "pre_tool_personal_data.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def hooks_alike(sub: str, hooks_dir: str, target_top: str, session_top: str) -> bool:
+    """Whether the repository's hooks do the same for this command run from the session's
+    worktree as from the other one (review of #140, finding 2; the maintainer chose (b)): no
+    reference-transaction hook, and for a push no pre-push hook or the agentic-github-flow one,
+    which reads refs and objects only, apart from its personal-data check, which `exempt-dirs`
+    switches off by the worktree's folder: both worktrees must be treated alike there."""
+    if os.path.lexists(os.path.join(hooks_dir, "reference-transaction")):
+        return False
+    pre_push = os.path.join(hooks_dir, "pre-push")
+    if sub != "push" or not os.path.lexists(pre_push):
+        return True
+    try:
+        with open(pre_push, "rb") as handle:
+            if blob_id(handle.read()) not in template_blobs():
+                return False
+        exempt = personal_data().exempt_session
+        return bool(target_top) and exempt(target_top) == exempt(session_top)
+    except Exception:  # unreadable hook, a missing or failing personal-data guard
+        return False
+
+
 def lone_git(cmd: list[Word], directory: str, cwd: str, fetch_head: bool) -> list[Word]:
     """`git <subcommand> …` run from `cwd` where it does the same as `cmd` run from `directory`;
     Unsafe when that cannot be shown.
@@ -1261,6 +1324,8 @@ def lone_git(cmd: list[Word], directory: str, cwd: str, fetch_head: bool) -> lis
     remote = positional[0] if positional else None
     if remote is not None and not git_remote(remote, cwd):
         raise Unsafe("a local path or an unknown remote")
+    if sub == "push" and any(name == "--work-tree" for name, _ in pairs):
+        raise Unsafe("the push's hooks would run in another work tree")
     if target[0] == session[0]:
         return [cmd[0]] + cmd[at:]
     # another worktree of the same repository
@@ -1293,6 +1358,9 @@ def lone_git(cmd: list[Word], directory: str, cwd: str, fetch_head: bool) -> lis
     hooks =git_out(cwd, "config", "core.hooksPath")
     if hooks and not os.path.isabs(os.path.expanduser(hooks)):
         raise Unsafe("hooks found relative to the worktree")
+    if not hooks_alike(sub, os.path.expanduser(hooks) if hooks else
+                       os.path.join(session[1], "hooks"), target[2], session[2]):
+        raise Unsafe("a hook that may do otherwise in the session's worktree")
     if os.path.isdir(os.path.join(session[1], "modules")) or any(
             top and os.path.exists(os.path.join(top, ".gitmodules"))
             for top in (target[2], session[2])):

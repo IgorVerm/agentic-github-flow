@@ -25,6 +25,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.path.join(HERE, '..', 'plugins', 'guards', 'scripts', 'pre_tool_sandbox_network.py')
 HOOKS_JSON = os.path.join(HERE, '..', 'plugins', 'guards', 'hooks', 'hooks.json')
+TEMPLATE_PRE_PUSH = os.path.join(HERE, '..', 'templates', 'pre-push')
 
 CORE = ['gh *', 'ssh *', 'scp *', 'git fetch *', 'git pull *', 'git push *', 'git ls-remote *',
         'rsync *']
@@ -194,7 +195,63 @@ def git_worktrees(tmp, run, claude, failures):
     result = run(['--check', 'git -C "%s" push origin agent/w' % inc_w, '--cwd', inc], claude)
     if result.returncode != 0:
         failures.append('includeIf onbranch, refused: %s' % result.stdout)
-    return len(block) + len(passing) + 3
+    return len(block) + len(passing) + 3 + hooks(base, run, claude, failures)
+
+
+def hooks(base, run, claude, failures):
+    """A push from another worktree runs its hooks in the session's worktree (review of #140,
+    finding 2; the maintainer chose (b)): refused only under no hook, or the agentic-github-flow pre-push
+    hook as some version of templates/pre-push wrote it, with both worktrees equally exempt from
+    its personal-data check."""
+    hk, hk_a, hk_b = (os.path.join(base, n) for n in ('hk', 'hk-a', 'hk-b'))
+    make_repo(hk, [('origin', 'git@github.com:example-org/demo.git')], branch='main')
+    git('-C', hk, '-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q',
+        '--allow-empty', '-m', 'start')
+    for path, branch in ((hk_a, 'agent/a'), (hk_b, 'agent/b')):
+        git('-C', hk, 'worktree', 'add', '-q', '-b', branch, path)
+    hook_dir = os.path.join(hk, '.git', 'hooks')
+    with open(TEMPLATE_PRE_PUSH, 'rb') as handle:
+        template = handle.read()
+
+    def install(name, data):
+        for old in ('pre-push', 'reference-transaction'):
+            if os.path.exists(os.path.join(hook_dir, old)):
+                os.remove(os.path.join(hook_dir, old))
+        if name:
+            with open(os.path.join(hook_dir, name), 'wb') as handle:
+                handle.write(data)
+
+    def settings(name, folders):
+        folder = os.path.join(base, name)
+        os.makedirs(os.path.join(folder, 'agentic-github-flow'))
+        with open(os.path.join(folder, 'agentic-github-flow', 'exempt-dirs'), 'w') as handle:
+            handle.write(''.join(f + '\n' for f in folders))
+        return folder
+
+    only_b, both = settings('xdg-only-b', [hk_b]), settings('xdg-both', [hk_a, hk_b])
+    push = 'git -C "%s" push origin agent/b' % hk_b
+    cases = [  # (hook, its content, XDG_CONFIG_HOME or None, command, refused)
+        (None, b'', None, push, True),
+        ('pre-push', template, None, push, True),
+        ('pre-push', template, both, push, True),
+        ('pre-push', template, only_b, push, False),     # the lone call would skip the check
+        ('pre-push', template + b'test -e BROKEN && exit 1\n', None, push, False),
+        ('pre-push', b'#!/bin/sh\ntest -e BROKEN && exit 1\nexit 0\n', None, push, False),
+        ('pre-push', template, None, 'git -C "%s" fetch origin' % hk_b, True),
+        ('reference-transaction', b'#!/bin/sh\nexit 0\n', None,
+         'git -C "%s" fetch origin' % hk_b, False),
+        ('pre-push', template, None, 'git --work-tree="%s" push origin agent/a' % hk_b, False),
+    ]
+    for name, data, xdg, command, refused in cases:
+        install(name, data)
+        result = run(['--check', command, '--cwd', hk_a], claude,
+                     **({'xdg': xdg} if xdg else {}))
+        if result.returncode != (2 if refused else 0):
+            failures.append('hook %s (%s), %s: rc %d:\n%s%s' % (
+                name, xdg and os.path.basename(xdg), command, result.returncode, result.stdout,
+                result.stderr))
+    install(None, b'')
+    return len(cases)
 
 
 def run_all(tmp):
@@ -505,7 +562,8 @@ def run_all(tmp):
     ]
 
     def run(args, claude, stdin=None, xdg=xdg, extra=None):
-        env = {k: v for k, v in os.environ.items() if k not in ('GH_REPO', 'GH_HOST')}
+        env = {k: v for k, v in os.environ.items()
+               if k not in ('GH_REPO', 'GH_HOST', 'CLAUDE_PROJECT_DIR')}
         env.update(CLAUDE_CONFIG_DIR=claude, XDG_CONFIG_HOME=xdg, **(extra or {}))
         if args[:1] == ['--check'] and len(args) > 1:  # the command through stdin: Windows
             stdin, args = args[1], ['--check', '-'] + args[2:]  # caps a command line at 32,767

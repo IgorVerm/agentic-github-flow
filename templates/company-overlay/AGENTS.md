@@ -27,9 +27,9 @@ Its owner: <role or team>. In short, for agents:
 | Secret | credentials, keys, tokens | no | no |
 
 Approved clients and services: <Claude Code / Codex under which plans; other services>.
-The dependency audit of the security plugin sends package names and versions to osv.dev, the
-public npm registry (`npm audit`) and the PyPI registry, with `--upgrades` also to endoflife.date,
-and with `--reachability` fetches crates from crates.io while it builds the repository:
+The dependency audit of the security plugin sends package names and versions to osv.dev and the
+public npm registry (`npm audit`), with `--upgrades` also to the npm and PyPI registries and
+endoflife.date, and with `--reachability` fetches crates from crates.io while it builds:
 <allowed / not allowed>.
 
 ## GitHub organisation

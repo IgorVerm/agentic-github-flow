@@ -1,9 +1,7 @@
-# agentic-github-flow installer for Windows (PowerShell 5.1 or 7). The one command (README):
-#   git clone https://github.com/IgorVerm/agentic-github-flow.git "$env:USERPROFILE\.agentic-github-flow"; & "$env:USERPROFILE\.agentic-github-flow\install.ps1"
+# agentic-github-flow installer for Windows (PowerShell 5.1 or 7). The command to run: docs/install.md.
 # It makes sure the clone exists in %USERPROFILE%\.agentic-github-flow, finds Python 3.8+ and hands
-# over to tools\installer.py in that clone, which owns every step. Options (all passed on):
-#   --with security,web-deploy   --guards   --overlay <git-url-or-path>   --update   --uninstall
-#   --no-claude   --no-codex   --claude-bin <path>   --codex-bin <path>   --help
+# over to tools\installer.py in that clone, which owns every step and the options, all passed on
+# (its docstring, or --help).
 $ErrorActionPreference = 'Continue'  # native commands report through exit codes, checked below
 
 $RepoUrl = if ($env:AGENTIC_GITHUB_FLOW_REPO) { $env:AGENTIC_GITHUB_FLOW_REPO } else { 'https://github.com/IgorVerm/agentic-github-flow.git' }

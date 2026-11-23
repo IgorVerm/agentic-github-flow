@@ -55,7 +55,7 @@ The skills read their values from it; a row left out takes its default:
 | model and effort | the model id and effort level every issue chat starts on (`claude --model`, `--effort`); a change applies from the next start | the starting chat's own model and effort |
 | ready label | the label that makes an issue ready for pickup | the default the `open-issue` skill states |
 | requirements label | the label of new work whose requirements are open | the default the `open-issue` skill states |
-| question label | the label of an issue that holds a question for the user | `needs-user` |
+| question label | the label of an issue that holds a question for the user | the default the `open-issue` skill states |
 | area labels | labels a chain may be limited to (`--area`); they own nothing | none |
 | spread over areas | `yes` or `no`; after `yes`, the area labels in backticks that a pick spreads over, up to the first `;` (the rest is a comment), without them every label in backticks of the row `area labels` (*Spreading over areas* below) | `no` |
 | sidebar section | the desktop app sidebar section the chats file themselves under | the repository's name |
@@ -334,10 +334,9 @@ notification began. So:
   `archive_session` refuses a session with live background work. After the hand-over, a
   subagent's report is the one thing a chat may end its turn for (`issue-handover`, *End your
   own live work*).
-- **Questions for the user go on the owning issue** with the question label (`needs-user`
-  unless §1's settings name another; never GitHub's built-in `question`). They do not block
-  the hand-over unless the next step needs the answer. A question that is really new scope gets
-  the requirements label instead. When the user answers, the chat records the answer in a
+- **Questions for the user go on the owning issue** with the question label (§1; never
+  GitHub's built-in `question`). They do not block the hand-over unless the next step needs
+  the answer. A question that is really new scope gets the requirements label instead. When the user answers, the chat records the answer in a
   signed comment on that issue and in the same step removes the question label
   (`gh issue edit <n> --remove-label <label>`), unless another question there is still open,
   which that comment then names. Closing an issue removes its question label too
@@ -364,7 +363,7 @@ weeks. So it ends this way:
 - **It archives itself once its work has landed or merged,** not when it is merely pushed: in
   local-main mode in the turn its work lands on the local landing branch (`local-main.md` §1 or
   §2); in pull-request mode in the turn its pull request is merged in that chat, on the user's
-  word for that pull request or by `merge_pr.py` where a standing grant allows it. While the
+  word for that pull request or by `merge_pr.py` where automatic merging is on. While the
   pull request is open the chat stays, so a follow-up from its parent or a review comment still
   reaches it. Then: `chat_archivable.py <its worktree> --landed` (this plugin's `scripts/`); on
   `ok`, its report (it reaches the parent as the chat's last words), `get_session "self"`, and
@@ -401,14 +400,14 @@ branch, and the announcement on the issue; this section makes the first and the 
   branch and worktree. Pickup skips assigned issues and `start_issue_chat.py` refuses one, so no
   issue gets two chats. The claim stays until the merge closes the issue; a chat that gives an
   issue up unassigns it and says why.
-- **The overlap check** (the core plugin's `overlap_check.py`, git and `gh` reads only) lists
+- **The overlap check** (the core plugin's `overlap_check.py`, which only reads) lists
   the unmerged branches, open pull requests and claimed issues that touch the same files, with
   the design note to read. It runs at pickup on the paths the issue names (`issue-handover`
   step 3) and before the ask for the push on the task branch (`ship-change` step 5). For every
-  hit the chat reads the other's note and writes, in its claim or its pull request text, one line
-  per hit: how the two stay compatible, or that it waits for the other. An unmerged overlapping
-  branch whose newest commit is older than 7 days is a reason to pick another issue, said in one
-  line.
+  hit the chat reads the other's note and writes, in its claim or pull request text, one line
+  per hit: how the two stay compatible, or that it waits for the other. A listed branch whose
+  newest commit is older than 7 days is a reason to pick another issue, said in one line; one
+  quiet for over 14 days is only counted.
 - **The design note** is a short signed comment on the issue before any code, when the pickup
   check reported an overlap or the issue is labelled `type:design-first`: the files it will
   touch, the public items it changes, removes or renames, and the design choice in two or three

@@ -39,9 +39,9 @@ tool never reaches further than a Claude chat's route for the same command:
 - each `network` host and `unix_sockets` path is in `sandbox.network.allowedDomains` (the host,
   or the host and port, no wildcard) and `sandbox.network.allowUnixSockets` of the person's or the
   managed settings: files the chat's sandbox cannot write. A project's network settings are not
-  read (Igor, 2026-11-22, on #116: a project never widens them). Where the managed settings set
-  `allowManagedPermissionRulesOnly` or `allowManagedDomainsOnly`, only their rules or domains
-  count, as in Claude Code.
+  read (the maintainer, 2026-11-22, on #116: a project never widens them). Where the managed
+  settings set `allowManagedPermissionRulesOnly` or `allowManagedDomainsOnly`, only their rules
+  or domains count, as in Claude Code.
 
 What the anchors bind: the command rule binds an honest chat; a hostile chat can name a worktree
 whose project settings it wrote, so against it the bound is the tool's sandbox, the person's deny

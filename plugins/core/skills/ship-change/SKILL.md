@@ -17,7 +17,8 @@ run from the repository's primary checkout, makes `../<repo>-worktrees/<task>` o
 above this skill's folder ([new_worktree.py](../../scripts/new_worktree.py)). Every worktree
 this skill makes, the integration worktree of step 2 too, comes from that script, so on macOS
 its tracked files are copy-on-write clones of the primary checkout's unless the user switched
-that off (`AGENTIC_GITHUB_FLOW_CLONES=0`; the script's header owns the details).
+that off (`AGENTIC_GITHUB_FLOW_CLONES=0`; the script's header owns the details). Run each
+script below as a call of its own, nothing chained or piped: most reach GitHub.
 
 ## 1. Detect the mode, pick the review route, say both on the issue
 
@@ -32,8 +33,8 @@ whose header owns the rule). Its last line is the mode, the line before it the l
   [local-main.md](local-main.md) in place of 4, 6 and 7.
 - **unknown** (exit 3): GitHub could not be asked from here, which the `check:` line before it
   explains; inside the Claude Code sandbox gh cannot read its configuration. Run the same
-  command outside the sandbox (in Claude Code: the sandbox disabled, which goes through the
-  permission check) and follow that answer. Never pick a mode yourself.
+  command again as a call of its own, which the sandbox's configured exceptions can let out,
+  and follow that answer. Never pick a mode yourself.
 
 Run it again at every landing, with `--explain` to see the signals it read, and never carry a
 mode over from an earlier task. A repository fixes its mode in `HANDOFF.md`, merged like any
@@ -68,10 +69,10 @@ The review route, in both modes:
 On either route, whoever checks the change checks the `Efficient design:` line of step 4
 against the diff (the core rule *Work grows with what changed*).
 
-One sentence on the issue is enough: the mode with its reason, the route and why. When you start
-work on an issue that has no assignee, assign it to the account you post under
-(`gh issue edit <n> --add-assignee @me`) and say so on the issue: that is the claim the overlap
-check of step 5 reads.
+One sentence on the issue is enough: the mode with its reason, the route and why. The claim,
+made when you start work on an issue that has no assignee: assign it to the account you post
+under (`gh issue edit <n> --add-assignee @me`) and name your branch and worktree in a signed
+comment. The overlap check of step 5 reads the assignee.
 
 ## 2. Bring the landing branch in
 
@@ -159,7 +160,7 @@ one.
 ## 7. Push and open the pull request
 
 **Under the grant:** `python3 <plugin>/scripts/push_branch.py --grant <HANDOFF.md or the
-overlay file> --title "<title>" --body-file <file> --draft` in your worktree, as a single call.
+overlay file> --title "<title>" --body-file <file> --draft` in your worktree.
 It checks, pushes your branch with the pre-push hook's protected-path check switched on, and
 opens the pull request. Exit 0: report its URL. Exit 1: it names each reason (a protected path,
 no hook, no grant where named, a refusal by the hook): nothing was pushed; ask the user as in
@@ -187,9 +188,7 @@ Your own pull request, in pull-request mode, until it is merged or the user take
    request you opened: it wakes the session on a failing check, a merge conflict or a review
    comment. Never the client's own auto-merge (`set_auto_merge`): merging goes through item 5.
 2. **Independent review.** A subagent given only the pull request number runs the
-   `review-change` skill and posts its verdict for the head commit. A pull request that is to
-   merge automatically needs it on either route of step 1; on the small-change route without
-   automatic merging, your own check of step 3 stands.
+   `review-change` skill and posts its verdict for the head commit, on either route of step 1.
 3. **Findings and failures become new commits** on the branch (never `--amend`), pushed as in
    step 7, under the grant without asking (`push_branch.py --grant <…>` alone: the pull request
    is open), and then a new review of the new head (item 2). A

@@ -19,8 +19,9 @@ folder two levels above this skill's folder, where the scripts are
 ([next_issue.py](../../scripts/next_issue.py),
 [start_issue_chat.py](../../scripts/start_issue_chat.py),
 [chat_archivable.py](../../scripts/chat_archivable.py)). The overlap check and the worktree
-tool are the core plugin's, run as the `ship-change` skill names them. Everything up to the ask
-for the push runs in the foreground of the turn of the task's work.
+tool are the core plugin's, run as the `ship-change` skill names them. Each script runs as a
+call of its own, nothing chained or piped. Everything up to the ask for the push runs in the
+foreground of the turn of the task's work.
 
 **The push and the merge follow `ship-change`, not the settings section.** The settings section
 lets this chat pick, claim, start the next chat and archive itself without asking; it never
@@ -65,7 +66,8 @@ the side-chat reason above decides.
 what it proved; then `git switch --detach origin/<default branch>` in its worktree, since the
 worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is closed.
 
-1. **Leave nothing half-held.** Stop or finish your runs and agents. Run the hand-over extras.
+1. **Leave nothing half-held.** Runs and agents: *End your own live work* (1), (2). Run the
+   hand-over extras.
    Commit verified work on the task branch, each commit a call of its own
    (`git commit -m "…" -- <paths>`); a fix is a new commit, never `--amend`. Anything
    uncommitted stops the hand-over: name it.
@@ -85,11 +87,11 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
    posts the landing comment), then the signed comment opens with
    `landed on local <landing branch> at <commit>` and the fields of `local-main.md` §1;
    the issue stays open and assigned until the push's cleanup closes it. Landing refused: stop
-   and report, no hand-over. A correction to an earlier comment is a new comment, never an edit. Each open question for the user stands on its owning issue,
-   signed, with the settings' question label: `needs-user` unless the settings name another
-   (method.md §1), never GitHub's built-in `question`. Once the user answers one, the chat
-   records the answer there and removes the label in the same step, unless another question on
-   that issue is still open (method.md §4, *Questions for the user*).
+   and report, no hand-over. A correction to an earlier comment is a new comment, never an
+   edit. Each open question for the user stands on its owning issue, signed, with the question
+   label (method.md §1), never GitHub's built-in `question`. Once the user answers one, the
+   chat records the answer there and removes the label in the same step, unless another
+   question on that issue is still open (method.md §4, *Questions for the user*).
 3. **Pick the next issue:** `git fetch origin`, then
    `python3 <plugin>/scripts/next_issue.py -C <this worktree>`, with `--area <area label>` when
    this chain is limited to an area. It prints the ready issues in pick order:
@@ -101,18 +103,18 @@ worktree check reads HEAD. A `cleanup-merged` sweep deletes it once the issue is
    (`gh issue view <n> --json state`). Read the chosen issue, then run the overlap check of
    `ship-change` step 5 with `--paths <the code paths the issue names> --issue <n>` in place of
    `--branch`: exit 0 none; 1 read each listed note and keep one line per hit for the claim (how
-   the work stays compatible, or that it waits); a hit that is an unmerged branch whose newest
-   commit is older than 7 days, or a second chat on the same issue, is a reason to pick the next
-   issue instead, said in one line; 3 GitHub was not read: stop here. An issue whose
-   requirements turn out to be open is not started: it gets the requirements label in place of
-   the ready label and a comment on what is open, and you pick the next. No ready issue: start
-   nothing, go to step 6.
+   the work stays compatible, or that it waits); a listed branch whose newest commit is older
+   than 7 days, or a second chat on the same issue, is a reason to pick the next issue instead,
+   said in one line (one quiet for over 14 days is only counted); 3 GitHub was not read: stop
+   here. An issue whose requirements turn out to be open is not started: it gets the
+   requirements label in place of the ready label and a comment on what is open, and you pick
+   the next. No ready issue: start nothing, go to step 6.
 4. **Check before you start anything:** no run of yours is still going and no half-made chat of
    an earlier attempt exists. The worktree check of your own worktree (the `worktreePath` of
    `get_session "self"`, or, for a chat with none, the worktree it worked in) is expected to say
    `keep:` while your branch waits for the push: that stops only the archive, never the start
    (in local-main mode it says `ok` once the work landed; a keep line ending in `landing mode
-   unknown` means GitHub could not be asked from the sandbox: run the check outside it).
+   unknown`: run it again alone).
 5. **Start the next chat and claim its issue.** Each numbered call stands alone, in the
    foreground of this turn; any failure goes to the fallback below.
    1. **Its worktree:** for the next issue a new one, made with the settings' worktree tool

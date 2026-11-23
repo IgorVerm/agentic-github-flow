@@ -46,7 +46,7 @@ The pages were read on 2026-10-30. None shows a version or a date.
 
 | Subject | The standard | Here | Why |
 |---|---|---|---|
-| Description length | 1-1024 | 40-500 | Every description sits in every session's list. Twelve skills at 1024 characters are 12,288, past a listing budget of 8,000 characters, the smallest a client here gives; at 500, 6,000. The floor stops a description too short to pick its skill |
+| Description length | 1-1024 | 40-500 | Every description sits in every session's list. At 1024 characters, eight skills already pass a listing budget of 8,000 characters, the smallest a client here gives; at 500, sixteen fit. The floor stops a description too short to pick its skill |
 | `disable-model-invocation` | Not a field | Allowed for a skill only the user starts, always together with each other client's own switch for it (`tests/skills_format.py` checks both) | Claude Code's way to keep a skill from the model; such a skill fails `skills-ref` and cannot be uploaded to claude.ai |
 | Description wording | Err on the side of triggering | Narrow triggers where a skill can do damage or costs much | Broad descriptions load cleanup procedures for unrelated tasks |
 | Testing a description | About 20 queries, 3 runs each | One request that should pick the skill and one that should not | A mini test catches a wrong trigger at a fraction of the cost |

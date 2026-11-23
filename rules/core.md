@@ -60,9 +60,9 @@ Agents have destroyed hours of uncommitted work with `reset --hard` and `checkou
 - **Never, unless the user asks for that exact operation:** force-push; delete or move a tag;
   rewrite or discard history (`reset --hard`, rebase, amending a pushed commit, expiring reflogs);
   discard uncommitted work, yours or anyone else's (`restore`, `checkout -- <path>`, `clean`,
-  `stash drop`); bypass a hook; change git or gh configuration; remove a worktree or force-delete a
-  branch other than through the `cleanup-merged` skill or an issue chat's checked archive. Undo a
-  committed mistake with `git revert`; bring `main` into a branch by merge.
+  `stash drop`); bypass a hook (`--no-verify`); change git or gh configuration; remove a worktree
+  or force-delete a branch other than through the `cleanup-merged` skill or an issue chat's checked
+  archive. Undo a committed mistake with `git revert`; bring `main` into a branch by merge.
 - **Files in a checkout that you did not write belong to another session.** Leave them; never
   stage them or move another worktree's branch (`promote_main.py`'s checked landing aside). Read
   a file before you overwrite it.
@@ -75,8 +75,8 @@ Agents have destroyed hours of uncommitted work with `reset --hard` and `checkou
 - **Commit freely:** small commits of verified work, staged by explicit path
   (`git commit -m "…" -- <paths>`, not `add -A`, `add .`, `add -f` or `commit -a`), the subject
   ending in the issue reference `(#n)`, with a `Co-Authored-By` trailer naming the agent; no file
-  over 50 MB. Only a pull request body closes its issue with a closing keyword, because the merge
-  publishes it.
+  over 50 MB. Only a pull request body may close its issue with a closing keyword, because the
+  merge publishes it.
 - **Ask before every push** (a task branch; `main` only in local-main mode), unless a standing
   grant covers your own task branch: then push it through `push_branch.py`. Mark ready or merge
   only on the user's word for it, or through `merge_pr.py` where `HANDOFF.md` switches

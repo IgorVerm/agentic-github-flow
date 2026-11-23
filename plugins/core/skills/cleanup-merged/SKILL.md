@@ -7,10 +7,11 @@ description: Remove a task's worktree and branches once its work is merged - its
 
 `<plugin>` below is the folder two levels above this skill's folder; the scripts are
 [remove_merged_worktree.py](../../scripts/remove_merged_worktree.py) and
-[delete_merged_branch.py](../../scripts/delete_merged_branch.py). Run everything from the
-repository's primary checkout, not from inside the worktree that goes. "The default branch"
-below is the landing branch when `HANDOFF.md` names one (`landing.py` in the same folder owns
-the setting); the scripts read it themselves.
+[delete_merged_branch.py](../../scripts/delete_merged_branch.py), each run as a call of its
+own, nothing chained or piped. Run everything from the repository's primary checkout, not
+from inside the worktree that goes. `<landing>` below is the landing branch: the one
+`HANDOFF.md` names, else the default branch (`landing.py` in the same folder owns the setting);
+the scripts read it themselves.
 
 1. **Prove the merge.** Pull-request mode: `gh pr view <number or branch> --json state,mergedAt,mergeCommit,headRefName,headRefOid`
    must say `MERGED`. Local-main mode (the `ship-change` skill's `local-main.md`): the push of
@@ -29,12 +30,12 @@ the setting); the scripts read it themselves.
    closed) and read its tip again; agents never run `git branch -D` themselves.
 3. **The remote branch** of the merged pull request, and each `remote copy: … (pull request
    #<n>)` the sweep named; never a `remote copy kept` (a long-lived branch such as `develop`
-   whose tip merely sits in the default branch).
+   whose tip merely sits in `<landing>`).
    `python3 <plugin>/scripts/delete_merged_branch.py <branch> --dry-run`
    says whether GitHub already deleted it and, if not, whether its tip on the remote is still
    the merged commit. Deleting it is a push, so ask the user first, like every other push. On a
    yes, run the same command without `--dry-run`: it deletes the branch only while its tip is
-   still the merged pull request's head (or in the default branch), with a lease on that tip,
+   still the merged pull request's head (or in `<landing>`), with a lease on that tip,
    so a commit someone pushed after the merge is never lost. A refusal: leave the branch and
    tell the user. The `pre-push` template allows the deletion on the same terms.
 4. **The issue.** `gh issue view <n> --json state,labels`. A closing keyword in the pull request closed
@@ -47,8 +48,7 @@ the setting); the scripts read it themselves.
    the commit. Branches that existed only locally and belong to no such issue are not
    published; they go in the report. Open no issue just to hold SHAs.
    A closed issue keeps no question label: when its labels show one, remove it with
-   `gh issue edit <n> --remove-label <label>` (`needs-user`, unless the issue-chats settings
-   name another).
+   `gh issue edit <n> --remove-label <label>` (the question label of the `open-issue` skill).
 5. **Report** what was removed and what was kept, with the reasons, and every DELETED branch
    with its SHA and restore command.
 
@@ -62,9 +62,9 @@ been merged.
 
 Per worktree, every check must hold; otherwise it is kept and named:
 
-- **merged**: its branch tip is in the fetched default branch (a merge commit or fast-forward),
-  or it is exactly the head commit of a pull request merged into the default branch (`gh pr list
-  --head <branch> --state merged`, `baseRefName` the default branch), which covers squash and
+- **merged**: its branch tip is in the fetched `<landing>` (a merge commit or fast-forward),
+  or it is exactly the head commit of a pull request merged into `<landing>` (`gh pr list
+  --head <branch> --state merged`, `baseRefName` `<landing>`), which covers squash and
   rebase merges; a pull request merged into another branch (stacked) does not count. A commit
   added after that head keeps it. In `--sweep`, a branch also needs commits of its own in its
   reflog, so a fresh worktree is never mistaken for merged; ancestry in the fetched default
@@ -88,7 +88,7 @@ commit that was proven merged. `git worktree prune` drops metadata of worktrees 
 already gone. Undo a merge with `git revert` (a merge commit: `git revert -m 1 <merge>`), never
 by rewriting `main`.
 
-A sweep's branch passes run only when the default branch could be established and no removal
+A sweep's branch passes run only when `<landing>` could be established and no removal
 failed in that sweep (`--no-fetch` skips the merged pass); `--dry-run` reports them too:
 
 - **scratch branches**: a local `scratch/<issue>-<what>` goes when GitHub reports its issue
@@ -100,9 +100,9 @@ failed in that sweep (`--no-fetch` skips the merged pass); `--dry-run` reports t
   until the user decides.
 - **merged branches**: every other local branch goes, whoever left it, when it is merged as
   above (without `gh`, a squash-merged one is only counted), no worktree holds it, and every
-  commit in its reflog is in the default branch or that pull request's head. It stays and is
+  commit in its reflog is in `<landing>` or that pull request's head. It stays and is
   named when a worktree holds it (one whose directory is gone: until `git worktree prune`),
-  when its reflog holds a commit outside the default branch, and for `claude/*`, the Claude
+  when its reflog holds a commit outside `<landing>`, and for `claude/*`, the Claude
   Code desktop app's session branches, which a resumed session checks out again. `main`,
-  `master` and the default branch are never touched; a branch that is not merged is only
+  `master` and `<landing>` are never touched; a branch that is not merged is only
   counted.

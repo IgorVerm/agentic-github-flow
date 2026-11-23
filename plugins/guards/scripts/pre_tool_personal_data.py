@@ -140,7 +140,7 @@ NOT_PERSONAL = re.compile(
     r'(?:^|\.)(?:example\.(?:com|org|net)|[a-z0-9-]+\.(?:example|test|invalid|localhost|local|'
     r'lan|internal|home))$|users\.noreply\.github\.com$', re.I)
 # The public co-author addresses of the AI agents these rules name, in a commit's
-# `Co-Authored-By` trailer: not anyone's personal data (Igor, 2026-11-17: "dat zijn geen
+# `Co-Authored-By` trailer: not anyone's personal data (the maintainer, 2026-11-17: "dat zijn geen
 # persoonsgegevens dat is het publiek email adres van codex"; #84). Claude's, noreply@anthropic.com,
 # already passes NOT_PERSONAL. Built by concatenation so that this file's own diff carries no
 # address an older copy of the hook would refuse.

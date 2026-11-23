@@ -10,15 +10,15 @@ The method, the settings, the title form, side chats and the session tools: the
 `issue-handover` skill's [method.md](../issue-handover/method.md), §1, §2, §4 *Side chats* and
 §6. The repository's `HANDOFF.md` section
 `## Issue chats settings` is the standing permission: a chat that passes every check below is
-archived without asking again; a chat that fails a check stays, and you say why. Without that
+archived without asking; a chat that fails a check stays, and you say why. Without that
 section, list what would go and ask the user. Archiving is reversible (the Archived list,
 `unarchive_session`); deleting is never done here. The title prefix and older title forms and
-the sidebar section come from the settings. A chat archives itself only by `issue-handover`,
-never here. **Outside the desktop app** (no session tools), list the chats that look finished by
+the sidebar section come from the settings. A chat archives itself only by `issue-handover`.
+**Outside the desktop app** (no session tools), list the chats that look finished by
 these checks and leave the archiving to the user.
 
-The worktree check is `python3 <plugin>/scripts/chat_archivable.py <worktree>`, `<plugin>` being
-the folder two levels above this skill's folder
+The worktree check is `python3 <plugin>/scripts/chat_archivable.py <worktree>`, a call of its
+own, `<plugin>` the folder two levels above this skill's folder
 ([chat_archivable.py](../../scripts/chat_archivable.py)): `ok` when the worktree is gone, or
 clean with its HEAD in origin's default branch or in the branch's own `origin/<branch>` after a
 fetch, or in local-main mode clean with its HEAD on the local landing branch, or, for a chat that

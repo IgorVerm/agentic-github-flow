@@ -109,16 +109,19 @@ def strip_comments(text):
 def split_comments(text):
     """(the text without shell comments, the rest of the line after each removed `#`).
 
-    A comment is an unquoted `#` at the start of a word, to the end of its line, or inside
-    backticks to the closing one. Here-document bodies are copied as they are, without reading
+    A comment is an unquoted `#` at the start of a word (not right after an escaped character:
+    `a\\ #b` is one word), to the end of its line, or inside backticks to the closing one. Here-document bodies are copied as they are, without reading
     quotes in them. It runs before the here-document and substitution passes, so they see the
     same quoting as the shell: an apostrophe in `git -C r stash drop # don't` once left them an
     open quote, which hid the command (#33). Quoting starts over inside `$(…)` and backticks,
     also within double quotes, as in the shell. The scanner is not the shell, and three review
     rounds each found a `#` it took for a comment where bash runs the rest of the line
     (`` echo \\`#a ; git … ``); so judge() also judges each removed rest of a line that may run
-    git, and a block or an ask from either side wins (#33, approved by the user 2026-11-23)."""
+    git, and a block or an ask from either side wins (#33, approved by the user 2026-11-23).
+    When a removed rest holds a quote or a parenthesis, judge() also judges the whole text with
+    its comments in, up to the first quote it cannot close (a fourth review)."""
     out, removed, stack, marks, i, n = [], [], [], [], 0, len(text)
+    escaped = -1  # where the last backslash escape ended: a `#` there starts no comment
     while i < n:
         c, top = text[i], stack[-1] if stack else None
         if top == "'":
@@ -129,6 +132,7 @@ def split_comments(text):
         if c == '\\' and i + 1 < n:
             out.append(text[i:i + 2])
             i += 2
+            escaped = i
             continue
         if c == '\n':
             out.append(c)
@@ -162,7 +166,7 @@ def split_comments(text):
             stack.append(')')
         elif c == ')' and top == ')':
             stack.pop()
-        elif c == '#' and (i == 0 or text[i - 1] in ' \t\n;&|()`'):
+        elif c == '#' and i != escaped and (i == 0 or text[i - 1] in ' \t\n;&|()`'):
             eol = text.find('\n', i)
             eol = n if eol < 0 else eol
             removed.append(text[i + 1:eol])  # to the end of the line, whatever ends it
@@ -222,6 +226,21 @@ def strip_heredocs(text):
 
 def substitutions(text):
     """Texts the shell runs as commands inside `…` and $(…), also within double quotes."""
+    return [text[a:b] for a, b in substitution_spans(text)]
+
+
+def without_substitutions(text):
+    """The text with the bodies of its substitutions emptied (`$()`, ``), which judge() judges
+    on their own: shlex cannot read quotes nested in "$(…)" (`-m "$(echo "don't")"`)."""
+    out, pos = [], 0
+    for a, b in substitution_spans(text):
+        out.append(text[pos:a])
+        pos = b
+    return ''.join(out) + text[pos:]
+
+
+def substitution_spans(text):
+    """(start, end) of the text inside each `…` and $(…)."""
     found, i, n, quote = [], 0, len(text), None
     while i < n:
         c = text[i]
@@ -238,14 +257,14 @@ def substitutions(text):
             j = text.find('`', i + 1)
             if j < 0:
                 break
-            found.append(text[i + 1:j])
+            found.append((i + 1, j))
             i = j
         elif c == '$' and text[i + 1:i + 2] == '(' and text[i + 2:i + 3] != '(':
             depth, j = 1, i + 2
             while j < n and depth:
                 depth += (text[j] == '(') - (text[j] == ')')
                 j += 1
-            found.append(text[i + 2:j - 1] if depth == 0 else text[i + 2:j])
+            found.append((i + 2, j - 1 if depth == 0 else j))
             i = j - 1
         i += 1
     return found
@@ -446,10 +465,11 @@ def judge_git(args):
             return 'discards work (reset --hard)'
     elif sub == 'clean':
         return 'deletes untracked files (clean)'
-    elif sub == 'restore':
-        if not (has_long(flags, '--staged') or has_short(flags, 'S')) \
-                or has_long(flags, '--worktree') or has_short(flags, 'W'):
-            return 'discards uncommitted work (restore)'
+    elif sub == 'restore':  # --staged too, as the Codex rules and Claude's `git restore *`
+        if (has_long(flags, '--staged') or has_short(flags, 'S')) \
+                and not (has_long(flags, '--worktree') or has_short(flags, 'W')):
+            return 'discards staged changes (restore --staged; unstage with git reset -- <path>)'
+        return 'discards uncommitted work (restore)'
     elif sub == 'checkout':
         if has_short(flags, 'B'):
             return 'moves a branch (checkout -B)'
@@ -611,18 +631,31 @@ def judge_command(tokens, depth):
     return None
 
 
-def judge(text, depth=0):
+def judge(text, depth=0, comments=True, lenient=False):
+    """The reason to block (or, under judge_ask, to ask about) a shell text, or None.
+
+    comments=False judges the text with its comments in, as words, the way origin/main did:
+    for the rest of a line after a removed `#`, and for the whole text when such a rest holds a
+    quote or a parenthesis, which would change how the shell reads the lines after it if the
+    scanner took a `#` for a comment that the shell does not (#33). lenient=True judges only
+    the commands before an open quote, which the shell runs before it fails on that quote."""
     if depth > MAX_DEPTH:
         return 'is nested too deeply to check'
     text, decoded = unquote_ansi_c(text)
     if not decoded and may_run_git(text):
         return "holds a $'…' string the guard cannot decode"
-    text, removed = split_comments(text.replace('\\\n', ' '))
-    for rest in removed:  # what the shell may run after all, if the scanner misread a `#`
-        reason = judge(rest, depth + 1) if may_run_git(rest) else None
-        if reason:
-            return reason
-    if brace_expansion(text) and may_run_git(text):
+    text = text.replace('\\\n#', '#').replace('\\\n', ' ')  # `a\<newline>#b` is one word
+    if comments:
+        whole, (text, removed) = text, split_comments(text)
+        for rest in removed:  # what the shell may run after all, if the scanner misread a `#`
+            reason = judge(rest, depth, comments=False) if may_run_git(rest) else None
+            if reason:
+                return reason
+        if any(set(rest) & set('\'"`()') for rest in removed) and may_run_git(whole):
+            reason = judge(whole, depth, comments=False, lenient=True)
+            if reason:
+                return reason
+    if not lenient and brace_expansion(text) and may_run_git(text):
         return 'uses brace expansion, which the guard cannot read safely'
     text, bodies = strip_heredocs(text)
     for line, body in bodies:
@@ -635,12 +668,20 @@ def judge(text, depth=0):
         reason = judge(inner, depth + 1)
         if reason:
             return reason
+    commands = []
     try:
-        commands = list(split_commands(text))
+        for tokens in split_commands(text):
+            commands.append(tokens)
     except ValueError:
-        if ASKING and re.search(r'\bgit\b', text):
-            return 'cannot be read by the git guard (an open quote?)'
-        return judge_raw(text)
+        if lenient:
+            pass  # the shell stops at the open quote; the commands before it run
+        else:
+            try:
+                commands = list(split_commands(without_substitutions(text)))
+            except ValueError:
+                if ASKING and re.search(r'\bgit\b', text):
+                    return 'cannot be read by the git guard (an open quote?)'
+                return judge_raw(text)
     for tokens in commands:
         reason = judge_command(tokens, depth)
         if reason:
@@ -651,7 +692,6 @@ def judge(text, depth=0):
             if reason:
                 return reason
     return None
-
 
 RAW = [  # each a sequence of patterns that must follow each other within one simple command
     ((r'git\b', r'\bpush\b', r'--force|\s-f\b|--mirror'), 'force-pushes'),

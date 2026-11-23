@@ -82,7 +82,7 @@ ALLOW = [
     'git commit -m "explain add -A and --no-verify in the docs" -- docs/x.md',
     'git commit --amend -m x', 'git push origin main', 'git push origin --delete agent/12-x',
     'git -C /tmp/x push origin main', 'git checkout main', 'git checkout -b agent/12-x', 'git switch main',
-    'git restore --staged a.txt', 'git stash push -m why -- a.txt', 'git stash list',
+    'git stash push -m why -- a.txt', 'git stash list',
     'git merge --ff-only --no-autostash --no-overwrite-ignore abc123', 'git merge --no-ff abc123',
     'git revert abc123', 'git tag v1', 'git branch -d agent/12-x', 'git branch --show-current',
     'git worktree add ../wt -b agent/12-x main', 'git worktree list', 'git worktree prune',
@@ -154,7 +154,16 @@ BLOCK += ["git -C /r stash drop # don't", "git -C /r tag -d v1 # it's gone",
           # the accepted cost: a comment that names a forbidden git command is refused
           'git status # then git reset --hard',
           # more unknown options than the guard reads both ways
-          'git ' + '-q ' * 16 + 'status']
+          'git ' + '-q ' * 16 + 'status',
+          # fourth review: a `#` right after an escaped character is a word, not a comment, so
+          # a quote after it spans lines; also after a line continuation (`a\\<newline>#`)
+          "echo a\\ #'\n'; git -C r clean -fdx; echo '\n\\ #'",
+          "echo a\\ #'\n'; git -C r reset --hard; echo '\n\\ #'",
+          "echo a\\)#'\n'; git -C r clean -fdx; echo '\n\\)#'",
+          "echo a\\`#'\n'; git -C r clean -fdx; echo '\n\\`#'",
+          "echo a\\\n#'\n'; git -C r clean -fdx; echo '\n\\\n#'",
+          # restore --staged drops staged changes; as in the Codex rules and `git restore *`
+          'git restore --staged a.txt', 'git -C r restore --staged a.py', 'git restore -S a.txt']
 # Claude Code (--claude): exit 3 asks the user, 0 passes, 2 blocks (a block beats an earlier ask)
 ASK = ['git push origin main', 'git -C /r push origin main', 'git -C /r commit --amend --no-edit',
        'git update-ref refs/heads/x HEAD', 'git -C /r remote add up https://x', 'ssh box git push',
@@ -165,13 +174,18 @@ ASK = ['git push origin main', 'git -C /r push origin main', 'git -C /r commit -
        'git -C r --attr-source HEAD push origin main', 'git --some-new-option x push',
        'echo `echo a #b` ; git -C r push origin main',
        'echo `echo a #x \\` #z` ; git -C r push origin main', 'echo \\`#a ; git -C r push',
+       "echo a\\ #'\n'; git -C r push origin main; echo '\n\\ #'",
        'git -C /r commit -m "an open quote']  # what the guard cannot read is asked
 CLAUDE_PASS = ["# don't\ngit -C /r commit -F - <<'EOF'\nit's done # here\nEOF",
                'git -C /r commit -m "push it, then --amend"', 'git -C /r commit -m "--amend"',
                'git log --grep push', 'git -C /r remote -v', 'git -C /r status',
                'git -C /r commit --allow-empty -m "push, clean, update-ref"', 'git push --help',
                'git -C /r commit -m "$(echo \'a "clean" step\')" # don\'t push it', 'git --no-pager log -1',
-               "cat <<\\EOF\nit's # push\nEOF", 'git -P diff', 'git -C r -P log --grep clean']
+               "cat <<\\EOF\nit's # push\nEOF", 'git -P diff', 'git -C r -P log --grep clean',
+               # quotes nested in "$(…)"; a comment with many `#` words is no nesting
+               'git -C r commit -m "$(echo "don\'t")"', 'git -C r commit -m "$(echo "a `b` c")" -- a.md',
+               'git -C r status ' + ' '.join('#w%d' % k for k in range(12)) + ' git',
+               "git -C r commit -m x -- a.md # it's (fine)", 'echo a\\ #b && git -C r status']
 # the accepted cost of judging removed comments: one that names git push is asked about
 ASK += ['echo `date` # it\'s ; git push']
 

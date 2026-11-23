@@ -324,9 +324,9 @@ def findings_in_text(line):
     return found
 
 
-# --- binary files in a push (#55). Twin: the push check in plugins/guards/scripts/
-# pre_tool_personal_data.py holds the same code (the two plugins are installed apart);
-# tests/pre_push_checks.py checks that both tell the same files apart alike.
+# --- binary files in a push (#55). The owner: tools/sync_copies.py writes FIRST_FEW_BYTES through
+# binary_blobs into the push check of plugins/guards/scripts/pre_tool_personal_data.py (the two
+# plugins are installed apart).
 FIRST_FEW_BYTES = 8000  # git calls a file binary when these hold a NUL byte (xdiff-interface.c)
 TEXT_BYTES = frozenset(range(32, 127)) | {9, 10, 13}
 

@@ -55,7 +55,7 @@ the overlap check start from the local landing branch while it holds unpushed la
 local-main mode (unpushed_landings()).
 It does not fetch. AGENTIC_GITHUB_FLOW_GH, a JSON list, replaces the `gh` command (tests use it).
 A copy of this file lives in the issue-chats plugin (an installed plugin stands alone);
-tests/landing.py keeps the two identical. Exit 0 with a decision, 3 for `unknown` (5), 2 for
+tools/sync_copies.py writes it from this one. Exit 0 with a decision, 3 for `unknown` (5), 2 for
 a usage error, a checkout outside git, or an invalid `landing branch`.
 """
 from __future__ import annotations

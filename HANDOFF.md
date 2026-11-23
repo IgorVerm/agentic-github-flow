@@ -1,11 +1,11 @@
 # agentic-github-flow: current state
 
-Checked on 2026-11-11 (v2, the landing modes of #13, the sandbox-network guard of #20, the pre-push checks of #40, the reviewer skill of #39, issue chats switched on by #51, the unasked push and the per-repository merge switch of #26).
+Checked on 2026-11-22.
 
 ## State
 
-- Six plugins: core, security, web-deploy, guards, issue-chats and codex; each version lives in its
-  manifests (`plugins/<name>/.claude-plugin/plugin.json`). Not published in a directory yet.
+- Six plugins: core, security, web-deploy, guards, issue-chats and codex; where each version
+  lives: `AGENTS.md`, *Plugin names never change*. Not published in a directory yet.
 - Maintainers: the author named in `NOTICE`.
 - v2 brought the team edition up to date with the personal rules repository it was built from;
   the item-by-item inventory and its verdicts are on issue #3.

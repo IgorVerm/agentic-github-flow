@@ -102,10 +102,11 @@ The options, all optional, combined as the person decided:
 
 For example, a work machine: `~/.agentic-github-flow/install.sh --guards --overlay <company-overlay>`.
 
-A second plain run keeps what an earlier one installed and adds what it names: it never removes a
-plugin, the guards or an overlay. To drop one, run `--uninstall` (step 7) and install again with
-every option wanted. Where a personal overlay is installed on a machine that now becomes a work
-machine, that is the way to remove it.
+A second plain run keeps what an earlier one installed and adds what it names: it removes no
+plugin (except the codex plugin without Codex in the plan, step 8), the guards or an overlay. To
+drop one, run `--uninstall` (step 7) and install again with every option wanted. Where a
+personal overlay is installed on a machine that now becomes a work machine, that is the way to
+remove it.
 
 The installer prints one line per step, starting with its status:
 

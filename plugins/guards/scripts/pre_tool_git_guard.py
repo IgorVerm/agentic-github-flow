@@ -102,13 +102,23 @@ def split_commands(text):
 
 
 def strip_comments(text):
-    """The text without shell comments: an unquoted `#` at the start of a word, to the end of
-    its line. Here-document bodies are copied as they are, without reading quotes in them. It
-    runs before the here-document and substitution passes, so they see the same quoting as the
-    shell: an apostrophe in `git -C r stash drop # don't` once left them an open quote, which
-    hid the command (#33). Quoting starts over inside `$(…)` and backticks, also within double
-    quotes, as in the shell: `"$(echo '"')' # "` holds no comment (#33 review)."""
-    out, stack, marks, i, n = [], [], [], 0, len(text)
+    """The text without shell comments; split_comments() says how."""
+    return split_comments(text)[0]
+
+
+def split_comments(text):
+    """(the text without shell comments, the rest of the line after each removed `#`).
+
+    A comment is an unquoted `#` at the start of a word, to the end of its line, or inside
+    backticks to the closing one. Here-document bodies are copied as they are, without reading
+    quotes in them. It runs before the here-document and substitution passes, so they see the
+    same quoting as the shell: an apostrophe in `git -C r stash drop # don't` once left them an
+    open quote, which hid the command (#33). Quoting starts over inside `$(…)` and backticks,
+    also within double quotes, as in the shell. The scanner is not the shell, and three review
+    rounds each found a `#` it took for a comment where bash runs the rest of the line
+    (`` echo \\`#a ; git … ``); so judge() also judges each removed rest of a line that may run
+    git, and a block or an ask from either side wins (#33, approved by the user 2026-11-23)."""
+    out, removed, stack, marks, i, n = [], [], [], [], 0, len(text)
     while i < n:
         c, top = text[i], stack[-1] if stack else None
         if top == "'":
@@ -153,9 +163,11 @@ def strip_comments(text):
         elif c == ')' and top == ')':
             stack.pop()
         elif c == '#' and (i == 0 or text[i - 1] in ' \t\n;&|()`'):
-            ends = [k for k in (text.find('\n', i), text.find('`', i) if '`' in stack else -1)
-                    if k >= 0]  # inside backticks a comment ends at the closing backtick
-            i = min(ends) if ends else n
+            eol = text.find('\n', i)
+            eol = n if eol < 0 else eol
+            removed.append(text[i + 1:eol])  # to the end of the line, whatever ends it
+            tick = text.find('`', i) if '`' in stack else -1
+            i = tick if 0 <= tick < eol else eol  # inside backticks it ends at the closing one
             continue
         elif text.startswith('<<', i) and not text.startswith('<<<', i) and HEREDOC.match(text, i):
             m = HEREDOC.match(text, i)
@@ -165,7 +177,7 @@ def strip_comments(text):
             continue
         out.append(c)
         i += 1
-    return ''.join(out)
+    return ''.join(out), removed
 
 
 def strip_heredocs(text):
@@ -605,7 +617,11 @@ def judge(text, depth=0):
     text, decoded = unquote_ansi_c(text)
     if not decoded and may_run_git(text):
         return "holds a $'…' string the guard cannot decode"
-    text = strip_comments(text.replace('\\\n', ' '))
+    text, removed = split_comments(text.replace('\\\n', ' '))
+    for rest in removed:  # what the shell may run after all, if the scanner misread a `#`
+        reason = judge(rest, depth + 1) if may_run_git(rest) else None
+        if reason:
+            return reason
     if brace_expansion(text) and may_run_git(text):
         return 'uses brace expansion, which the guard cannot read safely'
     text, bodies = strip_heredocs(text)

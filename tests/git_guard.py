@@ -146,6 +146,13 @@ BLOCK += ["git -C /r stash drop # don't", "git -C /r tag -d v1 # it's gone",
           'git --some-new-option HEAD clean -fdx', 'git -C r --no-pager clean -n',
           # a comment inside backticks ends at the closing backtick (second review)
           'echo `echo a #b` ; git -C r clean -fdx', 'x="`echo a # b`"; git -C r reset --hard',
+          # third review: an escaped character before `#`, an escaped backtick in a backtick
+          # comment; the removed rest of a line is judged too, so these hold whatever the scanner
+          # reads (#33, the approach approved 2026-11-23)
+          'echo \\`#a ; git -C r clean -fdx', 'echo \\)#b ; git -C r clean -fdx',
+          'echo `echo a #x \\` #z` ; git -C r clean -fdx',
+          # the accepted cost: a comment that names a forbidden git command is refused
+          'git status # then git reset --hard',
           # more unknown options than the guard reads both ways
           'git ' + '-q ' * 16 + 'status']
 # Claude Code (--claude): exit 3 asks the user, 0 passes, 2 blocks (a block beats an earlier ask)
@@ -157,14 +164,16 @@ ASK = ['git push origin main', 'git -C /r push origin main', 'git -C /r commit -
        'echo "$(echo \'"\')\' # " ; git -C r push origin main',
        'git -C r --attr-source HEAD push origin main', 'git --some-new-option x push',
        'echo `echo a #b` ; git -C r push origin main',
+       'echo `echo a #x \\` #z` ; git -C r push origin main', 'echo \\`#a ; git -C r push',
        'git -C /r commit -m "an open quote']  # what the guard cannot read is asked
 CLAUDE_PASS = ["# don't\ngit -C /r commit -F - <<'EOF'\nit's done # here\nEOF",
                'git -C /r commit -m "push it, then --amend"', 'git -C /r commit -m "--amend"',
                'git log --grep push', 'git -C /r remote -v', 'git -C /r status',
                'git -C /r commit --allow-empty -m "push, clean, update-ref"', 'git push --help',
                'git -C /r commit -m "$(echo \'a "clean" step\')" # don\'t push it', 'git --no-pager log -1',
-               "cat <<\\EOF\nit's # push\nEOF", 'git -P diff', 'git -C r -P log --grep clean',
-               'echo `date` # it\'s ; git push']
+               "cat <<\\EOF\nit's # push\nEOF", 'git -P diff', 'git -C r -P log --grep clean']
+# the accepted cost of judging removed comments: one that names git push is asked about
+ASK += ['echo `date` # it\'s ; git push']
 
 
 def run(command):

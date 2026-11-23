@@ -284,7 +284,11 @@ ask rules dropped, `git commit --all*` became `git commit --all *`). The git gua
 mode judges those spellings by parsing instead: it blocks the commands they denied (checked on
 an example of every former rule, `tests/claude_git_rules.py`) and asks for a push,
 `commit --amend`, `update-ref` and a remote change; a commit's option values are never flags and
-shell comments are removed first. The hook also covers the terminal tool. The installer removes
+shell comments are removed first. After three review rounds each found a `#` the comment
+scanner misread, the maintainer approved "#33 nieuwe aanpak" (2026-11-23): the rest of a line
+after each removed `#` is judged as well when it may run git, and a block or an ask from either
+side wins; a comment that names a forbidden git command is refused, which costs an agent only a
+reworded comment. The hook also covers the terminal tool. The installer removes
 the rules it added that the policy dropped, and names the user's own such rules without
 changing them.
 **Why:** such a `*` spans the rest of the command, so `git -C r commit -m "a clean step"` was

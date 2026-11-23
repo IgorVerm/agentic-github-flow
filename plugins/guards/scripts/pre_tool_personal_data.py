@@ -757,8 +757,8 @@ def codex_reason(what, carried, shell):
 # two plugins are installed apart, so each holds its own copy; tests/pre_push_checks.py runs
 # both on the same pushes.
 
-# --- binary files in a push (#55). Twin: plugins/security/scripts/scan_secrets.py holds the
-# same code; tests/pre_push_checks.py checks that both tell the same files apart alike.
+# --- binary files in a push (#55). Written from plugins/security/scripts/scan_secrets.py by
+# tools/sync_copies.py (FIRST_FEW_BYTES through binary_blobs); edit it there.
 FIRST_FEW_BYTES = 8000  # git calls a file binary when these hold a NUL byte (xdiff-interface.c)
 TEXT_BYTES = frozenset(range(32, 127)) | {9, 10, 13}
 

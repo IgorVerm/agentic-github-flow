@@ -418,14 +418,5 @@ class ChatArchivable(unittest.TestCase):
             os.rename(moved, self.origin)
 
 
-class Copy(unittest.TestCase):
-    def test_issue_chats_copy_of_work_proof_is_identical(self):
-        owner = os.path.join(ROOT, 'plugins', 'core', 'scripts', 'work_proof.py')
-        copy = os.path.join(os.path.dirname(TOOL), 'work_proof.py')
-        with open(owner, 'rb') as a, open(copy, 'rb') as b:
-            self.assertEqual(a.read(), b.read(), 'copy plugins/core/scripts/work_proof.py to %s'
-                             % os.path.relpath(copy, ROOT))
-
-
 if __name__ == '__main__':
     unittest.main(verbosity=1)

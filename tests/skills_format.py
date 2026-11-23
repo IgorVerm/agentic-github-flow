@@ -8,6 +8,12 @@ are unique across all plugins, and every skill, path or link the rules name exis
 skill file and not rules/core.md names Codex: Codex's side lives in the codex plugin and in
 rules/codex.md, which only a Codex install loads (#98). The standard
 and where these checks are stricter: plugins/core/skills/repo-docs/skill-standard.md.
+
+The skill budget (#125): BODY_BUDGET holds the bytes of each SKILL.md body (after the
+frontmatter) and DESCRIPTIONS_BUDGET the bytes of all descriptions together, as they were when
+last set. A change that grows a body or the sum past its number fails here until the same change
+raises the number, so the growth shows in the diff; a change that trims a skill lowers its number
+to the new size. A new skill gets its row in the change that adds it.
 """
 import os, re, sys
 
@@ -18,6 +24,14 @@ RULES_LIMIT = 8000
 LINK = re.compile(r'\]\(([^)#]+)(?:#[^)]*)?\)')
 CHARS_PER_TOKEN = 4  # an estimate: no tokenizer here, and the bound is a recommendation
 PLAIN_NEVER_FIRST = '[]{}>|*&!%@`,?-#'  # YAML indicators that cannot start a plain value
+# bytes; set 2026-11-23 (#125). Raise a number only in the change that grows the skill.
+BODY_BUDGET = {
+    'archive-finished-chats': 6157, 'check-web-deploy': 5275, 'cleanup-merged': 7737,
+    'codex-issue-chats': 7232, 'codex-worker': 8895, 'efficient-design': 3676,
+    'issue-handover': 19051, 'open-issue': 2852, 'repo-docs': 3472, 'requirements': 7191,
+    'review-change': 5701, 'review-security': 5732, 'ship-change': 13265, 'spec-first': 1250,
+}
+DESCRIPTIONS_BUDGET = 5645
 errors = []
 
 
@@ -40,6 +54,7 @@ if rules.count('⛔'):
     fail('rules/core.md uses a stop sign; state the rule and its reason instead')
 
 skills = {}  # name -> folder
+descriptions_bytes = 0
 plugins_dir = os.path.join(ROOT, 'plugins')
 for plugin in sorted(os.listdir(plugins_dir)):
     skills_dir = os.path.join(plugins_dir, plugin, 'skills')
@@ -87,6 +102,15 @@ for plugin in sorted(os.listdir(plugins_dir)):
             fail(f'{plugin}/{name}: compatibility is {len(front["compatibility"])} characters; '
                  '1 to 500 if present')
         body = text[m.end():]
+        descriptions_bytes += len(desc.encode('utf-8'))
+        body_bytes = len(body.encode('utf-8'))
+        if name not in BODY_BUDGET:
+            fail(f'{plugin}/{name}: no row in BODY_BUDGET (tests/skills_format.py); add '
+                 f'{name!r}: {body_bytes}')
+        elif body_bytes > BODY_BUDGET[name]:
+            fail(f'{plugin}/{name}: SKILL.md body is {body_bytes} bytes, over its budget of '
+                 f'{BODY_BUDGET[name]}; trim it, or raise BODY_BUDGET[{name!r}] in '
+                 'tests/skills_format.py in this change')
         if text.count('\n') >= 500:
             fail(f'{plugin}/{name}: SKILL.md has {text.count(chr(10))} lines, not under 500; '
                  'move detail to a reference file')
@@ -120,6 +144,12 @@ for plugin in sorted(os.listdir(plugins_dir)):
                  '(disable-model-invocation in SKILL.md and allow_implicit_invocation: false '
                  'in agents/openai.yaml)')
 
+for name in sorted(set(BODY_BUDGET) - set(skills)):
+    fail(f'BODY_BUDGET in tests/skills_format.py has a row for {name}, which is no skill')
+if descriptions_bytes > DESCRIPTIONS_BUDGET:
+    fail(f'the descriptions of all skills are {descriptions_bytes} bytes together, over the budget '
+         f'of {DESCRIPTIONS_BUDGET}; shorten one, or raise DESCRIPTIONS_BUDGET in '
+         'tests/skills_format.py in this change')
 for skill in re.findall(r'`([a-z0-9-]+)` skill', rules):
     if skill not in skills:
         fail(f'rules/core.md names a skill that does not exist: {skill}')
@@ -147,5 +177,6 @@ for link in LINK.findall(rules):
 
 if errors:
     print('\n'.join(errors)); sys.exit(1)
-print(f'OK: rules/core.md {len(rules_bytes)} bytes; {len(skills)} skills: '
+print(f'OK: rules/core.md {len(rules_bytes)} bytes; {len(skills)} skills within their budgets '
+      f'(descriptions {descriptions_bytes} of {DESCRIPTIONS_BUDGET} bytes): '
       + ', '.join(sorted(skills)))

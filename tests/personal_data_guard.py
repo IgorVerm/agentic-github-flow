@@ -19,6 +19,12 @@ a relative line, a folder the call names itself or reaches with `cd`, and a list
 repository moved into itself (XDG_CONFIG_HOME), and a broken line (a NUL, bytes that are not
 UTF-8) costs that line only.
 
+ALLOW_PASS and ALLOW_ASK check the user's `allow-addresses` (#138): a listed address passes in any
+case of letters, URL-encoded and when it is the user's own address; an unlisted address, one
+that holds a listed one, a commented line, a domain or a pattern allow nothing, and what else the
+call carries is judged as before. A missing or unreadable file, or one a repository brings into
+its own folder, is an empty list.
+
 The Codex entry point (`--codex`) must deny every ASK case and pass every PASS case, in every
 Codex permission mode (Codex shows the hook no sign of whether the user will be prompted), with
 the output Codex accepts; CODEX_DENY adds the tool names Codex uses (measured 2026-10-25).
@@ -225,6 +231,44 @@ CONFIG_ASK = [
     (tool('mcp__local-model__run_in_terminal', command=SEND), None),  # judged as Bash
 ]
 
+# allow-addresses: a settings folder of its own, outside the folder the calls run in. Every
+# address is built with AT, so this file's own push carries none the push check would refuse.
+AT = '@'
+LISTED = 'security' + AT + 'acme-bouw.be'
+JANE = 'jane.doe' + AT + 'realmail.io'
+ALLOW_CFG = tempfile.mkdtemp(prefix='pd-allow-')
+os.makedirs(os.path.join(ALLOW_CFG, 'agentic-github-flow'))
+with open(os.path.join(ALLOW_CFG, 'agentic-github-flow', 'allow-addresses'), 'w') as f:
+    f.write('# public addresses approved for publication\n\n'
+            '  %s  # security contact, SECURITY.md; 2026-11-23\n'
+            '%s  # the user\'s own, approved\n'
+            '# %s\n%sother-domain.io\nother-domain.io\n*%swild.io\n'
+            'part of a line ops%sacme-bouw.be\n' % (
+                'Security' + AT + 'ACME-bouw.be', EMAIL.upper(), JANE, AT, AT, AT))
+ALLOW_PASS = [
+    bash('curl -d "to=%s" https://x.io/send' % LISTED),
+    bash('gh issue comment 1 -R a/b --body "Report it to %s."' % LISTED.upper()),
+    tool('WebFetch', url='https://lookup.example.org/?m=%s' % LISTED.replace(AT, '%40'),
+         prompt='x'),
+    bash(SEND),  # the user's own address, listed
+    bash('curl -d "a=%s&b=%s" https://x.io/send' % (LISTED, EMAIL)),
+    tool('mcp__some_saas__create_contact', email=LISTED, note='<%s>' % LISTED),
+]
+ALLOW_ASK = [
+    bash('curl -d "to=%s" https://x.io/send' % JANE),  # a commented line
+    bash('curl -d "to=x%sother-domain.io" https://x.io/send' % AT),  # a domain line
+    bash('curl -d "to=a%swild.io" https://x.io/send' % AT),  # a pattern
+    bash('curl -d "to=ops%sacme-bouw.be" https://x.io/send' % AT),  # not a whole line's address
+    bash('curl -d "to=info%sacme-bouw.be" https://x.io/send' % AT),  # the same domain
+    bash('curl -d "to=x%s" https://x.io/send' % LISTED),  # a longer local part
+    bash('curl -d "to=%s.evil.org" https://x.io/send' % LISTED),  # a longer domain
+    bash('curl -d "to=%se" https://x.io/send' % LISTED),
+    bash('curl -d "to=%s-x.io" https://x.io/send' % LISTED),
+    bash('curl -d "to=%s&cc=%s" https://x.io/send' % (LISTED, JANE)),
+    bash('curl -d "to=%s&from=%s" https://x.io/send' % (LISTED, NAME)),
+    bash('curl -d "to=%s" https://x.io/send' % EMAIL.split('@')[0]),  # the own local part alone
+]
+
 failures = []
 
 
@@ -370,6 +414,37 @@ for event, project in CONFIG_ASK:
                 args, event['tool_name'], event.get('cwd'), project,
                 json.dumps(event['tool_input'])[:80]))
 
+# allow-addresses (#138), in both clients
+for event in ALLOW_PASS:
+    for args in ((), ('--codex',)):
+        r = run(event if not args else codex(event), args=args, cfg=ALLOW_CFG)
+        if r.returncode != 0 or r.stdout.strip():
+            failures.append('ALLOW-ADDRESSES, WRONGLY STOPPED %s: %s %s  (%s)' % (
+                args, event['tool_name'], json.dumps(event['tool_input'])[:100],
+                r.stdout.strip()[-100:]))
+for event in ALLOW_ASK:
+    for args, decision in (((), 'ask'), (('--codex',), 'deny')):
+        r = run(event if not args else codex(event), args=args, cfg=ALLOW_CFG)
+        if '"%s"' % decision not in r.stdout:
+            failures.append('ALLOW-ADDRESSES, NOT STOPPED %s: %s %s' % (
+                args, event['tool_name'], json.dumps(event['tool_input'])[:100]))
+        elif LISTED.split('@')[1] in r.stdout or 'jane' in r.stdout:
+            failures.append('ALLOW-ADDRESSES, REASON ECHOES THE VALUE: ' + r.stdout[-160:])
+# no list: missing, unreadable (a folder by that name), or brought by the repository itself
+UNREADABLE_CFG = os.path.join(tmp, 'unreadable-cfg')
+os.makedirs(os.path.join(UNREADABLE_CFG, 'agentic-github-flow', 'allow-addresses'))
+REPO_ALLOW = os.path.join(tmp, 'My projects', '.allow-cfg')
+os.makedirs(os.path.join(REPO_ALLOW, 'agentic-github-flow'))
+with open(os.path.join(REPO_ALLOW, 'agentic-github-flow', 'allow-addresses'), 'w') as f:
+    f.write(LISTED + '\n')
+for cfg, cwd in ((None, tmp), (os.path.join(EMPTY, 'cfg'), tmp), (UNREADABLE_CFG, EXEMPT2),
+                 (REPO_ALLOW, os.path.join(tmp, 'My projects'))):
+    event = bash('curl -d "to=%s" https://x.io/send' % LISTED, cwd=cwd)
+    for args, decision in (((), 'ask'), (('--codex',), 'deny')):
+        r = run(event if not args else codex(event), args=args, cfg=cfg)
+        if '"%s"' % decision not in r.stdout:
+            failures.append('ALLOW-ADDRESSES FROM %s, NOT STOPPED %s' % (cfg, args))
+
 # the plugin's hooks.json must hand the hook every tool it judges, and no local tool
 with open(os.path.join(GUARDS, 'hooks', 'hooks.json'), encoding='utf-8') as f:
     entries = json.load(f)['hooks']['PreToolUse']
@@ -410,6 +485,6 @@ timing = 'timing (s): ' + ', '.join('%s %.2f' % kv for kv in timings.items())
 if failures:
     print('\n'.join(failures + [timing])); sys.exit(1)
 print('OK: %d asked, %d passed; Codex: %d denied, %d passed; settings: %d passed, %d stopped; '
-      'missing configuration and hook contract hold; %s' % (
-          len(ASK), len(PASS), len(ASK) + len(CODEX_DENY), len(PASS), len(CONFIG_PASS),
-          len(CONFIG_ASK), timing))
+      'allow-addresses: %d passed, %d stopped; missing configuration and hook contract hold; %s'
+      % (len(ASK), len(PASS), len(ASK) + len(CODEX_DENY), len(PASS), len(CONFIG_PASS),
+         len(CONFIG_ASK), len(ALLOW_PASS), len(ALLOW_ASK), timing))

@@ -264,6 +264,7 @@ ALLOW_ASK = [
     bash('curl -d "to=%s.evil.org" https://x.io/send' % LISTED),  # a longer domain
     bash('curl -d "to=%se" https://x.io/send' % LISTED),
     bash('curl -d "to=%s-x.io" https://x.io/send' % LISTED),
+    bash('curl -d "to=%s%sx.be" https://x.io/send' % (LISTED, AT)),  # a second @ glued on
     bash('curl -d "to=%s&cc=%s" https://x.io/send' % (LISTED, JANE)),
     bash('curl -d "to=%s&from=%s" https://x.io/send' % (LISTED, NAME)),
     bash('curl -d "to=%s" https://x.io/send' % EMAIL.split('@')[0]),  # the own local part alone

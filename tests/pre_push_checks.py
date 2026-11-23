@@ -419,7 +419,7 @@ class Push(unittest.TestCase):
         self.allow('%s\n# %s\n@%s\n%s\n*@%s\nsee %s\n' % (
             LISTED, OTHER, OTHER.split('@')[1], OTHER.split('@')[1], OTHER.split('@')[1],
             'ops' + '@' + 'acme-bouw.be'))
-        for text in (OTHER, 'x' + LISTED, LISTED + '.evil.org', LISTED + 'e',
+        for text in (OTHER, 'x' + LISTED, LISTED + '.evil.org', LISTED + 'e', LISTED + '@' + 'x.be',
                      'ops' + '@' + 'acme-bouw.be', LISTED + ' and ' + OTHER):
             self.git(self.repo, 'switch', '-q', '-C', 'agent/x', 'main')
             self.commit('b.txt', text + '\n', 'b')

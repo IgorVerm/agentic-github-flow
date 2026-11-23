@@ -284,12 +284,13 @@ def _allowed_pattern(allowed):
     """One pattern for the listed addresses, built once per list (a push judges every line)."""
     return re.compile(r'(?<![A-Za-z0-9._%+-])(?:' + '|'.join(
         re.escape(a) for a in sorted(allowed, key=len, reverse=True)) +
-        r')(?![A-Za-z0-9-]|\.[A-Za-z0-9-])', re.I | re.A)
+        r')(?![A-Za-z0-9@-]|\.[A-Za-z0-9-])', re.I | re.A)
 
 
 def without_allowed(text, allowed):
     """The text with every listed address that stands alone blanked out; an address that holds a
-    listed one (more local part before it, more domain after it) stays and is judged."""
+    listed one (more local part before it, more domain or a second @ after it) stays and is
+    judged."""
     if not allowed or '@' not in text:
         return text
     return _allowed_pattern(allowed).sub(' ', text)

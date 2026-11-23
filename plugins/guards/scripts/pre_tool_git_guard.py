@@ -176,21 +176,22 @@ def drop_redirections(text):
             m = REDIRECT.match(text, i)
             if m:
                 j = m.end()
-                if m.group().endswith('&'):
-                    while j < n and (text[j].isdigit() or text[j] == '-'):
+                while j < n and text[j] in ' \t':  # the target: `1` of 2>&1, a file, `$(…)`
+                    j += 1
+                word = None
+                while j < n and (word or text[j] not in ' \t\n;&|()<>'):
+                    if word == "'" or (word == '"' and text[j] != '\\'):
+                        word = None if text[j] == word else word
+                    elif text[j] == '\\':
                         j += 1
-                else:
-                    while j < n and text[j] in ' \t':
-                        j += 1
-                    word = None
-                    while j < n and (word or text[j] not in ' \t\n;&|()<>'):
-                        if word == "'" or (word == '"' and text[j] != '\\'):
-                            word = None if text[j] == word else word
-                        elif text[j] == '\\':
-                            j += 1
-                        elif text[j] in '"\'':
-                            word = text[j]
-                        j += 1
+                    elif text[j] in '"\'':
+                        word = text[j]
+                    elif text.startswith('$(', j):
+                        j = closing_paren(text, j + 2)
+                    elif text[j] == '`':
+                        k = text.find('`', j + 1)
+                        j = n if k < 0 else k
+                    j += 1
                 out.append(' ')
                 i = j
                 continue
@@ -799,8 +800,11 @@ def judge(text, depth=0, comments=True, lenient=False):
     if comments:
         text, removed, whole = split_comments(text)
         for rest in removed:  # what the shell may run after all, if the scanner misread a `#`
-            reason = judge(rest, depth, comments=False, lenient=True) \
-                if may_run_git(rest) else None
+            if not may_run_git(rest):
+                continue
+            reason = judge(rest, depth, comments=False, lenient=True)
+            if not reason and set(rest) & set('\'"'):  # the lenient reading stopped at a quote
+                reason = judge_raw(rest)  # that the shell may have opened earlier (sixth review)
             if reason:
                 return reason
         if any(set(rest) & set('\'"`()') for rest in removed) and may_run_git(whole):
@@ -865,6 +869,11 @@ RAW = [  # each a sequence of patterns that must follow each other within one si
     ((r'git\b', r'\bcheckout\b', r'\s--\s'), 'discards uncommitted work (checkout)'),
 ]
 RAW = [(tuple(re.compile(p) for p in parts), reason) for parts, reason in RAW]
+RAW_ASK = [((r'git\b', r'\bpush\b'), 'pushes to a remote'),
+           ((r'git\b', r'\bcommit\b', r'--amend'), 'amends a commit (commit --amend)'),
+           ((r'git\b', r'\bupdate-ref\b'), 'moves a ref (update-ref)'),
+           ((r'git\b', r'\bremote\b', r'\b(add|set-url|remove|rm|rename)\b'), 'changes a remote')]
+RAW_ASK = [(tuple(re.compile(p) for p in parts), reason) for parts, reason in RAW_ASK]
 SEGMENT = re.compile(r'[^\n;|&]+')
 
 
@@ -884,13 +893,14 @@ def in_order(segment, patterns):
 def judge_raw(code, needs_exec=False):
     """Plain pattern search, for text shlex cannot parse and for code handed to an
     interpreter. Interpreter code is judged only when it can start a process: code that
-    merely prints or compares such a string passes. Never used for asks."""
-    if ASKING or needs_exec and not EXEC_HINT.search(code):
+    merely prints or compares such a string passes. Under judge_ask it searches for the asked
+    commands (RAW_ASK), for a removed comment rest only."""
+    if needs_exec and not EXEC_HINT.search(code):
         return None
     for segment in SEGMENT.findall(code):
         if 'git' not in segment:
             continue
-        for patterns, reason in RAW:
+        for patterns, reason in RAW_ASK if ASKING else RAW:
             if in_order(segment, patterns):
                 return reason
     return None

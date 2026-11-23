@@ -210,9 +210,16 @@ CLAUDE_PASS = ["# don't\ngit -C /r commit -F - <<'EOF'\nit's done # here\nEOF",
                "Docs: don't run git clean -fdx\nEOF",
                'git -C r status 2>&1 | tail -3', 'git -C r log --oneline >/tmp/log.txt',
                'git -C r commit -m "a > b, 2>&1" -- a.md']
-# a real comment with an open quote runs nothing, whatever it names (sixth review)
-CLAUDE_PASS += ['echo `date` # it\'s ; git push', "ls  # what's in the git dir",
-                "git -C r log -1  # don't rewrite git history"]
+# a real comment with an open quote runs nothing; asked only when it names an asked command
+CLAUDE_PASS += ["ls  # what's in the git dir", "git -C r log -1  # don't rewrite git history"]
+ASK += ['echo `date` # it\'s ; git push',  # the accepted cost: reword the comment
+        # seventh review: a case pattern's `)` ends $(…) for the scanner, the rest after its `#`
+        # holds a quote the shell had open; the plain search of that rest still finds the git
+        'echo "$(case x in a) echo " #"; echo \'"\'; esac)"; git commit --amend -m x']
+BLOCK += ['echo "$(case x in a) echo " #"; echo \'"\'; esac)"; git push --force',
+          'echo "$(case x in a) echo " #"; echo \'"\'; esac)"; git -C r reset --hard',
+          # a redirection's target is any word: a file after >&, a substitution
+          'git >&f reset --hard', 'git >$(echo f) push --force', 'git 2>`echo f` -C r reset --hard']
 
 
 def run(command):

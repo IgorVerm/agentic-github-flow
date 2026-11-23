@@ -43,8 +43,8 @@ None. The core rules apply here too, through the maintainer's own install.
   live twice on purpose: `COPIES` in `tools/sync_copies.py` lists each owner and its copy.
   Edit the owner, then run `python3 tools/sync_copies.py`, which writes the copies;
   `tests/repo_checks.py` fails while one differs. The ask and deny lists are owned by
-  `plugins/guards/policy/claude-permissions.json`, the Codex rules by
-  `plugins/guards/policy/git-safety.rules`.
+  `plugins/guards/policy/claude-permissions.json`, the Codex rules by the `.rules` files in
+  `plugins/guards/policy/`.
 
 ## Test gate
 

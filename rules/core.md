@@ -31,7 +31,7 @@ ask the user where the policy is and which data may go into a prompt, and follow
   - changes to these rules, to permission or security settings, to hooks.
 - **When the user describes a problem or asks a question, the deliverable is your assessment.**
   Report what you found; fix it when asked to.
-- **Large work with open requirements starts with a specification** (`spec-first`;
+- **Large work with open requirements starts with a specification** (the `spec-first` skill;
   `requirements` splits it into ready issues).
 - **Issue chats:** where `HANDOFF.md` on the default branch has *Issue chats settings*, the
   issue-chats skills pick, claim, start and archive chats without asking.
@@ -61,17 +61,17 @@ Agents have destroyed hours of uncommitted work with `reset --hard` and `checkou
   rewrite or discard history (`reset --hard`, rebase, amending a pushed commit, expiring reflogs);
   discard uncommitted work, yours or anyone else's (`restore`, `checkout -- <path>`, `clean`,
   `stash drop`); bypass a hook; change git or gh configuration; remove a worktree or force-delete a
-  branch other than through `cleanup-merged` or an issue chat's checked archive. Undo a committed
-  mistake with `git revert`; bring `main` into a branch by merge.
+  branch other than through the `cleanup-merged` skill or an issue chat's checked archive. Undo a
+  committed mistake with `git revert`; bring `main` into a branch by merge.
 - **Files in a checkout that you did not write belong to another session.** Leave them; never
   stage them or move another worktree's branch (`promote_main.py`'s checked landing aside). Read
   a file before you overwrite it.
 - **Outside a repository, delete with the system's trash, not `rm -rf`;** a recursive delete
   takes only literal, quoted, absolute paths you listed and checked, never paths built from
   command output.
-- **Work on a branch in a worktree, never directly on `main`.** `ship-change` lands it in the
-  repository's landing mode; after the merge, or the push of `main`, `cleanup-merged` removes the
-  worktree and branch and closes the issue.
+- **Work on a branch in a worktree, never directly on `main`.** The `ship-change` skill lands it
+  in the repository's landing mode; after the merge, or the push of `main`, the `cleanup-merged`
+  skill removes the worktree and branch and closes the issue.
 - **Commit freely:** small commits of verified work, staged by explicit path
   (`git commit -m "…" -- <paths>`, not `add -A`, `add .`, `add -f` or `commit -a`), the subject
   ending in the issue reference `(#n)`, with a `Co-Authored-By` trailer naming the agent; no file

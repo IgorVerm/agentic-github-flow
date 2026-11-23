@@ -44,7 +44,7 @@ Usage as a hook: reads JSON on stdin (`--claude` for Claude Code). For tests:
 `pre_tool_git_guard.py [--claude] --check '<command>'` prints the reason and exits 2 for a
 block, 3 for an ask (`--claude` only), or exits 0.
 """
-import json, re, shlex, sys
+import bisect, json, re, shlex, sys
 
 SHELLS = {'sh', 'bash', 'zsh', 'dash', 'ksh'}
 INTERPRETERS = {'python', 'python3', 'node', 'perl', 'ruby'}
@@ -63,7 +63,13 @@ GIT_FLAG_OPTS = {'-p', '--paginate', '-P', '--no-pager', '--bare', '--no-replace
 CONFIG_KEYS = ('core.hookspath', 'alias.', 'pull.rebase')
 BLIND_PATHS = {'.', './', '*', ':/', ':/.', ':(top)', '..', '../'}
 ASSIGN = re.compile(r'[A-Za-z_][A-Za-z0-9_]*=.*', re.S)
-HEREDOC = re.compile(r'<<(-?)\s*\\?["\']?([A-Za-z_][A-Za-z0-9_]*)["\']?')  # also <<\EOF
+# the marker as tests/fixtures/delete_guard_main.py reads it (that baseline stays as it was)
+HEREDOC = re.compile(r'<<(-?)\s*\\?["\']?([A-Za-z_][A-Za-z0-9_]*)["\']?')
+# a here-document marker: (dash, the delimiter as written); heredoc_word() gives the closing
+# line, quotes and backslashes removed (`<<E\\OF`, `<<'EOF'`, `<<"E"OF` all close at EOF)
+HEREDOC_MARK = re.compile(r'<<(-?)[ \t]*((?:[A-Za-z0-9_.-]|\\.|\'[^\'\n]*\'|"[^"\n]*")+)')
+# arithmetic, where `<<` is a shift, not a here-document: $((1<<X)), (( y = 1 << X ))
+ARITHMETIC = re.compile(r'\$?\(\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)\)')
 EXEC_HINT = re.compile(r'subprocess|system|popen|exec|spawn|check_output|check_call|`|%x')
 MAX_INPUT = 32_000  # characters; a longer command that may run git is blocked, not parsed
 MAX_DEPTH = 8
@@ -101,41 +107,88 @@ def split_commands(text):
         yield current
 
 
+def heredoc_word(written):
+    """The closing line of a here-document whose delimiter is written so."""
+    return re.sub(r'\\(.)|[\'"]', r'\1', written)
+
+
+def heredoc_at(text, i, shifts):
+    """(dash, closing line) of the here-document marker at i, or None: not `<<<`, nor a shift
+    inside arithmetic. shifts: the sorted spans of ARITHMETIC in text."""
+    k = bisect.bisect_right(shifts, (i, len(text) + 1)) - 1
+    if text.startswith('<<<', i) or k >= 0 and shifts[k][0] < i < shifts[k][1]:
+        return None
+    m = HEREDOC_MARK.match(text, i)
+    return m and (m.group(1), heredoc_word(m.group(2)))
+
+
+def join_continuations(text):
+    """The text with each backslash-newline removed, as the shell does outside single quotes;
+    an escaped backslash before a newline (`C:\\\\<newline>`) ends the line."""
+    out, i, n, quote = [], 0, len(text), None
+    while i < n:
+        c = text[i]
+        if quote == "'":
+            quote = None if c == "'" else quote
+        elif c == '\\' and i + 1 < n:
+            if text[i + 1] != '\n':
+                out.append(text[i:i + 2])
+            i += 2
+            continue
+        elif c in '"\'' and quote in (None, c):
+            quote = None if quote else c
+        out.append(c)
+        i += 1
+    return ''.join(out)
+
+
 def strip_comments(text):
     """The text without shell comments; split_comments() says how."""
     return split_comments(text)[0]
 
 
 def split_comments(text):
-    """(the text without shell comments, the rest of the line after each removed `#`).
+    """(the text without shell comments, the rest of the line after each removed `#`, the text
+    with its comments but without here-document bodies).
 
     A comment is an unquoted `#` at the start of a word (not right after an escaped character:
-    `a\\ #b` is one word), to the end of its line, or inside backticks to the closing one. Here-document bodies are copied as they are, without reading
-    quotes in them. It runs before the here-document and substitution passes, so they see the
-    same quoting as the shell: an apostrophe in `git -C r stash drop # don't` once left them an
-    open quote, which hid the command (#33). Quoting starts over inside `$(…)` and backticks,
-    also within double quotes, as in the shell. The scanner is not the shell, and three review
-    rounds each found a `#` it took for a comment where bash runs the rest of the line
-    (`` echo \\`#a ; git … ``); so judge() also judges each removed rest of a line that may run
-    git, and a block or an ask from either side wins (#33, approved by the user 2026-11-23).
-    When a removed rest holds a quote or a parenthesis, judge() also judges the whole text with
-    its comments in, up to the first quote it cannot close (a fourth review)."""
-    out, removed, stack, marks, i, n = [], [], [], [], 0, len(text)
+    `a\\ #b` is one word), to the end of its line, or inside backticks to the closing one. A
+    backslash-newline is removed, as the shell does, except inside single quotes, a comment
+    (`# C:\\` ends at its newline) and here-document bodies, which are copied as they are,
+    without reading quotes in them. It runs before the here-document and substitution passes,
+    so they see the same quoting as the shell: an apostrophe in `git -C r stash drop # don't`
+    once left them an open quote, which hid the command (#33). Quoting starts over inside `$(…)`
+    and backticks, also within double quotes, as in the shell. The scanner is not the shell, and
+    three review rounds each found a `#` it took for a comment where bash runs the rest of the
+    line (`` echo \\`#a ; git … ``); so judge() also judges each removed rest of a line that
+    may run git, and a block or an ask from either side wins (#33, approved by the user
+    2026-11-23). When a removed rest holds a quote or a parenthesis, judge() also judges the
+    third text, up to the first quote it cannot close (a fourth review)."""
+    out, kept, removed, stack, marks, i, n = [], [], [], [], [], 0, len(text)
+    shifts = [m.span() for m in ARITHMETIC.finditer(text)] if '((' in text else []
     escaped = -1  # where the last backslash escape ended: a `#` there starts no comment
+
+    def emit(part):
+        out.append(part)
+        kept.append(part)
+
     while i < n:
         c, top = text[i], stack[-1] if stack else None
         if top == "'":
-            out.append(c)
+            emit(c)
             stack.pop() if c == "'" else None
             i += 1
             continue
         if c == '\\' and i + 1 < n:
-            out.append(text[i:i + 2])
+            if text[i + 1] == '\n':  # a continuation: the word goes on unless a blank ended it
+                escaped = i + 2 if i and text[i - 1] not in ' \t\n;&|()`' else escaped
+            else:
+                emit(text[i:i + 2])
+                escaped = i + 2
             i += 2
-            escaped = i
             continue
         if c == '\n':
-            out.append(c)
+            emit(c)
             i += 1
             if marks and top not in ('"', "'"):
                 for dash, word in marks:  # the body, verbatim, up to its closing line
@@ -145,12 +198,13 @@ def split_comments(text):
                         out.append(line + ('' if j < 0 else '\n'))
                         i = n if j < 0 else j + 1
                         if (line.lstrip('\t') if dash else line) == word:
+                            kept.append(line + ('' if j < 0 else '\n'))
                             break
                 marks = []
             continue
         if text.startswith('$(', i):
             stack.append(')')
-            out.append('$(')
+            emit('$(')
             i += 2
             continue
         if top == '"':
@@ -171,17 +225,19 @@ def split_comments(text):
             eol = n if eol < 0 else eol
             removed.append(text[i + 1:eol])  # to the end of the line, whatever ends it
             tick = text.find('`', i) if '`' in stack else -1
-            i = tick if 0 <= tick < eol else eol  # inside backticks it ends at the closing one
+            end = tick if 0 <= tick < eol else eol  # inside backticks it ends at the closing one
+            kept.append(text[i:end])
+            i = end
             continue
-        elif text.startswith('<<', i) and not text.startswith('<<<', i) and HEREDOC.match(text, i):
-            m = HEREDOC.match(text, i)
-            marks.append(m.groups())
-            out.append(text[i:m.end()])
-            i = m.end()
+        elif text.startswith('<<', i) and heredoc_at(text, i, shifts):
+            marks.append(heredoc_at(text, i, shifts))
+            end = HEREDOC_MARK.match(text, i).end()
+            emit(text[i:end])
+            i = end
             continue
-        out.append(c)
+        emit(c)
         i += 1
-    return ''.join(out), removed
+    return ''.join(out), removed, ''.join(kept)
 
 
 def strip_heredocs(text):
@@ -197,6 +253,7 @@ def strip_heredocs(text):
         out.append(line)
         i += 1
         marks, k = [], 0
+        shifts = [m.span() for m in ARITHMETIC.finditer(line)] if '((' in line else []
         while k < len(line):
             c = line[k]
             if quote == "'":
@@ -206,9 +263,10 @@ def strip_heredocs(text):
             elif c in '"\'' and quote in (None, c):
                 quote = None if quote else c
             elif quote is None and line.startswith('<<', k):
-                m = None if line.startswith('<<<', k) else HEREDOC.match(line, k)
+                mark = heredoc_at(line, k, shifts)
+                m = mark and HEREDOC_MARK.match(line, k)
                 if m:
-                    marks.append(m.groups())
+                    marks.append(mark)
                 k += 2 if not m else m.end() - k - 1
                 while line.startswith('<', k + 1):
                     k += 1
@@ -260,14 +318,44 @@ def substitution_spans(text):
             found.append((i + 1, j))
             i = j
         elif c == '$' and text[i + 1:i + 2] == '(' and text[i + 2:i + 3] != '(':
-            depth, j = 1, i + 2
-            while j < n and depth:
-                depth += (text[j] == '(') - (text[j] == ')')
-                j += 1
-            found.append((i + 2, j - 1 if depth == 0 else j))
-            i = j - 1
+            j = closing_paren(text, i + 2)
+            found.append((i + 2, j))
+            i = j
         i += 1
     return found
+
+
+def closing_paren(text, j):
+    """Where the `$(` that opened before j closes (or len(text)): parentheses inside quotes,
+    after a backslash or in a nested `$(…)` do not count. Linear: each character is read once,
+    and without recursion, so no nesting depth can crash it."""
+    n, stack, single = len(text), [1], False  # per level: the open parentheses, or '"'
+    while j < n:
+        c = text[j]
+        if single:
+            single = c != "'"
+        elif c == '\\':
+            j += 1
+        elif stack[-1] == '"':
+            if c == '"':
+                stack.pop()
+            elif text.startswith('$(', j):
+                stack.append(1)
+                j += 1
+        elif c == '"':
+            stack.append('"')
+        elif c == "'":
+            single = True
+        elif c == '(':
+            stack[-1] += 1
+        elif c == ')':
+            stack[-1] -= 1
+            if not stack[-1]:
+                stack.pop()
+                if not stack:
+                    return j
+        j += 1
+    return n
 
 
 def base(word):
@@ -338,8 +426,10 @@ def unquote_ansi_c(text):
 
 
 def brace_expansion(text):
-    """True when text holds an unquoted brace expansion: {a,b} or {1..3}, not ${x} or @{1}."""
-    quote, i, n = None, 0, len(text)
+    """True when text holds an unquoted brace expansion: {a,b} or {1..3}, not ${x} or @{1}.
+    One pass with a stack of the braces open in the current word, so the time stays linear
+    (a scan per `{` took 18 s on 22,000 of them)."""
+    quote, i, n, opened = None, 0, len(text), []  # per open brace: [after a $, holds , or ..]
     while i < n:
         c = text[i]
         if quote:
@@ -351,14 +441,16 @@ def brace_expansion(text):
             i += 1
         elif c in '"\'':
             quote = c
-        elif c == '{' and (i == 0 or text[i - 1] != '$'):
-            depth, j = 1, i + 1
-            while j < n and depth and text[j] not in ' \t\n;|&':
-                depth += (text[j] == '{') - (text[j] == '}')
-                j += 1
-            inner = text[i + 1:j - 1] if depth == 0 else ''
-            if ',' in inner or '..' in inner:
+        elif c in ' \t\n;|&':
+            opened = []
+        elif c == '{':
+            opened.append([i > 0 and text[i - 1] == '$', False])
+        elif c == '}' and opened:
+            param, listed = opened.pop()
+            if listed and not param:
                 return True
+        elif opened and (c == ',' or text.startswith('..', i)):
+            opened[-1][1] = True
         i += 1
     return False
 
@@ -644,17 +736,19 @@ def judge(text, depth=0, comments=True, lenient=False):
     text, decoded = unquote_ansi_c(text)
     if not decoded and may_run_git(text):
         return "holds a $'…' string the guard cannot decode"
-    text = text.replace('\\\n#', '#').replace('\\\n', ' ')  # `a\<newline>#b` is one word
     if comments:
-        whole, (text, removed) = text, split_comments(text)
+        text, removed, whole = split_comments(text)
         for rest in removed:  # what the shell may run after all, if the scanner misread a `#`
             reason = judge(rest, depth, comments=False) if may_run_git(rest) else None
             if reason:
                 return reason
         if any(set(rest) & set('\'"`()') for rest in removed) and may_run_git(whole):
+            # the text with its comments in as words, here-document bodies left out
             reason = judge(whole, depth, comments=False, lenient=True)
             if reason:
                 return reason
+    else:
+        text = join_continuations(text)
     if not lenient and brace_expansion(text) and may_run_git(text):
         return 'uses brace expansion, which the guard cannot read safely'
     text, bodies = strip_heredocs(text)

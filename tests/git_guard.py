@@ -163,7 +163,16 @@ BLOCK += ["git -C /r stash drop # don't", "git -C /r tag -d v1 # it's gone",
           "echo a\\`#'\n'; git -C r clean -fdx; echo '\n\\`#'",
           "echo a\\\n#'\n'; git -C r clean -fdx; echo '\n\\\n#'",
           # restore --staged drops staged changes; as in the Codex rules and `git restore *`
-          'git restore --staged a.txt', 'git -C r restore --staged a.py', 'git restore -S a.txt']
+          'git restore --staged a.txt', 'git -C r restore --staged a.py', 'git restore -S a.txt',
+          # fifth review: a backslash-newline is joined only where the shell joins it (not after
+          # an escaped backslash, not in a comment); a quoted `)` does not end "$(…)"; `<<` in
+          # arithmetic is a shift; a here-document delimiter is the whole word
+          "echo a\\\\\n#'\ngit -C r clean -fdx\n#'", "echo a\\\\\n#'\ngit -C r stash drop\n#'",
+          "# trailing backslash \\\ngit -C r reset --hard", "echo C:\\\\\ngit -C r reset --hard",
+          "echo \"$(echo ')' ; git -C r stash drop)\"",
+          "echo $((1<<X))\n# it's\ngit -C r stash drop\n# isn't",
+          "(( y = 1 << X ))\n# it's\ngit -C r stash drop\n# isn't",
+          "cat <<E\\OF\nx\nEOF\n# it's\ngit -C r clean -fdx\n# isn't"]
 # Claude Code (--claude): exit 3 asks the user, 0 passes, 2 blocks (a block beats an earlier ask)
 ASK = ['git push origin main', 'git -C /r push origin main', 'git -C /r commit --amend --no-edit',
        'git update-ref refs/heads/x HEAD', 'git -C /r remote add up https://x', 'ssh box git push',
@@ -175,6 +184,9 @@ ASK = ['git push origin main', 'git -C /r push origin main', 'git -C /r commit -
        'echo `echo a #b` ; git -C r push origin main',
        'echo `echo a #x \\` #z` ; git -C r push origin main', 'echo \\`#a ; git -C r push',
        "echo a\\ #'\n'; git -C r push origin main; echo '\n\\ #'",
+       "echo hi # see C:\\\ngit -C r push origin main",
+       "echo \"$(echo ')' ; git -C r push origin main)\"",
+       "cat <<E\\OF\nx\nEOF\n# it's\ngit -C r push origin main\n# isn't",
        'git -C /r commit -m "an open quote']  # what the guard cannot read is asked
 CLAUDE_PASS = ["# don't\ngit -C /r commit -F - <<'EOF'\nit's done # here\nEOF",
                'git -C /r commit -m "push it, then --amend"', 'git -C /r commit -m "--amend"',
@@ -185,7 +197,11 @@ CLAUDE_PASS = ["# don't\ngit -C /r commit -F - <<'EOF'\nit's done # here\nEOF",
                # quotes nested in "$(…)"; a comment with many `#` words is no nesting
                'git -C r commit -m "$(echo "don\'t")"', 'git -C r commit -m "$(echo "a `b` c")" -- a.md',
                'git -C r status ' + ' '.join('#w%d' % k for k in range(12)) + ' git',
-               "git -C r commit -m x -- a.md # it's (fine)", 'echo a\\ #b && git -C r status']
+               "git -C r commit -m x -- a.md # it's (fine)", 'echo a\\ #b && git -C r status',
+               # a comment's apostrophe and one in a here-document body are no quote pair
+               "git -C r add a.md # don't forget\ngit -C r commit -F - <<'EOF'\nDon't use --force\nEOF",
+               "git -C r add a.md # don't forget\ngit -C r commit -F - <<'EOF'\n"
+               "Docs: don't run git clean -fdx\nEOF"]
 # the accepted cost of judging removed comments: one that names git push is asked about
 ASK += ['echo `date` # it\'s ; git push']
 
@@ -238,6 +254,10 @@ slow = run_hook('git push x ' + 'a ' * 4300 + "# it's\ngit reset --hard")  # shl
 if slow.returncode != 2 or time.time() - started > 3:
     failures.append('the unparsable 9 KB case must block within 3 s (took %.1f s)'
                     % (time.time() - started))
+started = time.time()
+braces = run_hook('echo ' + '{' * 22000 + '; git -C r clean -fdx')  # the hook timeout is 10 s
+if braces.returncode != 2 or time.time() - started > 3:
+    failures.append('22,000 braces must block within 3 s (took %.1f s)' % (time.time() - started))
 
 
 def run_claude(command):

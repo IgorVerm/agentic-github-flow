@@ -178,26 +178,70 @@ def drop_redirections(text):
                 j = m.end()
                 while j < n and text[j] in ' \t':  # the target: `1` of 2>&1, a file, `$(…)`
                     j += 1
-                word = None
-                while j < n and (word or text[j] not in ' \t\n;&|()<>'):
-                    if word == "'" or (word == '"' and text[j] != '\\'):
-                        word = None if text[j] == word else word
-                    elif text[j] == '\\':
-                        j += 1
-                    elif text[j] in '"\'':
-                        word = text[j]
-                    elif text.startswith('$(', j):
-                        j = closing_paren(text, j + 2)
-                    elif text[j] == '`':
-                        k = text.find('`', j + 1)
-                        j = n if k < 0 else k
-                    j += 1
+                end = word_end(text, j)
+                if end is None:  # a target the scanner cannot close: the rest stays as it is,
+                    out.append(text[i:])  # to be judged (and read once, not once per `>`)
+                    break
                 out.append(' ')
-                i = j
+                i = end
                 continue
         out.append(c)
         i += 1
     return ''.join(out)
+
+
+def word_end(text, j):
+    """Where the shell word that starts at j ends, or None when it does not close: quotes,
+    `$(…)`, `${…}` and backticks (an escaped one does not close) inside it, also within double
+    quotes. Linear: each character is read once."""
+    n, stack = len(text), []  # the open '"', '{' (of ${) and '`'
+    while j < n:
+        c, top = text[j], stack[-1] if stack else None
+        if c == '\\':
+            j += 2
+            continue
+        if top == '`':
+            if c == '`':
+                stack.pop()
+        elif c == "'" and top != '"':
+            k = text.find("'", j + 1)
+            if k < 0:
+                return None
+            j = k + 1
+            continue
+        elif c == '"':
+            if top == '"':
+                stack.pop()
+            else:
+                stack.append('"')
+        elif text.startswith('$(', j):
+            j = closing_paren(text, j + 2)
+            if j >= n:
+                return None
+        elif c == '`':
+            stack.append('`')
+        elif text.startswith('${', j):
+            stack.append('{')
+            j += 1
+        elif c == '}' and top == '{':
+            stack.pop()
+        elif top is None and c in ' \t\n;&|()<>':
+            return j
+        j += 1
+    return None if stack else n
+
+
+def closing_tick(text, j):
+    """Where the backtick substitution whose body starts at j closes, or -1: a backtick after
+    a backslash does not close it."""
+    while j < len(text):
+        if text[j] == '\\':
+            j += 2
+            continue
+        if text[j] == '`':
+            return j
+        j += 1
+    return -1
 
 
 def strip_comments(text):
@@ -373,7 +417,7 @@ def substitution_spans(text):
         elif c == '"':
             quote = None if quote else '"'
         elif c == '`':
-            j = text.find('`', i + 1)
+            j = closing_tick(text, i + 1)
             if j < 0:
                 break
             found.append((i + 1, j))
@@ -894,7 +938,7 @@ def judge_raw(code, needs_exec=False):
     """Plain pattern search, for text shlex cannot parse and for code handed to an
     interpreter. Interpreter code is judged only when it can start a process: code that
     merely prints or compares such a string passes. Under judge_ask it searches for the asked
-    commands (RAW_ASK), for a removed comment rest only."""
+    commands (RAW_ASK)."""
     if needs_exec and not EXEC_HINT.search(code):
         return None
     for segment in SEGMENT.findall(code):

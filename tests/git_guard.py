@@ -220,6 +220,20 @@ BLOCK += ['echo "$(case x in a) echo " #"; echo \'"\'; esac)"; git push --force'
           'echo "$(case x in a) echo " #"; echo \'"\'; esac)"; git -C r reset --hard',
           # a redirection's target is any word: a file after >&, a substitution
           'git >&f reset --hard', 'git >$(echo f) push --force', 'git 2>`echo f` -C r reset --hard']
+# eighth review: a target's word reader knows an escaped backtick, $(…) and `…` inside double
+# quotes and ${…}; a target it cannot close leaves the rest of the text to be judged
+BLOCK += ['git >`whoami\\`\\`` reset --hard', 'git 2>`whoami\\`\\`` -C r push --force',
+          'echo hi >`whoami\\`\\``; git reset --hard',
+          'echo hi 2>`whoami\\`\\``\ngit -C r push --force origin main',
+          "git >`echo '\\`'` reset --hard", 'git >&`whoami\\`\\`` clean -fdx',
+          'git >"$(echo "x y")" reset --hard', 'git >"$(echo "\'")" reset --hard',
+          'echo hi >"$(echo "\'")"; git reset --hard', 'git >${x:-)} reset --hard',
+          'git >"`echo f`" reset --hard', 'git >&$(echo 1) push --force']
+ASK += ['git >`whoami\\`\\`` push origin main', 'ls >`whoami\\`\\`` && git push',
+        'git >"$(echo "x y")" push', 'git >&`echo 1` push']
+CLAUDE_PASS += ['git -C r log >"$out" 2>&1', 'git -C r log 2>"$(mktemp)"', 'git -C r log >&"$fd"',
+                'git -C r log >`mktemp` 2>&1 && echo ok', 'git -C r diff > >(tee d.txt)',
+                'git -C r log >${out:-x.txt}', "git -C r log >'a b.txt' 2>&1"]
 
 
 def run(command):
@@ -279,6 +293,11 @@ started = time.time()
 braces = run_hook('echo ' + '{' * 22000 + '; git -C r clean -fdx')  # the hook timeout is 10 s
 if braces.returncode != 2 or time.time() - started > 3:
     failures.append('22,000 braces must block within 3 s (took %.1f s)' % (time.time() - started))
+started = time.time()  # each unclosable target once read to the end would be quadratic
+targets = run_hook('>$( ' * 7700 + '; git -C r clean -fdx')
+if targets.returncode != 2 or time.time() - started > 3:
+    failures.append('7,700 unclosed targets must block within 3 s (took %.1f s)'
+                    % (time.time() - started))
 
 
 def run_claude(command):

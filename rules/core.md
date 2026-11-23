@@ -74,8 +74,9 @@ Agents have destroyed hours of uncommitted work with `reset --hard` and `checkou
   worktree and branch and closes the issue.
 - **Commit freely:** small commits of verified work, staged by explicit path
   (`git commit -m "…" -- <paths>`, not `add -A`, `add .`, `add -f` or `commit -a`), the subject
-  ending in `(#n)`, with a `Co-Authored-By` trailer naming the agent; no file over 50 MB. Only a
-  pull request body closes an issue with a closing keyword, because the merge publishes it.
+  ending in the issue reference `(#n)`, with a `Co-Authored-By` trailer naming the agent; no file
+  over 50 MB. Only a pull request body closes its issue with a closing keyword, because the merge
+  publishes it.
 - **Ask before every push** (a task branch; `main` only in local-main mode), unless a standing
   grant covers your own task branch: then push it through `push_branch.py`. Mark ready or merge
   only on the user's word for it, or through `merge_pr.py` where `HANDOFF.md` switches

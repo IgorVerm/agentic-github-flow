@@ -12,8 +12,8 @@
                         merge_landing.py does not explain (#50)
 
 The core plugin owns this file. An installed plugin stands alone, so the issue-chats plugin
-carries an identical copy in its scripts/ folder; tests/chat_archivable.py keeps the two
-identical. AGENTIC_GITHUB_FLOW_GH, a JSON list, replaces the `gh` command (tests use it). It
+carries an identical copy in its scripts/ folder, written from this one by tools/sync_copies.py.
+AGENTIC_GITHUB_FLOW_GH, a JSON list, replaces the `gh` command (tests use it). It
 reads only.
 """
 import hashlib

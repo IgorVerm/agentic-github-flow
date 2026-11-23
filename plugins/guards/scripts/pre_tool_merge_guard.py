@@ -81,9 +81,12 @@ SEPARATORS = set(";&|()\n")
 LEAD = gg.KEYWORDS | {"{", "}"}  # words before a command that are not the command
 
 
-def protected(path: str) -> bool:
-    """As work_proof.protected in the core plugin (#50), which this plugin cannot import."""
-    return path == ".mcp.json" or path.startswith(".claude/")
+# protected() is written from plugins/core/scripts/work_proof.py by tools/sync_copies.py: this
+# plugin cannot import the core plugin.
+def protected(path):
+    """True for a path the Claude Code sandbox keeps its session's own worktree from writing:
+    anything under .claude/, and .mcp.json (#50)."""
+    return path == '.mcp.json' or path.startswith('.claude/')
 
 
 def git(directory: str, *args: str) -> subprocess.CompletedProcess | None:

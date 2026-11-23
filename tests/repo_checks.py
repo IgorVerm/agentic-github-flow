@@ -9,10 +9,13 @@
   homepage, both marketplace files the owner; the author is named nowhere in rules/ or a skill,
   and the maintainer's first name nowhere in a plugin, rules/, templates/, tools/ or the two
   install scripts (a ruling there says "the maintainer");
-- manifests: each plugin's two manifests and both marketplace entries agree on name and version,
-  every plugin folder is listed, the repository URL is the same everywhere it is written, and a
+- manifests: each plugin's two manifests and both marketplace entries agree on name, and its
+  version agrees in the three places that hold one (the two manifests and its
+  .claude-plugin/marketplace.json entry; tools/bump_version.py raises all three), every plugin
+  folder is listed, the repository URL is the same everywhere it is written, and a
   plugin whose files differ from the default branch (origin/main, when fetched) has a new version;
-- copies: the security plugin's gitignore-secrets is byte-identical to templates/gitignore-secrets;
+- copies: every deliberate copy equals its owner; tools/sync_copies.py owns the list (COPIES)
+  and writes them;
 - installer commands: every option on a line of README.md or docs/*.md that runs install.sh or
   install.ps1, and every row of an options table (a row starting with a backticked `--option`),
   is one tools/installer.py accepts, with a known plugin after --with and a known guard after
@@ -165,7 +168,7 @@ if base.returncode == 0:
         if changed and old.returncode == 0 and \
                 json.loads(old.stdout).get('version') == manifests[(plugin, '.claude-plugin')].get('version'):
             fail('%s changed since origin/main but its version did not: installed copies would '
-                 'keep the old files' % plugin)
+                 'keep the old files; run python3 tools/bump_version.py %s' % (plugin, plugin))
 
 # installer commands in the user documents (#91)
 installer = read('tools/installer.py')
@@ -189,9 +192,14 @@ for rel in ['README.md'] + sorted(f for f in files if f.startswith('docs/') and 
                 fail('%s:%d: %s %s names what the installer does not know (choose from %s)'
                      % (rel, number, option, value, ', '.join(sorted(known[option]))))
 
-# copies
-if read('templates/gitignore-secrets') != read('plugins/security/scripts/gitignore-secrets'):
-    fail('plugins/security/scripts/gitignore-secrets differs from templates/gitignore-secrets')
+# copies: the list and the comparison are tools/sync_copies.py's
+sys.path.insert(0, os.path.join(ROOT, 'tools'))
+import sync_copies  # noqa: E402
+try:
+    for owner, copy, block, _ in sync_copies.differences(ROOT):
+        fail(sync_copies.describe(owner, copy, block) + '; run python3 tools/sync_copies.py')
+except sync_copies.ListError as e:
+    fail('tools/sync_copies.py: %s' % e)
 
 # review dates: a decision that carries `**Review by:** YYYY-MM-DD` is looked at again by then
 import datetime  # noqa: E402
@@ -206,5 +214,5 @@ for m in re.finditer(r'^## (.+?)\n(?:(?!^## ).*\n)*?.*\*\*Review by:\*\* (\d{4}-
 if errors:
     print('\n'.join(errors))
     sys.exit(1)
-print('OK: %d files clean; attribution, %d plugins and their manifests agree; copies identical'
-      % (len(files), len(plugins)))
+print('OK: %d files clean; attribution, %d plugins and their manifests agree; %d copies identical'
+      % (len(files), len(plugins), len(sync_copies.COPIES)))

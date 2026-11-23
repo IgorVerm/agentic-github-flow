@@ -59,10 +59,10 @@ Agents have destroyed hours of uncommitted work with `reset --hard` and `checkou
 
 - **Never, unless the user asks for that exact operation:** force-push; delete or move a tag;
   rewrite or discard history (`reset --hard`, rebase, amending a pushed commit, expiring reflogs);
-  discard uncommitted work, yours or anyone else's (`restore`, `checkout -- <path>`, `clean`, `stash
-  drop`); bypass a hook; change git or gh configuration; remove a worktree or force-delete a branch
-  other than through `cleanup-merged` or an issue chat's checked archive. Undo a committed mistake
-  with `git revert`; bring `main` into a branch by merge.
+  discard uncommitted work, yours or anyone else's (`restore`, `checkout -- <path>`, `clean`,
+  `stash drop`); bypass a hook; change git or gh configuration; remove a worktree or force-delete a
+  branch other than through `cleanup-merged` or an issue chat's checked archive. Undo a committed
+  mistake with `git revert`; bring `main` into a branch by merge.
 - **Files in a checkout that you did not write belong to another session.** Leave them; never
   stage them or move another worktree's branch (`promote_main.py`'s checked landing aside). Read
   a file before you overwrite it.

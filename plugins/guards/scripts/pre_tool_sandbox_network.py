@@ -53,17 +53,21 @@ nothing. Three kinds of call are refused:
    `--git-dir` or `--work-tree` (#122), becomes the lone `git <subcommand> …` (`lone_git()`):
    - always, when git runs in the session's folder;
    - in the session's own worktree reached another way (a subfolder, `--git-dir`): except
-     `pull`, a relative local path as the remote, and an option this hook does not know;
+     `pull`, a remote given or configured as a relative path (`../x.git`, also as a push URL),
+     and an option this hook does not know;
    - in another worktree of the same repository, which shares branches, tags, remotes, hooks
      and the shallow file but not HEAD, its upstream or FETCH_HEAD: only `push`, `fetch` and
      `ls-remote` with an explicit remote (a configured name, a URL, an absolute path; `fetch
      --all`), `push` with a refspec or `--all`, `--branches`, `--tags` or `--mirror`, no
      per-worktree ref (`HEAD`, `@`, `refs/worktree/`, ...), `fetch` only into
      `refs/remotes/` or `refs/tags/` and never when the call names FETCH_HEAD, only the
-     options in GIT_FLAGS, no submodules, no relative `core.hooksPath`, and no per-worktree
-     configuration beyond the sparse-checkout keys (WORKTREE_LOCAL_KEYS). A pre-push hook then
+     options in GIT_FLAGS, no submodules, no relative `core.hooksPath`, no per-worktree
+     configuration beyond the sparse-checkout keys (WORKTREE_LOCAL_KEYS), and no configuration
+     included per branch or folder (`includeIf "onbranch:"`, `"gitdir:"`). A pre-push hook then
      runs in the session's worktree instead of the other one.
-   Any other global option (`-c`, `--no-pager`) passes the call. Where no lone call exists, a
+   Any other global option (`-c`, `--no-pager`), a `..` in a `-C` folder (git follows a symlink
+   before it, unlike `cd`), or a `~` the shell leaves literal (`--git-dir=~/x`, a quoted `~`)
+   passes the call. Where no lone call exists, a
    `git` after a `cd` is named with `-C` beside the other rewrites, as a form that runs inside.
 
 It passes, so the call runs as before, whenever a faithful lone call does not exist or cannot be
@@ -162,12 +166,12 @@ GIT_TAKES_VALUE = {"-o", "--push-option", "--server-option", "--depth", "--deepe
                    "--shallow-since", "--shallow-exclude", "-j", "--jobs", "--negotiation-tip",
                    "--sort"}
 GIT_EVERY_REF = {"--all", "--branches", "--tags", "--mirror"}  # push: refs without a refspec
-# a ref whose meaning differs between worktrees: HEAD and its kin (ORIG_HEAD, FETCH_HEAD ...),
-# `@` and `@{...}`, and the per-worktree ref namespaces
 # per-worktree configuration keys that do not change a network command (merge_landing.py and
 # sparse checkouts set them); any other key in a worktree's config.worktree passes the call
 WORKTREE_LOCAL_KEYS = {"core.sparsecheckout", "core.sparsecheckoutcone", "core.untrackedcache",
                        "index.sparse", "sparse.expectfilesoutsideofpatterns"}
+# a ref whose meaning differs between worktrees: HEAD and its kin (ORIG_HEAD, FETCH_HEAD ...),
+# `@` and `@{...}`, and the per-worktree ref namespaces
 WORKTREE_REF = re.compile(r"HEAD|@|^(refs/(worktree|bisect|rewritten)/|main-worktree/|worktrees/)")
 # gh: commands that take -R; those that do not depend on the folder; those that act on it
 GH_REPO_FLAG = {"issue", "pr", "release", "run", "workflow", "label", "cache", "ruleset",
@@ -1148,8 +1152,11 @@ def git_where(cmd: list[Word]) -> tuple[list[tuple[str, str]], int]:
         else:
             raise Unsafe(f"the git option {cmd[i].value}")
         value = dequote(raw)
-        if re.search(r"[$`]", raw) or not value or value.startswith("~") and not raw.startswith("~"):
-            raise Unsafe("a computed or quoted-tilde git folder")
+        if re.search(r"[$`]", raw) or not value or value.startswith("~") and (
+                eq or not raw.startswith("~")):  # the shell keeps `~` after `=` and in quotes
+            raise Unsafe("a computed or literal-tilde git folder")
+        if name == "-C" and ".." in value.split("/"):  # git follows a symlink before `..`
+            raise Unsafe("`..` in a -C folder")
         pairs.append((name, os.path.expanduser(value) if raw.startswith("~") else value))
     return pairs, i
 
@@ -1211,12 +1218,21 @@ def git_arguments(sub: str, args: list[Word]) -> tuple[set[str], list[str]]:
     return options, positional
 
 
+def fixed_url(value: str) -> bool:
+    """A repository URL that names the same repository from every folder: a URL with a scheme
+    (`file://` only with an absolute path), `host:path`, an absolute path or `~/…`."""
+    if value.startswith("file://"):
+        return value.startswith("file:///")
+    return (value.startswith(("/", "~")) or remote_operand(value)
+            or bool(re.match(r"[A-Za-z][A-Za-z0-9+.-]*://", value)))
+
+
 def git_remote(value: str, session: str) -> bool:
-    """A remote the same from every folder: a configured remote name or a URL to another host,
-    or an absolute path."""
-    return (value in remote_urls(session) or value.startswith("/") or remote_operand(value)
-            or bool(re.match(r"[A-Za-z][A-Za-z0-9+.-]*://", value)
-                    and not value.startswith("file://")))
+    """A remote the same from every folder: a fixed URL, or a configured remote whose every
+    URL and push URL is one (a relative one names another repository from another folder)."""
+    lines = [line.split() for line in git_out(session, "remote", "-v").splitlines()]
+    urls = [parts[1] for parts in lines if len(parts) >= 2 and parts[0] == value]
+    return all(fixed_url(u) for u in urls) if urls else fixed_url(value)
 
 
 def lone_git(cmd: list[Word], directory: str, cwd: str, fetch_head: bool) -> list[Word]:
@@ -1271,7 +1287,10 @@ def lone_git(cmd: list[Word], directory: str, cwd: str, fetch_head: bool) -> lis
             for key in git_out(folder, *args, "config", "--worktree", "--name-only",
                                "--list").lower().splitlines()):
         raise Unsafe("per-worktree configuration")
-    hooks = git_out(cwd, "config", "core.hooksPath")
+    if re.search(r"^includeif\.(onbranch|gitdir)", git_out(
+            cwd, "config", "--name-only", "--get-regexp", r"^includeif\."), re.M | re.I):
+        raise Unsafe("configuration included per branch or folder")
+    hooks =git_out(cwd, "config", "core.hooksPath")
     if hooks and not os.path.isabs(os.path.expanduser(hooks)):
         raise Unsafe("hooks found relative to the worktree")
     if os.path.isdir(os.path.join(session[1], "modules")) or any(
@@ -1496,6 +1515,8 @@ def reason(found: list, had_cd: bool, directory: str) -> str:
                "stays in the sandbox, where git cannot reach the remote. From your own "
                "worktree the lone call does the same: worktrees of one repository share "
                "branches, tags and remotes.")
+        if any(f[0] == "git" and any(w.value == "fetch" for w in f[1]) for f in found):
+            why += " A fetch fills FETCH_HEAD in your own worktree."
     lines = [f"Refused by the {REASON_MARKER}: " + why
              + " Run it as its own call; this form matches an entry of your "
                "`sandbox.excludedCommands`, so it runs outside the sandbox as configured:"]

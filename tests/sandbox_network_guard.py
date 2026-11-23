@@ -103,6 +103,13 @@ def git_worktrees(tmp, run, claude, failures):
     git('-C', cfg_y, 'config', '--worktree', 'core.sparseCheckout', 'false')  # as merge_landing
     git('-C', cfg_z, 'config', '--worktree', 'remote.origin.url', 'git@github.com:a/fork.git')
     gitdir_b = os.path.join(main_co, '.git', 'worktrees', 'wt-b')
+    # review of #140: a remote whose URL is a relative path names another repository from
+    # another folder (finding 3); `..` after a symlink in -C leaves for where the link points,
+    # since git changes folder physically (finding 4)
+    git('-C', main_co, 'remote', 'add', 'near', '../../remote.git')
+    git('-C', main_co, 'remote', 'add', 'pushnear', 'git@github.com:example-org/demo.git')
+    git('-C', main_co, 'config', 'remote.pushnear.pushurl', '../remote.git')
+    os.symlink(other, os.path.join(wt_a, 'link'))
     a, b = '"%s"' % wt_a, '"%s"' % wt_b
     block = [
         ('git -C %s push origin main' % b, '    git push origin main\n'),
@@ -150,6 +157,14 @@ def git_worktrees(tmp, run, claude, failures):
         # another repository, submodules, a computed or missing folder
         'git -C "%s" push origin main' % other, 'git -C "%s" push origin agent/c' % wt_c,
         'git -C "$W" push origin main', 'git -C "%s/missing" push origin main' % base,
+        # a remote URL or push URL relative to the folder (review of #140, finding 3)
+        'git -C %s push near agent/b' % b, 'git -C %s push pushnear agent/b' % b,
+        'git -C "%s/sub" push near agent/a' % wt_a, 'git -C %s ls-remote near' % b,
+        # `..` after a symlink: git follows the link (finding 4)
+        'git -C "%s/link/.." pull' % wt_a, 'git -C "%s/link/.." push origin main' % wt_a,
+        'git -C "%s" -C link/.. pull' % wt_a,
+        # `~` after `=` stays literal in the shell: the call as written fails
+        'git --git-dir=~/x fetch origin',
     ]
     for command, expected in block:
         result = run(['--check', command, '--cwd', wt_a], claude)
@@ -169,7 +184,17 @@ def git_worktrees(tmp, run, claude, failures):
     result = run(['--check', 'git -C "%s" push origin agent/z' % cfg_z, '--cwd', cfg], claude)
     if result.returncode != 0:
         failures.append('own remote in config.worktree, refused: %s' % result.stdout)
-    return len(block) + len(passing) + 2
+    # configuration included per branch can give each worktree its own remote (review of #140)
+    inc, inc_w = os.path.join(base, 'inc'), os.path.join(base, 'inc-w')
+    make_repo(inc, [('origin', 'git@github.com:example-org/demo.git')], branch='main')
+    git('-C', inc, '-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q',
+        '--allow-empty', '-m', 'start')
+    git('-C', inc, 'worktree', 'add', '-q', '-b', 'agent/w', inc_w)
+    git('-C', inc, 'config', 'includeIf.onbranch:agent/w.path', 'fork.inc')
+    result = run(['--check', 'git -C "%s" push origin agent/w' % inc_w, '--cwd', inc], claude)
+    if result.returncode != 0:
+        failures.append('includeIf onbranch, refused: %s' % result.stdout)
+    return len(block) + len(passing) + 3
 
 
 def run_all(tmp):

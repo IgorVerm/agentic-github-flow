@@ -11,7 +11,10 @@ It parses the command into simple commands, unwraps shell `-c` strings, `eval`, 
 substitutions and wrappers such as `timeout`, and judges every `git` invocation by its subcommand
 and flags, wherever they stand. It is a guardrail, not a boundary: git started from a script
 file or built from variables is not seen, and `git checkout <path>` cannot be told from
-`git checkout <branch>`. An input it cannot parse passes, except where the parse would hide git:
+`git checkout <branch>`. Known misreads (#33, sixth review): `<<` inside `${x:-<<y}`, `$[…]` or
+arithmetic nested deeper than two levels is taken for a here-document, as is a marker inside
+`$(…)` closed on its own line, a backslash-newline inside a here-document body is not joined,
+and a `case` pattern's `)` ends a `$(…)`; the lines such a misread takes for a body go unjudged. An input it cannot parse passes, except where the parse would hide git:
 it blocks, rather than guesses, a command that may run git and is longer than MAX_INPUT
 characters, holds an unquoted brace expansion (`git push origin {-f,main}`), an ANSI-C string it
 cannot decode (`$'…'` strings are decoded first), or is nested deeper than MAX_DEPTH (eval in
@@ -142,6 +145,60 @@ def join_continuations(text):
     return ''.join(out)
 
 
+REDIRECT = re.compile(r'(?:&>>?|\d*(?:>>|>&|>\||<>|<&|<<-?|>|<))(?!\()')
+
+
+def drop_redirections(text):
+    """The text with its unquoted redirections and their targets blanked (`2>&1`, `>/dev/null`,
+    `&>log`, a here-document marker left on its line), so `git -C r 2>&1 stash drop` reads as
+    `git -C r stash drop`: shlex would make `2>` and `1` words, one of them the subcommand.
+    A here-string (`<<<`) and process substitution (`<(…)`) stay: they are judged as input."""
+    out, i, n, quote = [], 0, len(text), None
+    while i < n:
+        c = text[i]
+        if quote == "'":
+            quote = None if c == "'" else quote
+        elif c == '\\' and i + 1 < n:
+            out.append(text[i:i + 2])
+            i += 2
+            continue
+        elif c == '"':
+            quote = None if quote else '"'
+        elif c == "'" and quote is None:
+            quote = "'"
+        elif quote is None and text.startswith('<<<', i):
+            out.append('<<<')
+            i += 3
+            continue
+        elif quote is None and (
+                c in '<>' or text.startswith('&>', i) or
+                c.isdigit() and (i == 0 or text[i - 1] in ' \t\n;&|()')):
+            m = REDIRECT.match(text, i)
+            if m:
+                j = m.end()
+                if m.group().endswith('&'):
+                    while j < n and (text[j].isdigit() or text[j] == '-'):
+                        j += 1
+                else:
+                    while j < n and text[j] in ' \t':
+                        j += 1
+                    word = None
+                    while j < n and (word or text[j] not in ' \t\n;&|()<>'):
+                        if word == "'" or (word == '"' and text[j] != '\\'):
+                            word = None if text[j] == word else word
+                        elif text[j] == '\\':
+                            j += 1
+                        elif text[j] in '"\'':
+                            word = text[j]
+                        j += 1
+                out.append(' ')
+                i = j
+                continue
+        out.append(c)
+        i += 1
+    return ''.join(out)
+
+
 def strip_comments(text):
     """The text without shell comments; split_comments() says how."""
     return split_comments(text)[0]
@@ -167,6 +224,7 @@ def split_comments(text):
     out, kept, removed, stack, marks, i, n = [], [], [], [], [], 0, len(text)
     shifts = [m.span() for m in ARITHMETIC.finditer(text)] if '((' in text else []
     escaped = -1  # where the last backslash escape ended: a `#` there starts no comment
+    last_eol = -1  # the line of the last removed rest: a later `#` on it gives only a suffix
 
     def emit(part):
         out.append(part)
@@ -223,7 +281,9 @@ def split_comments(text):
         elif c == '#' and i != escaped and (i == 0 or text[i - 1] in ' \t\n;&|()`'):
             eol = text.find('\n', i)
             eol = n if eol < 0 else eol
-            removed.append(text[i + 1:eol])  # to the end of the line, whatever ends it
+            if eol != last_eol:  # to the end of the line, whatever ends it
+                removed.append(text[i + 1:eol])
+                last_eol = eol
             tick = text.find('`', i) if '`' in stack else -1
             end = tick if 0 <= tick < eol else eol  # inside backticks it ends at the closing one
             kept.append(text[i:end])
@@ -739,7 +799,8 @@ def judge(text, depth=0, comments=True, lenient=False):
     if comments:
         text, removed, whole = split_comments(text)
         for rest in removed:  # what the shell may run after all, if the scanner misread a `#`
-            reason = judge(rest, depth, comments=False) if may_run_git(rest) else None
+            reason = judge(rest, depth, comments=False, lenient=True) \
+                if may_run_git(rest) else None
             if reason:
                 return reason
         if any(set(rest) & set('\'"`()') for rest in removed) and may_run_git(whole):
@@ -762,20 +823,26 @@ def judge(text, depth=0, comments=True, lenient=False):
         reason = judge(inner, depth + 1)
         if reason:
             return reason
-    commands = []
+    commands, plain = [], drop_redirections(text)
     try:
-        for tokens in split_commands(text):
+        for tokens in split_commands(plain):
             commands.append(tokens)
     except ValueError:
-        if lenient:
-            pass  # the shell stops at the open quote; the commands before it run
-        else:
+        if not lenient:  # lenient: the shell stops at the open quote, after these commands
             try:
-                commands = list(split_commands(without_substitutions(text)))
+                commands = list(split_commands(without_substitutions(plain)))
             except ValueError:
+                reason = judge_commands(commands, text, depth)  # the ones before the quote run
+                if reason:
+                    return reason
                 if ASKING and re.search(r'\bgit\b', text):
                     return 'cannot be read by the git guard (an open quote?)'
                 return judge_raw(text)
+    return judge_commands(commands, text, depth)
+
+
+def judge_commands(commands, text, depth):
+    """judge_command() for each of commands, parsed from text."""
     for tokens in commands:
         reason = judge_command(tokens, depth)
         if reason:
@@ -786,6 +853,7 @@ def judge(text, depth=0, comments=True, lenient=False):
             if reason:
                 return reason
     return None
+
 
 RAW = [  # each a sequence of patterns that must follow each other within one simple command
     ((r'git\b', r'\bpush\b', r'--force|\s-f\b|--mirror'), 'force-pushes'),

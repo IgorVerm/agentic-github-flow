@@ -172,7 +172,12 @@ BLOCK += ["git -C /r stash drop # don't", "git -C /r tag -d v1 # it's gone",
           "echo \"$(echo ')' ; git -C r stash drop)\"",
           "echo $((1<<X))\n# it's\ngit -C r stash drop\n# isn't",
           "(( y = 1 << X ))\n# it's\ngit -C r stash drop\n# isn't",
-          "cat <<E\\OF\nx\nEOF\n# it's\ngit -C r clean -fdx\n# isn't"]
+          "cat <<E\\OF\nx\nEOF\n# it's\ngit -C r clean -fdx\n# isn't",
+          # sixth review: a redirection is no word of the command; the commands before an open
+          # quote or a trailing backslash run
+          '2>&1 git -C r stash drop', 'git -C r 2>&1 stash drop', 'git 2>&1 -C r clean -fd',
+          'git -C r >/dev/null reset --hard', 'git -C r &>log clean -fd',
+          'git -C r stash drop<<E\nE', "git -C r stash drop\necho '", 'git -C r stash drop\n\\']
 # Claude Code (--claude): exit 3 asks the user, 0 passes, 2 blocks (a block beats an earlier ask)
 ASK = ['git push origin main', 'git -C /r push origin main', 'git -C /r commit --amend --no-edit',
        'git update-ref refs/heads/x HEAD', 'git -C /r remote add up https://x', 'ssh box git push',
@@ -187,6 +192,7 @@ ASK = ['git push origin main', 'git -C /r push origin main', 'git -C /r commit -
        "echo hi # see C:\\\ngit -C r push origin main",
        "echo \"$(echo ')' ; git -C r push origin main)\"",
        "cat <<E\\OF\nx\nEOF\n# it's\ngit -C r push origin main\n# isn't",
+       'git -C r 2>&1 push', 'git -C r 2> err.txt push origin main',
        'git -C /r commit -m "an open quote']  # what the guard cannot read is asked
 CLAUDE_PASS = ["# don't\ngit -C /r commit -F - <<'EOF'\nit's done # here\nEOF",
                'git -C /r commit -m "push it, then --amend"', 'git -C /r commit -m "--amend"',
@@ -201,9 +207,12 @@ CLAUDE_PASS = ["# don't\ngit -C /r commit -F - <<'EOF'\nit's done # here\nEOF",
                # a comment's apostrophe and one in a here-document body are no quote pair
                "git -C r add a.md # don't forget\ngit -C r commit -F - <<'EOF'\nDon't use --force\nEOF",
                "git -C r add a.md # don't forget\ngit -C r commit -F - <<'EOF'\n"
-               "Docs: don't run git clean -fdx\nEOF"]
-# the accepted cost of judging removed comments: one that names git push is asked about
-ASK += ['echo `date` # it\'s ; git push']
+               "Docs: don't run git clean -fdx\nEOF",
+               'git -C r status 2>&1 | tail -3', 'git -C r log --oneline >/tmp/log.txt',
+               'git -C r commit -m "a > b, 2>&1" -- a.md']
+# a real comment with an open quote runs nothing, whatever it names (sixth review)
+CLAUDE_PASS += ['echo `date` # it\'s ; git push', "ls  # what's in the git dir",
+                "git -C r log -1  # don't rewrite git history"]
 
 
 def run(command):
@@ -253,6 +262,11 @@ started = time.time()
 slow = run_hook('git push x ' + 'a ' * 4300 + "# it's\ngit reset --hard")  # shlex cannot parse it
 if slow.returncode != 2 or time.time() - started > 3:
     failures.append('the unparsable 9 KB case must block within 3 s (took %.1f s)'
+                    % (time.time() - started))
+started = time.time()
+ticks = run_hook('git -C r stash drop\n' + '`#`' * 2600 + ' git status')  # sixth review
+if ticks.returncode != 2 or time.time() - started > 3:
+    failures.append('2,600 backtick comments must block within 3 s (took %.1f s)'
                     % (time.time() - started))
 started = time.time()
 braces = run_hook('echo ' + '{' * 22000 + '; git -C r clean -fdx')  # the hook timeout is 10 s

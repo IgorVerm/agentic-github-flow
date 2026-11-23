@@ -231,6 +231,12 @@ BLOCK += ['git >`whoami\\`\\`` reset --hard', 'git 2>`whoami\\`\\`` -C r push --
           'git >"`echo f`" reset --hard', 'git >&$(echo 1) push --force']
 ASK += ['git >`whoami\\`\\`` push origin main', 'ls >`whoami\\`\\`` && git push',
         'git >"$(echo "x y")" push', 'git >&`echo 1` push']
+# ninth review: within "${…}" a quote is a character (zsh, dash); a target that does not close
+# ends at the next blank, as before word_end
+BLOCK += ['git -C r 2>"${LOG:-it\'s.log}" push --force', 'git -C r 2>"${LOG:-it\'s.log}" reset --hard',
+          'git -C r 2>"${LOG:-it\'s.log}" stash drop', 'git -C r <<${ stash drop']
+ASK += ['git -C r >"${x:-\'}" push']
+CLAUDE_PASS += ['git -C r log 2>"${LOG:-it\'s.log}"', 'git -C r log > "${TMPDIR:-/tmp}/log"']
 CLAUDE_PASS += ['git -C r log >"$out" 2>&1', 'git -C r log 2>"$(mktemp)"', 'git -C r log >&"$fd"',
                 'git -C r log >`mktemp` 2>&1 && echo ok', 'git -C r diff > >(tee d.txt)',
                 'git -C r log >${out:-x.txt}', "git -C r log >'a b.txt' 2>&1"]

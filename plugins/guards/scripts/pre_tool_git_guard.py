@@ -152,8 +152,9 @@ def drop_redirections(text):
     """The text with its unquoted redirections and their targets blanked (`2>&1`, `>/dev/null`,
     `&>log`, a here-document marker left on its line), so `git -C r 2>&1 stash drop` reads as
     `git -C r stash drop`: shlex would make `2>` and `1` words, one of them the subcommand.
+    A target is one shell word (word_end); one that does not close ends at the next blank.
     A here-string (`<<<`) and process substitution (`<(…)`) stay: they are judged as input."""
-    out, i, n, quote = [], 0, len(text), None
+    out, i, n, quote, closes = [], 0, len(text), None, True
     while i < n:
         c = text[i]
         if quote == "'":
@@ -178,10 +179,12 @@ def drop_redirections(text):
                 j = m.end()
                 while j < n and text[j] in ' \t':  # the target: `1` of 2>&1, a file, `$(…)`
                     j += 1
-                end = word_end(text, j)
-                if end is None:  # a target the scanner cannot close: the rest stays as it is,
-                    out.append(text[i:])  # to be judged (and read once, not once per `>`)
-                    break
+                end = word_end(text, j) if closes else None
+                if end is None:  # a target the scanner cannot close: to the next blank,
+                    closes = False  # and so every later target, so the text is read once
+                    end = j
+                    while end < n and text[end] not in ' \t\n':
+                        end += 1
                 out.append(' ')
                 i = end
                 continue
@@ -194,7 +197,7 @@ def word_end(text, j):
     """Where the shell word that starts at j ends, or None when it does not close: quotes,
     `$(…)`, `${…}` and backticks (an escaped one does not close) inside it, also within double
     quotes. Linear: each character is read once."""
-    n, stack = len(text), []  # the open '"', '{' (of ${) and '`'
+    n, stack, dq = len(text), [], 0  # the open '"', '{' (of ${) and '`'; how many '"'
     while j < n:
         c, top = text[j], stack[-1] if stack else None
         if c == '\\':
@@ -203,7 +206,7 @@ def word_end(text, j):
         if top == '`':
             if c == '`':
                 stack.pop()
-        elif c == "'" and top != '"':
+        elif c == "'" and not dq:  # within "${…}" a quote is a character (zsh, dash)
             k = text.find("'", j + 1)
             if k < 0:
                 return None
@@ -212,8 +215,10 @@ def word_end(text, j):
         elif c == '"':
             if top == '"':
                 stack.pop()
+                dq -= 1
             else:
                 stack.append('"')
+                dq += 1
         elif text.startswith('$(', j):
             j = closing_paren(text, j + 2)
             if j >= n:

@@ -24,12 +24,12 @@ RULES_LIMIT = 8000
 LINK = re.compile(r'\]\(([^)#]+)(?:#[^)]*)?\)')
 CHARS_PER_TOKEN = 4  # an estimate: no tokenizer here, and the bound is a recommendation
 PLAIN_NEVER_FIRST = '[]{}>|*&!%@`,?-#'  # YAML indicators that cannot start a plain value
-# bytes; set 2026-11-22 (#125). Raise a number only in the change that grows the skill.
+# bytes; set 2026-11-23 (#125). Raise a number only in the change that grows the skill.
 BODY_BUDGET = {
-    'archive-finished-chats': 6162, 'check-web-deploy': 5275, 'cleanup-merged': 7740,
-    'codex-issue-chats': 7232, 'codex-worker': 8903, 'efficient-design': 3676,
-    'issue-handover': 19052, 'open-issue': 2885, 'repo-docs': 3489, 'requirements': 7193,
-    'review-change': 5701, 'review-security': 5750, 'ship-change': 13317, 'spec-first': 1250,
+    'archive-finished-chats': 6157, 'check-web-deploy': 5275, 'cleanup-merged': 7737,
+    'codex-issue-chats': 7232, 'codex-worker': 8895, 'efficient-design': 3676,
+    'issue-handover': 19051, 'open-issue': 2852, 'repo-docs': 3472, 'requirements': 7191,
+    'review-change': 5701, 'review-security': 5732, 'ship-change': 13265, 'spec-first': 1250,
 }
 DESCRIPTIONS_BUDGET = 5645
 errors = []

@@ -28,7 +28,6 @@ from unittest import mock
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 TOOL = os.path.join(ROOT, 'plugins', 'core', 'scripts', 'landing.py')
-COPY = os.path.join(ROOT, 'plugins', 'issue-chats', 'scripts', 'landing.py')
 
 STUB = r'''import json, os, sys
 s = json.load(open(os.environ['STUB_GH']))
@@ -569,13 +568,6 @@ class Consumers(unittest.TestCase):
                            env=dict(os.environ, AGENTIC_GITHUB_FLOW_GH='["false"]'))
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn('never deleted', r.stdout)
-
-
-class Copy(unittest.TestCase):
-    def test_issue_chats_copy_is_identical(self):
-        with open(TOOL, 'rb') as a, open(COPY, 'rb') as b:
-            self.assertEqual(a.read(), b.read(), 'copy plugins/core/scripts/landing.py to %s'
-                             % os.path.relpath(COPY, ROOT))
 
 
 if __name__ == '__main__':

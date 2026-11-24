@@ -43,7 +43,8 @@ repository, with this repository moved to Part C. After the second round: the ti
 gone as well, an audit agent lists the critical systems, checks written for an issue are not
 carried forward unless they protect one, and this repository is pruned now, not on a date.
 
-**One question is left,** in [§B.6](#b6-open-question).
+**Four questions are left,** in [§B.6](#b6-open-questions). Three of them are places where I
+read more into your words than they say; each is marked where it occurs.
 
 ## The maintainer's rulings on the first version, 2026-11-24
 
@@ -163,7 +164,7 @@ next remove checks unseen.
 | `full` | The command for everything. | `cargo test --workspace` and the headless run | `python3 tests/run_all.py` |
 | `drive` | How to start the product and look at it, or the project skill or script that does. | The game run headless for N frames from a fixed seed; a screenshot command | none: the tests already run the real hooks, installer and scripts |
 | `check paths` | Where checks live, as patterns. | `**/tests/**`, `**/*_test.rs` | `tests/**` |
-| `critical paths` | The critical systems, as path patterns: the parts whose checks are kept. Listed by an audit agent. | Save-game format, the simulation core | `plugins/guards/**`, the merge and push gates, `templates/pre-push`, the installer |
+| `critical paths` | The critical systems, as path patterns: the parts whose checks are kept. Listed by an audit agent. | Save-game format, the simulation core | a first guess until the audit: the guards, the merge and push gates, the pre-push hook, the installer (Part C) |
 | `verification gate` | `off`, `observe` or `enforce`; `off` when missing. | `observe` | `observe` |
 
 A project with a heavy harness (a game, a mobile app) keeps it as its own skill or script and
@@ -268,7 +269,7 @@ gate.
 | | A task check | A standing check |
 |---|---|---|
 | Made for | One issue: it shows that issue's goal was met (§B.1). | A critical system: it shows that system still works after any change. |
-| Lives | Until the issue lands. It is left behind: not added to the `full` command, and by default not committed. The `Verified:` line records what was run and what it showed. | In the repository, under `check paths`, run by `fast` when its trigger matches and by `full` always. |
+| Lives | Until the issue lands. It is left behind: not added to the `full` command, which is all "left behind" means. Until the landing the reviewer must be able to rerun it: its command is in the pull request body, or its script is committed with the change in a folder the section names outside `check paths`. The `Verified:` line records what was run and what it showed. | In the repository, under `check paths`, run by `fast` when its trigger matches and by `full` always. |
 | May be | Quick and specific: a script, a one-off command, a failing-then-passing test, a screenshot. | Only what passes the admission test below. |
 | Count and time | Not limited. | Not limited. They are measured and reported (§B.5), never a reason by themselves to refuse or to remove a check. |
 
@@ -292,13 +293,16 @@ tests, and the core rule *Work grows with what changed* applied to the gate itse
   it, `standing-check: <test> fails when <defect>`, and the reviewer repeats it for one new
   check per pull request, of the reviewer's choice.
 
-Refused at review: a check outside the critical systems offered as a standing check; a test
+Refused at review: a check outside the critical systems offered as a standing check (my
+reading of "may be left behind" as "is left behind"; question 2 of §B.6); a test
 that restates the implementation (it asserts a constant equals itself, or that a stub
 returns what it was told to return); a test of someone else's code; a second test that fails
 on the same defect as an existing one (it becomes a case of that one); a test that stands in
 for a judgment (P4). No coverage target: coverage rewards exactly the tests this refuses.
 
-**4. Which standing checks go: the pruning rule.** From the two rulings together. A standing
+**4. Which standing checks go: the pruning rule.** From the two rulings together; the second
+bullet is my reading, since the second ruling alone would drop such a check (question 3 of
+§B.6). A standing
 check is kept when either holds:
 
 - it protects a path under `critical paths`, and a named defect still makes it fail; or
@@ -311,7 +315,8 @@ commit, and the change waits for the maintainer (§B.3).
 **5. When pruning happens.** Now, as the first step in every repository that adopts the
 method: the audit agent lists the critical systems, and one pruning pass applies the rule
 to the checks that exist. After that the system holds by construction, because new checks
-enter only through the admission test. The audit is repeated at a `**Review by:**` date on
+enter only through the admission test. The audit is repeated at a `**Review by:**` date,
+which the maintainer sets when the section merges, on
 the repository's `DESIGN_DECISIONS.md` entry for its verification settings, because what is
 critical changes as a product grows; a pruning pass follows only if the list changed.
 
@@ -323,7 +328,7 @@ The cause is fixed, or the check is deleted with the reason written down.
 | The miss is | It becomes |
 |---|---|
 | Mechanical, in a critical system, and a test can fail on it | A case in an existing standing check, through the admission test |
-| Mechanical, elsewhere | An item in `REVIEW.md`; no standing check |
+| Mechanical, elsewhere | An item in `REVIEW.md`; no standing check (question 2 of §B.6) |
 | Something that must hold every time | A hook or a permission rule, not a sentence |
 | A matter of attention at review | An item in `REVIEW.md` |
 | Seen once | Nothing yet |
@@ -376,15 +381,31 @@ What would show the method is wrong: a `none` on a change that later needed a fi
 rounds rising after the gate; issues whose check was rewritten by the agent that did the
 work; the same evidence text on every landing.
 
-## B.6 Open question
+## B.6 Open questions
 
-**Does the audit agent's list take effect without the maintainer's word?** The section is
-guarded (§B.2), so today a change to it waits for the maintainer at the merge. That keeps a
-working agent from narrowing the list for its own change, and it means the maintainer sees
-the audit's result once per repository and at each review date, without compiling it.
-Recommendation: keep the guard. The alternative is to let a change that the audit agent
-made, and nothing else touched, merge automatically; that needs a way for `merge_pr.py` to
-know a change came from an audit, which it does not have.
+1. **Does the audit agent's list take effect without the maintainer's word?** The section is
+   guarded (§B.2), so today a change to it waits for the maintainer at the merge. That keeps
+   a working agent from narrowing the list for its own change, and the maintainer sees the
+   audit's result once per repository and at each review date, without compiling it.
+   Recommendation: keep the guard.
+2. **"May be left behind", or "is left behind"?** Your words say a check made for an issue
+   need not be carried along and may be left behind unless it protects critical systems. The
+   proposal reads that strictly: a check outside the critical systems does not become a
+   standing check at all. The looser reading lets the author keep one when it seems useful.
+   Recommendation: the strict reading, because "when it seems useful" is how this
+   repository went from 12 to 34 test files in a month.
+3. **Does a check that once caught something stay, although it protects nothing critical?**
+   Your first ruling called useless the tests that never fail and protect no critical part;
+   your second lets everything outside the critical systems go. The proposal keeps a
+   standing check that has failed on record. That is uneven with question 2: an old check of
+   that kind stays, a new one cannot enter. Recommendation: keep them at this first pruning
+   pass, since the record shows they did work, and let the next audit decide whether what
+   they protect is critical after all.
+4. **Where does a task check live until the landing?** The reviewer must be able to rerun it
+   (§B.3), so it cannot exist only in the author's session. The proposal offers the command
+   in the pull request body, or a script committed with the change outside `check paths`.
+   Your words say nothing about committing. Recommendation: the body for a command, a
+   committed script only when a command does not fit; such scripts are never run by `full`.
 
 # Part C. This repository as the first case
 

@@ -289,8 +289,13 @@ scanner misread, the maintainer approved "#33 nieuwe aanpak" (2026-11-23): the r
 after each removed `#` is judged as well when it may run git, and a block or an ask from either
 side wins; a comment that names a forbidden git command is refused, which costs an agent only a
 reworded comment. `git restore --staged` is refused in every spelling, as the Codex rules and
-`git restore *` already did (the dropped `git -C * restore *` had refused it too). The hook
-also covers the terminal tool. The installer removes
+`git restore *` already did (the dropped `git -C * restore *` had refused it too). After nine
+review rounds each found new spellings, the maintainer chose "(b) structureel vangnet"
+(2026-11-24): when a git command's subcommand slot holds no plain word (`git $(true) stash
+drop`, `git -C r <<<x stash drop`, none at all), every subcommand word after a `git` in the
+whole text is judged as the subcommand (`judge_loose`), as the dropped `git -C * …` rules
+matched. This closes the class rather than one spelling at a time. The hook also covers the
+terminal tool. The installer removes
 the rules it added that the policy dropped, and names the user's own such rules without
 changing them.
 **Why:** such a `*` spans the rest of the command, so `git -C r commit -m "a clean step"` was

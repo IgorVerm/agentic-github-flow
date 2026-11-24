@@ -14,7 +14,11 @@ file or built from variables is not seen, and `git checkout <path>` cannot be to
 `git checkout <branch>`. Known misreads (#33, sixth review): `<<` inside `${x:-<<y}`, `$[…]` or
 arithmetic nested deeper than two levels is taken for a here-document, as is a marker inside
 `$(…)` closed on its own line, a backslash-newline inside a here-document body is not joined,
-and a `case` pattern's `)` ends a `$(…)`; the lines such a misread takes for a body go unjudged. An input it cannot parse passes, except where the parse would hide git:
+and a `case` pattern's `)` ends a `$(…)`; the lines such a misread takes for a body go unjudged.
+The belt behind the parser (#33, ninth review): when a git command's subcommand slot holds no
+plain word (`git $(true) stash drop`, `git -C r <<<x stash drop`, nothing at all), every
+subcommand word after a `git` in the whole text is judged as the subcommand (judge_loose), as
+the dropped `git -C * stash drop*` rules matched. An input it cannot parse passes, except where the parse would hide git:
 it blocks, rather than guesses, a command that may run git and is longer than MAX_INPUT
 characters, holds an unquoted brace expansion (`git push origin {-f,main}`), an ANSI-C string it
 cannot decode (`$'…'` strings are decoded first), or is nested deeper than MAX_DEPTH (eval in
@@ -393,8 +397,10 @@ def strip_heredocs(text):
 
 
 def substitutions(text):
-    """Texts the shell runs as commands inside `…` and $(…), also within double quotes."""
-    return [text[a:b] for a, b in substitution_spans(text)]
+    """Texts the shell runs as commands inside `…` and $(…), also within double quotes. In a
+    backtick body the shell drops a backslash before ` $ or \\, so a nested `\\`git …\\`` runs."""
+    return [re.sub(r'\\([`$\\])', r'\1', text[a:b]) if text[a - 1] == '`' else text[a:b]
+            for a, b in substitution_spans(text)]
 
 
 def without_substitutions(text):
@@ -739,6 +745,51 @@ def judge_git(args):
 
 
 ASKING = False  # set by judge_ask(): judge_command then reports ask_git() reasons
+UNSURE = False  # set by judge_command() for a git command without a plain subcommand word
+PLAIN_SUB = re.compile(r'[A-Za-z][\w.-]*')
+# the subcommands judge_git() or ask_git() can refuse or ask about
+RULED = {'push', 'pull', 'reset', 'clean', 'restore', 'checkout', 'switch', 'stash', 'rebase',
+         'tag', 'branch', 'filter-branch', 'filter-repo', 'replace', 'reflog', 'gc', 'prune',
+         'update-ref', 'worktree', 'commit', 'add', 'config', 'remote'}
+MAX_LOOSE = 16
+LOOSE_WORD = re.compile(r'''(?:"[^"]*"|'[^']*'|\\.|[^\s"'\\]|["'\\])+''')
+
+
+def git_slot(args):
+    """Where the subcommand stands in args (the tokens after `git`), options read as flags
+    unless GIT_VALUE_OPTS says they take a value; len(args) when there is none."""
+    i = 0
+    while i < len(args) and args[i].startswith('-'):
+        i += 2 if args[i] in GIT_VALUE_OPTS else 1
+    return i
+
+
+def judge_loose(text):
+    """The belt: in each simple command of text (split at newlines, ; | &, not at parentheses),
+    every word in RULED after a `git` word, up to the next one, is judged as the subcommand
+    with the words after it. A quoted stretch stays in its word (`-m "push it"` is no push), a
+    quote that does not close is a character; then quotes and backslashes are dropped and a word
+    is read without the `$(`, `(`, `{` or backtick before it and the `)`, `}` or backtick after
+    it. Linear: each word belongs to one git; past MAX_LOOSE candidates for one git it gives up
+    and refuses."""
+    one = ask_git if ASKING else judge_git
+    for segment in SEGMENT.findall(text):
+        if 'git' not in segment:
+            continue
+        words = [re.sub(r'[\'"\\]', '', w).lstrip('$(`{').rstrip(')`}')
+                 for w in LOOSE_WORD.findall(segment)]
+        starts = [k for k, w in enumerate(words) if base(w) == 'git'] + [len(words)]
+        for a, b in zip(starts, starts[1:]):
+            tried = 0
+            for k in range(a + 1, b):
+                if words[k] in RULED:
+                    tried += 1
+                    if tried > MAX_LOOSE:
+                        return 'cannot be read by the git guard (git with many subcommand words)'
+                    reason = one(words[k:b])
+                    if reason:
+                        return reason
+    return None
 
 
 def ask_git(args):
@@ -793,6 +844,9 @@ def judge_command(tokens, depth):
         return 'is nested too deeply to check'
     name = base(tokens[0])
     if name == 'git':
+        global UNSURE
+        i = git_slot(tokens[1:])
+        UNSURE = i >= len(tokens) - 1 or not PLAIN_SUB.fullmatch(tokens[1 + i])
         return ask_git(tokens[1:]) if ASKING else judge_git(tokens[1:])
     if name == 'gh':
         if tokens[1:2] in (['config'], ['alias']) and tokens[2:3] in (
@@ -846,6 +900,7 @@ def judge(text, depth=0, comments=True, lenient=False):
     text, decoded = unquote_ansi_c(text)
     if not decoded and may_run_git(text):
         return "holds a $'…' string the guard cannot decode"
+    full = text  # comments in, for the belt
     if comments:
         text, removed, whole = split_comments(text)
         for rest in removed:  # what the shell may run after all, if the scanner misread a `#`
@@ -885,19 +940,27 @@ def judge(text, depth=0, comments=True, lenient=False):
             try:
                 commands = list(split_commands(without_substitutions(plain)))
             except ValueError:
-                reason = judge_commands(commands, text, depth)  # the ones before the quote run
+                reason = judge_commands(commands, text, depth, full)  # the ones before it run
                 if reason:
                     return reason
                 if ASKING and re.search(r'\bgit\b', text):
                     return 'cannot be read by the git guard (an open quote?)'
                 return judge_raw(text)
-    return judge_commands(commands, text, depth)
+    return judge_commands(commands, text, depth, full)
 
 
-def judge_commands(commands, text, depth):
-    """judge_command() for each of commands, parsed from text."""
+def judge_commands(commands, text, depth, full):
+    """judge_command() for each of commands, parsed from text; full is text with its comments.
+    A git command whose subcommand slot the parser could not fill with a plain word turns on
+    the belt (judge_loose) over full."""
+    global UNSURE
+    loosened = False  # the belt reads full once, however many git commands turn it on
     for tokens in commands:
+        UNSURE = False
         reason = judge_command(tokens, depth)
+        if not reason and UNSURE and not loosened:
+            reason, loosened = judge_loose(full), True
+        UNSURE = False
         if reason:
             return reason
         if base(tokens[0]) in SHELLS and all(t.startswith('-') for t in tokens[1:]):

@@ -237,6 +237,16 @@ BLOCK += ['git -C r 2>"${LOG:-it\'s.log}" push --force', 'git -C r 2>"${LOG:-it\
           'git -C r 2>"${LOG:-it\'s.log}" stash drop', 'git -C r <<${ stash drop']
 ASK += ['git -C r >"${x:-\'}" push']
 CLAUDE_PASS += ['git -C r log 2>"${LOG:-it\'s.log}"', 'git -C r log > "${TMPDIR:-/tmp}/log"']
+# the belt (Igor, 2026-11-24, "structureel vangnet"): a git command without a plain subcommand
+# word has every subcommand word after a git judged; the -C forms were denied by main's rules
+BLOCK += ['echo `echo \\`git stash drop\\``', 'git -C r < <(echo) stash drop',
+          'git -C r <<<x stash drop', 'git -C r >$[ 1 ] stash drop', 'git $(true) stash drop',
+          'git -c a.b=`:`#x stash drop', 'git "$x" -C r reset --hard', 'git ${s:-} clean -fdx',
+          '(git $(true) stash drop)', 'git `true` push --force origin main']
+ASK += ['echo `echo \\`git -C r push\\``', 'git -C r < <(echo) push', 'git -C r <<<x push',
+        'git $(true) push', 'git "$x" commit --amend -m x']
+CLAUDE_PASS += ['git "$cmd" --version', 'git $(echo status) --short', 'git', 'git --version',
+                'git "$@"', 'git -C "$repo" log --oneline -5', 'git $sub commit -m "push it" -- a.md']
 CLAUDE_PASS += ['git -C r log >"$out" 2>&1', 'git -C r log 2>"$(mktemp)"', 'git -C r log >&"$fd"',
                 'git -C r log >`mktemp` 2>&1 && echo ok', 'git -C r diff > >(tee d.txt)',
                 'git -C r log >${out:-x.txt}', "git -C r log >'a b.txt' 2>&1"]
@@ -299,6 +309,11 @@ started = time.time()
 braces = run_hook('echo ' + '{' * 22000 + '; git -C r clean -fdx')  # the hook timeout is 10 s
 if braces.returncode != 2 or time.time() - started > 3:
     failures.append('22,000 braces must block within 3 s (took %.1f s)' % (time.time() - started))
+started = time.time()  # the belt reads the text once, however many git commands turn it on
+belt = run_hook('git $x status; ' * 2000 + 'git ' + 'stash ' * 4000 + '; git -C r clean -fdx')
+if belt.returncode != 2 or time.time() - started > 3:
+    failures.append('2,000 unsure git commands must block within 3 s (took %.1f s)'
+                    % (time.time() - started))
 started = time.time()  # each unclosable target once read to the end would be quadratic
 targets = run_hook('>$( ' * 7700 + '; git -C r clean -fdx')
 if targets.returncode != 2 or time.time() - started > 3:

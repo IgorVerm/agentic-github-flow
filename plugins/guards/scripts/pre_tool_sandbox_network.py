@@ -54,7 +54,8 @@ nothing. Three kinds of call are refused:
    - always, when git runs in the session's folder;
    - in the session's own worktree reached another way (a subfolder, `--git-dir`): except
      `pull`, a remote given or configured as a relative path (`../x.git`, also as a push URL),
-     and an option this hook does not know;
+     and an option this hook does not know; with `--git-dir` from another folder git runs its
+     hooks in that folder, so there the hooks must be alike as below;
    - in another worktree of the same repository, which shares branches, tags, remotes, hooks
      and the shallow file but not HEAD, its upstream or FETCH_HEAD: only `push`, `fetch` and
      `ls-remote` with an explicit remote (a configured name, a URL, an absolute path; `fetch
@@ -67,7 +68,8 @@ nothing. Three kinds of call are refused:
      session's worktree instead of the other one (`hooks_alike()`, the maintainer's choice (b) on the
      review of #140): no `reference-transaction` hook, and for a push no `pre-push` hook or the
      agentic-github-flow one, byte for byte a version of `templates/pre-push` in this clone's
-     history, with both worktrees alike in its personal-data check's `exempt-dirs`; a push with
+     history, with both worktrees alike in its personal-data check's `exempt-dirs`, judged with
+     and without CLAUDE_PROJECT_DIR (the hook has it, a push from Bash does not); a push with
      `--work-tree` passes.
    Any other global option (`-c`, `--no-pager`), a `..` in a `-C` folder (git follows a symlink
    before it, unlike `cd`), or a `~` the shell leaves literal (`--git-dir=~/x`, a quoted `~`)
@@ -1292,10 +1294,37 @@ def hooks_alike(sub: str, hooks_dir: str, target_top: str, session_top: str) -> 
         with open(pre_push, "rb") as handle:
             if blob_id(handle.read()) not in template_blobs():
                 return False
-        exempt = personal_data().exempt_session
-        return bool(target_top) and exempt(target_top) == exempt(session_top)
+        return bool(target_top) and all(alike_exempt(target_top, session_top, project)
+                                        for project in (os.environ.get("CLAUDE_PROJECT_DIR"),
+                                                        None))
     except Exception:  # unreadable hook, a missing or failing personal-data guard
         return False
+
+
+def alike_exempt(target_top: str, session_top: str, project: str | None) -> bool:
+    """Both worktrees alike in `exempt-dirs` with CLAUDE_PROJECT_DIR as given: the hook judges
+    with Claude Code's variable set, the pre-push hook of a push from Bash runs without it
+    (review of #140, finding 3 of the second round), so the guard asks under both."""
+    saved = os.environ.pop("CLAUDE_PROJECT_DIR", None)
+    try:
+        if project:
+            os.environ["CLAUDE_PROJECT_DIR"] = project
+        exempt = personal_data().exempt_session
+        return exempt(target_top) == exempt(session_top)
+    finally:
+        os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        if saved is not None:
+            os.environ["CLAUDE_PROJECT_DIR"] = saved
+
+
+def same_hooks(sub: str, cwd: str, common: str, target_top: str, session_top: str) -> None:
+    """Unsafe unless the hooks git runs for `sub` in `target_top` do the same in `session_top`."""
+    hooks = git_out(cwd, "config", "core.hooksPath")
+    if hooks and not os.path.isabs(os.path.expanduser(hooks)):
+        raise Unsafe("hooks found relative to the worktree")
+    if not hooks_alike(sub, os.path.expanduser(hooks) if hooks else
+                       os.path.join(common, "hooks"), target_top, session_top):
+        raise Unsafe("a hook that may do otherwise in the session's worktree")
 
 
 def lone_git(cmd: list[Word], directory: str, cwd: str, fetch_head: bool) -> list[Word]:
@@ -1327,6 +1356,8 @@ def lone_git(cmd: list[Word], directory: str, cwd: str, fetch_head: bool) -> lis
     if sub == "push" and any(name == "--work-tree" for name, _ in pairs):
         raise Unsafe("the push's hooks would run in another work tree")
     if target[0] == session[0]:
+        if target[2] != session[2]:  # `--git-dir` alone: git's hooks run in the folder it is in
+            same_hooks(sub, cwd, session[1], target[2], session[2])
         return [cmd[0]] + cmd[at:]
     # another worktree of the same repository
     if remote is None and not (sub == "fetch" and "--all" in options):
@@ -1355,12 +1386,7 @@ def lone_git(cmd: list[Word], directory: str, cwd: str, fetch_head: bool) -> lis
     if re.search(r"^includeif\.(onbranch|gitdir)", git_out(
             cwd, "config", "--name-only", "--get-regexp", r"^includeif\."), re.M | re.I):
         raise Unsafe("configuration included per branch or folder")
-    hooks =git_out(cwd, "config", "core.hooksPath")
-    if hooks and not os.path.isabs(os.path.expanduser(hooks)):
-        raise Unsafe("hooks found relative to the worktree")
-    if not hooks_alike(sub, os.path.expanduser(hooks) if hooks else
-                       os.path.join(session[1], "hooks"), target[2], session[2]):
-        raise Unsafe("a hook that may do otherwise in the session's worktree")
+    same_hooks(sub, cwd, session[1], target[2], session[2])
     if os.path.isdir(os.path.join(session[1], "modules")) or any(
             top and os.path.exists(os.path.join(top, ".gitmodules"))
             for top in (target[2], session[2])):

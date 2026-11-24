@@ -229,8 +229,15 @@ def hooks(base, run, claude, failures):
         return folder
 
     only_b, both = settings('xdg-only-b', [hk_b]), settings('xdg-both', [hk_a, hk_b])
+    only_a = settings('xdg-only-a', [hk_a])
     push = 'git -C "%s" push origin agent/b' % hk_b
-    cases = [  # (hook, its content, XDG_CONFIG_HOME or None, command, refused)
+    # the session's own worktree through --git-dir from another folder: git runs the hooks
+    # there (second review of #140, finding 2)
+    out = os.path.join(base, 'hk-out')
+    os.makedirs(out)
+    own = 'git -C "%s" --git-dir="%s" push origin agent/a' % (
+        out, os.path.join(hk, '.git', 'worktrees', 'hk-a'))
+    cases = [  # (hook, its content, XDG_CONFIG_HOME or None, command, refused[, project])
         (None, b'', None, push, True),
         ('pre-push', template, None, push, True),
         ('pre-push', template, both, push, True),
@@ -241,11 +248,20 @@ def hooks(base, run, claude, failures):
         ('reference-transaction', b'#!/bin/sh\nexit 0\n', None,
          'git -C "%s" fetch origin' % hk_b, False),
         ('pre-push', template, None, 'git --work-tree="%s" push origin agent/a' % hk_b, False),
+        (None, b'', None, own, True),
+        ('pre-push', template, None, own, True),
+        ('pre-push', template, only_a, own, False),      # the hook in hk-out is not exempt
+        ('pre-push', b'#!/bin/sh\nexit 0\n', None, own, False),
+        # alike only with CLAUDE_PROJECT_DIR, which the push from Bash lacks (finding 3)
+        ('pre-push', template, only_a, push, False, hk),
+        ('pre-push', template, only_a, push, False),
+        ('pre-push', template, both, push, True, hk_a),
     ]
-    for name, data, xdg, command, refused in cases:
+    for name, data, xdg, command, refused, *project in cases:
         install(name, data)
         result = run(['--check', command, '--cwd', hk_a], claude,
-                     **({'xdg': xdg} if xdg else {}))
+                     **({'xdg': xdg} if xdg else {}),
+                     extra={'CLAUDE_PROJECT_DIR': project[0]} if project else None)
         if result.returncode != (2 if refused else 0):
             failures.append('hook %s (%s), %s: rc %d:\n%s%s' % (
                 name, xdg and os.path.basename(xdg), command, result.returncode, result.stdout,

@@ -1,6 +1,6 @@
 {
   "name": "agentic-github-flow-guards",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Claude Code hooks that refuse destructive git commands and a bare merge the sandbox would break, and ask before destructive deletes and before personal data leaves the machine.",
   "author": {
     "name": "MAI-Tech",

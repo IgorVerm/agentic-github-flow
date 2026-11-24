@@ -54,7 +54,11 @@ Checked on 2026-11-22.
     them once; macOS only; measured live on a scratch worktree, not yet in a real issue chain. Its threads are not listed in the Codex desktop
     app. A project may list tools in `.agents/codex-tools.json` (Blender, its QA runs, the
     Spark scripts) that the worker serves to Codex from sandboxes of its own, anchored in the
-    Claude Code settings (#116, `codex_tools.py`).
+    Claude Code settings (#116, `codex_tools.py`). What a turn keeps in its context (#149): each
+    tool output capped at 2,000 tokens (`tool_output_token_limit`), a tool call's full log in a
+    file, and a fresh thread per round with the worker's hand-over instead of `--resume`; offline
+    tests only, not yet in a live job (the Codex weekly limit was spent). A cap on Codex's own
+    subagents waits on the maintainer's choice of number (measured on #149).
 - Efficient design (#37): the core skill `efficient-design` is a checklist at design and review
   (work per frame, request or job run grows with what changed, not with all data), and the core
   rule *Work grows with what changed* has the author write an `Efficient design:` line in the

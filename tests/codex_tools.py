@@ -12,7 +12,8 @@ writes only the job, has the GPU only with the grant, a unix socket only when na
 the deny list; a call to a tool the turn does not serve, or whose server never starts, is refused
 (126). A server run without a sandbox serves only its own turn's folder (a request of another
 turn is never run), survives a request whose folder holds a NUL byte, and a call removes its
-files; a call whose server is gone stops waiting (125).
+files; a call whose server is gone stops waiting (125); a call whose output is longer than the
+cap prints its head and tail with a line naming the full log, which it keeps whole (#149).
 
 Live, on macOS wherever `sandbox-exec` can run (not inside Claude Code's own sandbox, which
 refuses a nested one; under `CI` it must run): a broker serves four tools from their sandboxes,
@@ -316,6 +317,32 @@ def route():
         check('route: a folder with a NUL byte or a deeply nested request does not stop it',
               server.poll() is None and result.returncode == 0 and
               result.stdout == 'hi again\n', repr(result))
+        # Long output (#149): the call prints its head and tail, names the full log and keeps it.
+        words = ['%s%04d' % (letter, n) for n in range(3) for letter in 'abc'] + \
+            ['x' * 4000, 'y' * 4000, 'z' * 4000, 'end']
+        result = subprocess.run([sys.executable, '-I', SCRIPT, 'call', 'echo', 'hi'] + words,
+                                env=env, cwd=os.path.join(job, 'work'), capture_output=True,
+                                timeout=60)
+        full = ('hi ' + ' '.join(words) + '\n').encode()
+        out = result.stdout
+        named = [line for line in out.split(b'\n') if line.startswith(b'[codex_tools: ')]
+        log_path = named[0].rsplit(b' is ', 1)[1][:-1].decode() if named else ''
+        try:
+            with open(log_path, 'rb') as handle:
+                kept = handle.read()
+        except OSError:
+            kept = b''
+        check('route: long output prints the head and the tail, not the middle',
+              result.returncode == 0 and out.startswith(full[:ct.HEAD_BYTES]) and
+              out.endswith(full[-ct.TAIL_BYTES:]) and b'y' * 3500 not in out and
+              len(out) < ct.HEAD_BYTES + ct.TAIL_BYTES + 300, '%d bytes' % len(out))
+        check('route: the line names the full log, kept whole in the job',
+              len(named) == 1 and kept == full and log_path.startswith(job + os.sep) and
+              ('%d bytes cut' % (len(full) - ct.HEAD_BYTES - ct.TAIL_BYTES)).encode() in named[0],
+              repr(named))
+        left = [n for n in os.listdir(folder) if not n.startswith((ident, deep))]
+        check('route: of the calls only the cut one keeps its log, nothing else',
+              sorted(left) == sorted(['ready', os.path.basename(log_path)]), str(left))
         server.kill()
         server.wait()
         os.environ.update(AGF_CODEX_TOOLS_DIR=tools_dir, AGF_CODEX_TOOLS='echo')

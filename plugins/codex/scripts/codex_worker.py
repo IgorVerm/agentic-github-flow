@@ -95,12 +95,32 @@ resumes with it; `--json` events do not carry it):
   codex exec [resume <thread id>] --json -o <last message> -m <model>
              --skip-git-repo-check --ignore-user-config --ignore-rules
              [-c model_reasoning_effort="<effort>"]
-             -c approval_policy="never" -c default_permissions="agf_codex_worker"
+             -c approval_policy="never" -c tool_output_token_limit=2000
+             -c default_permissions="agf_codex_worker"
              -c permissions.agf_codex_worker.filesystem={…}
              -c permissions.agf_codex_worker.network.enabled=false
              -c shell_environment_policy.set.GIT_DIR=… (GIT_WORK_TREE, TMPDIR, the marker)
              -c features.hooks=false -c features.shell_snapshot=false -c features.apps=false
              -c features.plugins=false -c features.skill_mcp_dependency_install=false -
+
+**What a turn keeps in its context** (issue #149). Every request of a turn re-sends its whole
+context, so the usage follows what stays in it. `tool_output_token_limit` caps each tool output
+Codex keeps at `OUTPUT_TOKENS` (2,000 tokens, about 8,000 characters): measured on the model job
+of pax_deorum#1019, 99% of the 14.6M characters of text output came from Codex's own commands
+and 0.6% from the project's tools, so the cap belongs here, where it covers every command, not in
+each project's tools; `codex_tools.py` adds a file with the full log of a tool's call. The note
+tells Codex to send long output to a file and read the part it needs.
+
+**A round** is one task the chat hands Codex in a prompt of its own (a part of the issue, a
+round of a model); the chat decides where one ends, since it writes the prompts and reads the
+last messages. Within a round `--resume` carries on the same thread: an answer to Codex's
+question, a review finding, a turn the time limit cut. The next task in the same job is a turn
+without `--resume`: a fresh thread, so the earlier rounds' context is not re-sent with every
+request (about 11% of that job's input, estimated). The worker writes its hand-over: the note
+names the job's commits since the base and adds the last turn's final message (its first
+`HANDOVER_MAX` characters, kept in `state.json`), which the note asks Codex to write so that a
+fresh thread can carry on from it. The report's `round` says which it was: `first` (a new job),
+`next` (a fresh thread with the hand-over) or `resume`.
 
 **The project's tools** (issue #116; `codex_tools.py`'s header owns them): when the worktree
 holds `.agents/codex-tools.json`, it and the project's `Bash(...)` rules are read inside Codex's
@@ -123,7 +143,7 @@ turn: the process group, then every process of this user whose environment holds
 marker (which catches a `setsid` double-fork). A process that leaves the group and drops its
 environment survives inside Codex's sandbox; the kill is hygiene, not the boundary. Its report:
 `status`, `thread_id` (for `--resume` and `codex resume`), `model`, `effort` (null without
-`--effort`), `branch`, `job`,
+`--effort`), `round`, `branch`, `job`,
 `time_limit_minutes`, `timed_out`, `group_left`, `marked_killed`, `last_message` (Codex's final
 message: all the Claude chat reads of a turn), `tools` (`served`: names; `refused`: name and
 reason; `ended_early`: a server that ended before the turn, with its exit), `events` (the JSONL event log, kept with the last
@@ -234,6 +254,11 @@ MANAGED_PREFERENCES = ('/Library/Managed Preferences/%(user)s/com.anthropic.clau
                        '/Library/Managed Preferences/com.anthropic.claudecode.plist')
 REMOTE_SETTINGS = os.path.join('.claude', 'remote-settings.json')
 FEATURES_OFF = ('hooks', 'shell_snapshot', 'apps', 'plugins', 'skill_mcp_dependency_install')
+# The cap on each tool output Codex keeps in its context (`tool_output_token_limit`, issue #149):
+# about 8,000 characters. Measured on the job of pax_deorum#1019: 99% of the text output came
+# from Codex's own commands, and an 8,000-character cap cuts 30% of it.
+OUTPUT_TOKENS = 2000
+HANDOVER_MAX = 6000  # characters of a turn's last message kept for the next round's hand-over
 REPORT_MAX = 8 * 1024 * 1024  # a 1 MiB prompt, JSON-escaped
 LOG_DAYS = 30
 MARKER = 'CODEX_WORKER_TURN'
@@ -244,7 +269,18 @@ git reaches it through the GIT_DIR and GIT_WORK_TREE variables that every comman
 already has, so `git status`, `git add` and `git commit` work as usual. Do not create a .git
 folder, do not unset or change those variables, and never push (you have no network). Commit
 your work on this branch. You cannot ask a question while you work: put a question or a blocker
-in your final message.
+in your final message. A command's output beyond about %(tokens)d tokens is cut in the middle:
+send long output to a file under $TMPDIR and read the part you need. Write your final message so
+that a fresh thread can carry on from it alone: what you did and committed, what is left, where
+your outputs are, and any question.
+
+'''
+HANDOVER = '''[Hand-over from the earlier rounds of this job]
+This job did earlier work in other threads, which are closed. Their commits are on your branch
+since %(base)s (`git log --oneline %(base)s..HEAD`). The final message of the last turn follows;
+build on it, and read the files rather than assume more.
+
+%(message)s
 
 '''
 
@@ -787,7 +823,8 @@ def codex_command(codex, model, effort, resume, job, last_message, marker, extra
                  'TMP': tmp, 'TEMP': tmp, MARKER: marker}
     variables.update(extra or {})
     values = ['model_reasoning_effort=%s' % toml_string(effort)] if effort else []
-    values += ['approval_policy="never"'] + profile_config(job)
+    values += ['approval_policy="never"', 'tool_output_token_limit=%d' % OUTPUT_TOKENS]
+    values += profile_config(job)
     values += ['shell_environment_policy.set.%s=%s' % (name, toml_string(value))
                for name, value in variables.items()]
     # Off: hooks and the shell snapshot run outside Codex's sandbox; apps (the ChatGPT account's
@@ -983,8 +1020,17 @@ def run_turn(args, codex, where):
     state['project_denied'] = project
     write_state(where, state)
     branch = state.get('branch') if isinstance(state.get('branch'), str) else ''
-    prompt = NOTE % {'work': os.path.join(job, 'work'), 'branch': branch} + \
-        codex_tools.note(served, sys.executable) + prompt
+    # A round (the header): a turn without --resume in a job that has one starts a fresh thread,
+    # with the last turn's final message as its hand-over.
+    kind = 'first' if name else 'resume' if args.resume else 'next'
+    handover = ''
+    if kind == 'next':
+        message = state.get('handover') if isinstance(state.get('handover'), str) else ''
+        handover = HANDOVER % {'base': state.get('base'),
+                               'message': message.strip() or '(the last turn left none)'}
+    prompt = NOTE % {'work': os.path.join(job, 'work'), 'branch': branch,
+                     'tokens': OUTPUT_TOKENS} + \
+        codex_tools.note(served, sys.executable) + handover + prompt
 
     marker = secrets.token_hex(16)
     state['marker'] = marker
@@ -1049,8 +1095,12 @@ def run_turn(args, codex, where):
             last = handle.read()
     except OSError:
         last = ''
+    if last.strip():
+        # Codex's own text, kept as text for the next round's prompt; only this script reads it.
+        state['handover'] = last[:HANDOVER_MAX]
+        write_state(where, state)
     report = {'status': 'failed', 'thread_id': thread_id or args.resume, 'model': args.model,
-              'effort': args.effort, 'branch': branch, 'job': job,
+              'effort': args.effort, 'round': kind, 'branch': branch, 'job': job,
               'time_limit_minutes': args.time_limit, 'timed_out': timed_out,
               'group_left': group_left,
               'marked_killed': marked_killed, 'last_message': last, 'events': events,

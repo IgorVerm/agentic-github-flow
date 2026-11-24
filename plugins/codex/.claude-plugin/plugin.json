@@ -1,6 +1,6 @@
 {
   "name": "agentic-github-flow-codex",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Codex for issue chats, installed only where Codex is chosen: a Claude Code issue chat hands an issue's implementation to Codex in a sandboxed job and imports its commits, and a Codex chat hands over with Codex's own thread tools.",
   "author": {
     "name": "MAI-Tech",

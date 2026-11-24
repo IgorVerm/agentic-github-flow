@@ -35,7 +35,10 @@ not measured on accepted; the project's tools (#116) served without an anchor in
 a network host only the project allows, a call outside the rules or to a tool not served
 running, Codex not told its tools, a tool's server outside its own sandbox profile or still
 running after the turn, or a tool list that is not JSON accepted (a stand-in for `sandbox-exec`;
-`tests/codex_tools.py` runs the real one). On Windows only the refusals run. Offline.
+`tests/codex_tools.py` runs the real one); a turn, a resume or the next round without the cap on
+each tool output, a next round (a turn without `--resume` in a job) that resumes the thread or
+lacks the hand-over, or a first turn or a resume that gets one (#149). On Windows only the
+refusals run. Offline.
 """
 import glob
 import json
@@ -541,6 +544,13 @@ def main():
               [c for c in configs if c.startswith('model_reasoning_effort')] ==
               ['model_reasoning_effort="xhigh"'], str(configs))
         check('report effort', report.get('effort') == 'xhigh', str(report))
+        check('each tool output Codex keeps is capped (#149)',
+              'tool_output_token_limit=2000' in configs, str(configs))
+        check('a new job is the first round, with no hand-over', report.get('round') == 'first'
+              and '[Hand-over' not in call['stdin'], str(report.get('round')))
+        check('the note tells Codex the cap and asks for a final message to carry on from',
+              'cut in the middle' in call['stdin'] and 'fresh thread' in call['stdin'],
+              call['stdin'])
         check('the profile is selected', 'default_permissions="agf_codex_worker"' in configs)
         check('no network', 'permissions.agf_codex_worker.network.enabled=false' in configs)
         for feature in ('hooks', 'shell_snapshot', 'apps', 'plugins',
@@ -612,7 +622,8 @@ def main():
         for called in sandboxed:
             inner = [called['argv'][i + 1] for i, v in enumerate(called['argv']) if v == '-c']
             profile = [c for c in configs if not c.startswith(('model_reasoning_effort=',
-                                                               'approval_policy='))]
+                                                               'approval_policy=',
+                                                               'tool_output_token_limit='))]
             expected = profile[:3]
             if called['argv'][called['argv'].index('--') + 4] == 'settings':
                 # Read before the project's rules are known: the profile without them.
@@ -643,6 +654,29 @@ def main():
               report_of(result).get('job') == job)
         check('resume reports the thread', report_of(result).get('thread_id') == THREAD)
         check('resume makes no new setup', 'setup' not in report_of(result))
+        check('a resume keeps the cap and carries on the thread without a hand-over',
+              'tool_output_token_limit=2000' in configs and
+              report_of(result).get('round') == 'resume' and '[Hand-over' not in call['stdin'],
+              str(configs))
+
+        # The next round (#149): a turn without --resume in the job is a fresh thread whose
+        # prompt carries the hand-over: the job's base and the last turn's final message.
+        result = run([wt] + good, STUB_MODE='quiet')
+        call = json.load(open(log))
+        argv = call['argv']
+        check('the next round exits 0', result.returncode == 0, result.stderr + result.stdout)
+        check('the next round is a fresh thread in the same job',
+              'resume' not in argv and report_of(result).get('round') == 'next' and
+              report_of(result).get('job') == job and 'setup' not in report_of(result),
+              str(argv) + result.stdout)
+        handover = call['stdin'].split('[Hand-over from the earlier rounds of this job]')
+        check('the next round\'s prompt carries the hand-over before the task',
+              len(handover) == 2 and 'done; question: none' in handover[1] and
+              before in handover[1] and
+              handover[1].index('done; question: none') <
+              handover[1].index('Do the task of issue #1.'), call['stdin'])
+        check('the next round keeps the cap',
+              '-c' in argv and 'tool_output_token_limit=2000' in argv, str(argv))
 
         # The export and the import. The export runs under the job's project denials, kept from
         # when the job was made, even after the project's settings drop them.

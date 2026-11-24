@@ -79,7 +79,10 @@ writes only the job, reads the disk except the deny list, and reaches nothing el
 run) and waits; `serve` (one per tool, in the tool's sandbox, started by the worker for the turn)
 reads it, checks the command line against the anchors again, runs the tool in `<job>/work` (or
 the caller's folder below it) with output to `<id>.log`, and writes `<id>.done`; the call prints
-the log and removes its files. Calls to one tool run one after another. A call waits up to 30 s
+the log and removes its files. What it prints lands in Codex's context, so it is capped (issue
+#149): the first `HEAD_BYTES` stream while the tool runs, then the last `TAIL_BYTES`; when more
+was cut between them, a line names the full log, which the call then keeps for Codex to read on
+purpose. Calls to one tool run one after another. A call waits up to 30 s
 for its server to start, stops waiting (exit 125) when the server's `ready` file has not been
 touched for 20 s (it touches it every 2 s while it lives), and stops waiting (exit 124) when no
 result comes within the tool's limit and 2 minutes.
@@ -136,6 +139,10 @@ GRACE_SECONDS = 120  # past the tool's limit, a call stops waiting for its resul
 BEAT_SECONDS = 2     # a server touches its ready file this often
 STALE_SECONDS = 20   # a ready file untouched this long: the server is gone
 GONE = 125
+# What a call prints of a tool's output, which lands in Codex's context (issue #149): the first
+# HEAD_BYTES while the tool runs, then the last TAIL_BYTES; the full log stays in a file. Together
+# about the worker's cap on every command's output (codex_worker.py OUTPUT_TOKENS, ~4 bytes each).
+HEAD_BYTES, TAIL_BYTES = 2000, 6000
 
 # The base of every tool's sandbox: deny by default, then what a process needs to start and run
 # Python, a shell, git, ssh and rsync and read files; modelled on Codex's own seatbelt policy
@@ -566,8 +573,9 @@ def note(specs, python):
              '  %s -I %s call <tool> [arguments ...]' % (shlex.quote(python),
                                                          shlex.quote(os.path.abspath(__file__))),
              'in place of the command itself, passing only the arguments that follow the '
-             'command shown for the tool (it already holds them); the call prints the tool\'s '
-             'output and exits with its code. It waits for the tool, so give the call a timeout at least as long as '
+             'command shown for the tool (it already holds them); the call prints the start and '
+             'the end of the tool\'s output, naming the file with all of it when the middle is '
+             'cut, and exits with its code. It waits for the tool, so give the call a timeout at least as long as '
              'the tool\'s limit. A command line the project does not allow is refused (exit '
              '126). The tools run while this turn runs.']
     for spec in specs:
@@ -710,6 +718,28 @@ def serve(job, turn, spec_text):
 
 # --- inside Codex's sandbox: the call -----------------------------------------------------------
 
+def print_rest(log_path, size, out):
+    """After the head that streamed: the rest of a log of size bytes, whole when it fits in
+    TAIL_BYTES, else a line naming the full log and its last TAIL_BYTES. True when it was cut,
+    so that the log is kept for Codex to read on purpose."""
+    if size <= HEAD_BYTES:
+        return False
+    cut = size > HEAD_BYTES + TAIL_BYTES
+    start = size - TAIL_BYTES if cut else HEAD_BYTES
+    try:
+        with open(log_path, 'rb') as handle:
+            handle.seek(start)
+            rest = handle.read(size - start)
+    except OSError:
+        return False
+    if cut:
+        out.write(('\n[codex_tools: %d bytes cut here; the full log (%d bytes) is %s]\n'
+                   % (start - HEAD_BYTES, size, log_path)).encode())
+    out.write(rest)
+    out.flush()
+    return cut
+
+
 def call(name, args):
     """Ask the tool's server for one run and wait for it; print its output, return its exit."""
     top = os.environ.get('AGF_CODEX_TOOLS_DIR')
@@ -759,9 +789,10 @@ def call(name, args):
             with open(log_path, 'rb') as handle:
                 handle.seek(offset)
                 chunk = handle.read()
+            if offset < HEAD_BYTES:  # the head streams while the tool runs
+                out.write(chunk[:HEAD_BYTES - offset])
+                out.flush()
             offset += len(chunk)
-            out.write(chunk)
-            out.flush()
             if deadline is None:
                 deadline = time.time() + limit * 60 + GRACE_SECONDS
         except FileNotFoundError:
@@ -777,6 +808,7 @@ def call(name, args):
                   file=sys.stderr)
             return TIMED_OUT
         time.sleep(POLL)
+    kept = print_rest(log_path, offset, out)
     try:
         with open(done_path, encoding='utf-8') as handle:
             result = json.load(handle)
@@ -784,7 +816,8 @@ def call(name, args):
         result = {}
     if not isinstance(result, dict):
         result = {}
-    for suffix in ('.run', '.log', '.done'):  # the folder keeps only calls still waiting
+    # The folder keeps only calls still waiting, and the full log of an output that was cut.
+    for suffix in ('.run', '.done') if kept else ('.run', '.log', '.done'):
         try:
             os.remove(os.path.join(folder, ident + suffix))
         except OSError:

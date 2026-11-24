@@ -17,7 +17,7 @@ writes it). An allow rule is never touched.
 
 Once the rules are gone, `git -C <dir> …` rests on the guards plugin's git guard alone. So
 --apply refuses unless the settings folder shows an enabled guards plugin whose hooks run
-`pre_tool_git_guard.py --claude` (guards 0.9.0 and later): update first, then run this.
+`pre_tool_git_guard.py --claude` (guards 0.10.0 and later): update first, then run this.
 --without-guard-check skips that check, for a settings file that is not beside the plugins.
 Exit code: 0 done or nothing to do, 1 refused.
 """

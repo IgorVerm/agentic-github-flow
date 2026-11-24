@@ -318,7 +318,9 @@ again or `MAX_SECONDS` have passed (it took 38 s on 32,000 braces, where the hoo
 A here-document body stays data unless a shell or an interpreter reads it, or a command in the
 text runs a text that is not in its own words (`eval "$(cat <<'EOF' … EOF)"`): then every
 body is judged as a shell text. A body written to a file that is run later is not seen, as
-before. The hook also covers the
+before, though the former rules stopped it by its text: asked "Here-documents als data laten
+(zoals de branch doet) en #33 pushen?", the maintainer answered "Ja, alles" (2026-11-24), so a
+here-document body stays data. The hook also covers the
 terminal tool. The installer removes
 the rules it added that the policy dropped, and names the user's own such rules without
 changing them; `tools/remove_reaching_rules.py` removes those for the user (a dry run unless

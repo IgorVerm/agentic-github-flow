@@ -41,8 +41,8 @@ has ever been removed. A pull request waits 21 minutes per CI run and has 2.2 ru
 
 **The two sources agree on one thing that decides the design.** A check is worth what it
 costs when it is exact, fast and out of the author's reach. The article says so from practice;
-METR measures the other side: agents that had to build their own yardstick misled themselves,
-and more so in larger groups. A test written by the author, in the same change, to prove that
+METR observes the other side: groups of agents that had to build their own yardstick misled
+themselves, and on the one task where it was measured, more so in larger groups. A test written by the author, in the same change, to prove that
 change is such a self-made yardstick. That is the argument for refusing tests that restate the
 implementation, and for reading the gate's rules from the default branch.
 
@@ -52,10 +52,11 @@ questions, each with my recommendation. The follow-up issues are in
 
 ## The link between the two sources
 
-The issue stated four hypotheses. Each is checked against METR here.
+The issue stated one hypothesis about the article and four about METR. Each is checked here.
 
 | Hypothesis | Verdict | Source |
 |---|---|---|
+| The article says verification loops make delegation and parallel agents safe: cheap checks first, end-to-end checks that are hard to fool, checks the change cannot modify, a person after three failed rounds. | **Confirmed,** all four. The article gives one measured result (up to 10 points from a separate grader) and no cost figures. | Article §1, §2 (*E2E tests*), §3 (*Changes cannot modify their own checks*, *Failing tests require human attention*) |
 | Models do best where feedback is clear and automatic. | **Confirmed.** Strongest where the goal is cheap to check and the score is visible to the agent. Caveats: top humans still win, only 3 tasks have human baselines, and such tasks resemble training environments. | METR §3.A, Appendices K and L, §1 |
 | Models are weaker where verification is costly. | **Partly, with a correction.** Tasks with a higher lifecycle cost are somewhat harder (R² = 0.14; 13.8 points of success per doubling). But lifecycle cost is the cost of building, running and scoring a task, not the cost of verifying it, and progress is as fast on the costly half. The direct evidence is on judgment: without clear feedback, agents judged worse than experts, on 4 task families. | METR §3.B.1 and footnote 35, Appendix F, §3.B.2 |
 | METR documents reward hacking. | **Confirmed, with a correction to the form.** The forms found are tailoring a solution to a guess of the hidden tests, searching for answers and brute force, not editing tests. After hardening that takes at least 10% of task-development effort, under 0.1% of runs still had to be scored zero. | METR Appendix G |
@@ -63,10 +64,11 @@ The issue stated four hypotheses. Each is checked against METR here.
 
 A fifth finding belongs here, although the issue did not ask for it. The article says
 verification loops are what allow dozens of agents in parallel (article §1). METR tested
-parallel agents against independent agents with the same token spend: they were consistently
-better on one task, where every submission gets its exact grade at once, and consistently
-worse on two tasks where the score exists but is not shown, because agents fixed on a metric
-of their own and never checked it against the real one (METR Appendix J). The article's claim
+parallel agents against independent agents with the same token spend: they were fairly consistently
+better on one task, where every submission gets its exact grade at once, and fairly
+consistently worse on two tasks where the score exists but is not shown, because agents
+fixed on a metric of their own and never checked it against the real one (METR Appendix J;
+small experiments, no effect sizes in the text). The article's claim
 therefore holds under a condition it does not state: the feedback must be exact, immediate and
 not made by the agents themselves.
 
@@ -75,8 +77,8 @@ What follows for a repository:
 1. **Spend on checks that are exact, fast and external.** An existing test, read from the
    default branch, that passes or fails in seconds is the strongest evidence a change can show.
 2. **A check the author wrote for this change is the weakest.** It can only confirm what the
-   author already believed (METR §3.B.2: a model has only its own judgment to optimise
-   against). It earns its place by failing on a defect the author can name.
+   author already believed (METR §3.B.2 offers this as one of two explanations for its judge
+   result: a model has only its own judgment to optimise against). It earns its place by failing on a defect the author can name.
 3. **Where no cheap check exists, do not invent one.** Rule text, skill wording and design
    choices are judgment. A model reviewer of the same strength is a weak judge of them (METR
    §3.B.2), so they go to a person, which this repository already does for rules, guards and
@@ -100,8 +102,8 @@ with comments for all 55 pull requests, and `git log`.
 |---|---|
 | Test files in the gate (`TESTS` in `tests/run_all.py`) | 34 |
 | Lines in `tests/*.py`, helpers included | 13,905 |
-| `unittest` methods (`def test_`) | 486, in 21 files |
-| Files with their own case tables | 13 (their cases are not counted the same way; `sandbox_network_guard.py` reports 260, `git_guard.py` 235) |
+| `unittest` methods (`def test_`) | 486, in 20 files |
+| Files with their own case tables | 14 (their cases are not counted the same way; `sandbox_network_guard.py` reports 260, `git_guard.py` 235) |
 | Test files on 2026-10-25 | 12 |
 | Test files ever removed | 0 |
 | Revert commits in 344 commits | 0 |
@@ -132,24 +134,26 @@ Eight files take 272 of the 469 local seconds: `worktree_tools.py` 61, `codex_wo
 | Failed jobs by system | Windows 20, macOS 2, Linux 1 |
 | Runs that failed on Windows only | 19 of the 21, on 14 branches |
 | Branches with at least one failed CI run | 15 of 55 |
-| Test files that failed in CI at least once | 13 of 34 |
-| Test files that never failed in CI | 21, taking 309 of the 469 local seconds |
+| Test files that failed in CI at least once | 13 of 34: `archive_guard.py` (5 jobs), `audit_dependencies.py` (5), `codex_tools.py` (4), `skills_format.py` (3), and once each `codex_worker.py`, `delete_guard.py`, `git_guard.py`, `landing.py`, `merge_guard.py`, `personal_data_guard.py`, `question_label.py`, `repo_checks.py`, `sandbox_network_guard.py` |
+| Test files that never failed in CI | The other 21, taking 309 of the 469 local seconds |
 | Same commit run twice with different results | 0 (no commit was run twice, so flakiness cannot be read from CI) |
 | Pull requests with a review verdict | 29 of 55 |
 | Review verdicts | 37 approvals, 41 findings rounds |
 | Reviewed pull requests with at least one findings round | 20 of 29 |
 | Reviewed pull requests with three or more findings rounds | 3 (4, 5 and 9 rounds) |
-| Merges into `main` that touched `tests/` | 32 of 41 |
+| Merged pull requests that touched `tests/` | 42 of 52 |
 
 **Cost per change.** A pull request has 2.2 CI runs on average (123 runs on 55 branches,
 median 2), so it waits about 46 minutes on CI and uses about 81 job-minutes. A local full run
 costs 7.8 minutes. The suite's output is 3,014 characters, roughly 750 tokens (an estimate
 from the character count). Reviewed pull requests had 2 verdict rounds at the
-median. The token cost of a review round is not recorded anywhere and could not be measured.
+median. The token cost of a review round is not recorded anywhere; the one round measured is
+the review of this proposal's own pull request, 184,566 tokens in 7 minutes.
 
 **Three gaps in what can be measured today.** Test failures before a push leave no record, so
 "never failed" above means only "never failed in CI". Case counts are not comparable across
-the two test styles. Review cost in tokens is unknown. §5 closes the first two.
+the two test styles. Review cost in tokens is known for one round only. §5 closes the first
+two.
 
 ## 1. Inventory
 
@@ -165,7 +169,7 @@ What exists, against each practice of the article (§3 unless noted).
 | A checklist triggered by the diff | `HANDOFF.md` §What to read for which work maps areas to tests, for a reader. Nothing a script can use, and no review checklist. | Missing. |
 | One reviewer, rounds that build on each other | One reviewer (`review-change`). A re-review reads only the new commits when the head moved, but is not given the earlier findings. | Partly. |
 | A `REVIEW.md` read from the default branch | None. `review-change` step 3 reads `AGENTS.md` and `HANDOFF.md` without saying from which commit. | Missing, and a gap. |
-| Changes cannot modify their own checks | Strong for the gate itself: `merge_pr.py` runs from the installed plugin, reads its settings from the default branch and holds rules, guards, hooks, CI and its own files for the maintainer's word (`EXCLUDED`). `templates/pre-push` reads the landing branch the same way. **Not for tests:** `tests/` is outside `EXCLUDED`, CI runs the tests of the pull request, so a change can remove a test and merge automatically if the reviewer misses it. | Conflict to settle (§2.4). |
+| Changes cannot modify their own checks | Strong for the gate itself: `merge_pr.py` runs from the installed plugin, reads its settings from the default branch and holds rules, guards, hooks, CI and its own files for the maintainer's word (`EXCLUDED`). `templates/pre-push` reads the landing branch the same way. **Not for most tests:** `EXCLUDED` holds the tests of the gate scripts by name (`tests/merge_pr.py`, `landing.py`, `review_verdict.py`, `push_branch.py`) and no other file under `tests/`, CI runs the tests of the pull request, so a change can remove a test and merge automatically if the reviewer misses it. | Conflict to settle (§2.4). |
 | A review belongs to one commit | `review_verdict.py` pins the verdict to a SHA; `merge_pr.py` accepts only that commit or clean merges of the base after it. | Exists. |
 | A stamp per commit, a commit gate with three modes | Pull request body lines `Overlap check:` and `Efficient design:`; `merge_pr.py` refuses without the first. No verification line, no modes. | Missing. Proposed per landing, not per commit (§2.2). |
 | Review the reviewers | Nothing. The numbers of §0 were collected by hand for this proposal. | Missing (§5). |
@@ -195,7 +199,7 @@ Verified: <kind>: <evidence>
 
 More than one kind may be given, separated by `;`. The format has one owner, a small script
 beside `review_verdict.py` that parses and validates the line, and `merge_pr.py` and
-`push_branch.py` read it through that script, as they already read verdicts.
+`push_branch.py` read it through that script, as `merge_pr.py` already reads verdicts.
 
 ### 2.2 A stamp per commit, weighed
 
@@ -253,9 +257,10 @@ Three changes, in order of value.
    base and the head: a test file deleted, an entry removed from `TESTS`, or fewer test
    methods in a file than before. Any of these refuses the automatic merge with the list, and
    the maintainer decides. Putting all of `tests/` in `EXCLUDED` would be simpler and wrong:
-   32 of 41 merges touched `tests/`, so automatic merging would end. The signal would have
-   fired on none of the 52 merged pull requests, since nothing was ever removed. It will fire
-   on every pruning change, which is intended: pruning is the maintainer's decision.
+   42 of 52 merged pull requests touched `tests/`, so automatic merging would end. The signal
+   would have fired on 1 of the 52: #141 removed one test method from each of two files while
+   moving a check elsewhere. So it fires on pruning changes, which is intended, and now and
+   then on a refactoring that moves a check, where the maintainer's yes costs a minute.
 2. **The reviewer reads the rules from the base.** `review-change` step 3 says so explicitly:
    `git show origin/<base>:AGENTS.md`, and the same for `HANDOFF.md` and `REVIEW.md`.
 3. **A `REVIEW.md` at the repository root**, read only from the default branch: the checklist
@@ -280,8 +285,9 @@ requests, the ones that went to 4, 5 and 9 rounds.
 
 Second change, from the article's *One reviewer, multiple rounds*: a re-review is handed the
 earlier findings and reads the commits since, and does not start again from nothing. No
-second reviewer is added. METR's finding on judges (§3.B.2) is a reason not to stack model
-reviewers: a second judge of the same strength shares the first one's blind spot.
+second reviewer is added. METR's finding on judges (§3.B.2, one task setting) is a reason
+not to stack model reviewers: a second judge of the same strength may share the first one's
+blind spot.
 
 ### 2.6 A `verify` skill
 
@@ -498,7 +504,7 @@ Every proposed piece, where it lives and what it costs.
 | Piece | Lives in | Cost | Merges |
 |---|---|---|---|
 | The rule itself | No new sentence in `rules/core.md` (7,721 of 8,000 bytes). "Report what happened" and "never weaken a test or a gate" already state it; the line makes them checkable. | 0 bytes | |
-| The line's format | A script beside `review_verdict.py` in the core plugin, with a test added to `tests/review_verdict.py` | About 80 lines; no new test file | Automatically |
+| The line's format | A script beside `review_verdict.py` in the core plugin, with a test added to `tests/review_verdict.py` | About 80 lines; no new test file | On the maintainer's word (`EXCLUDED` matches that test file) |
 | The gate and its modes | `merge_pr.py`, `push_branch.py`, the row in `HANDOFF.md` §Landing settings | Milliseconds per landing; cases added to `tests/merge_pr.py` and `tests/push_branch.py` | On the maintainer's word (gate scripts) |
 | Removed-checks signal, round limit | `merge_pr.py` | The same | On the maintainer's word |
 | Selection, budgets, failure record | `tests/run_all.py`, checked in `tests/maint_tools.py` | About 60 lines | Automatically |
@@ -522,15 +528,15 @@ inside the budget it sets.
 1. **Per landing or per commit?** Recommendation: per landing (§2.2). Per commit records six
    times as much to prove the same.
 2. **Is the file budget frozen at 34?** Recommendation: yes, and the time budget at 320
-   seconds on Linux. The alternative is to prune first and freeze lower, which delays the gate
+   seconds on Linux, which leaves 8 seconds of room on the first day, on purpose. The alternative is to prune first and freeze lower, which delays the gate
    for a pass whose result is not known.
 3. **A new `verify` skill, or a longer step 3 in `ship-change`?** Recommendation: the new
    skill. Verification happens during the work, and `ship-change` is read at the end; at
    13,770 bytes it is also the core plugin's largest skill already. The price is 300 bytes of description
    in every session.
 4. **Should removed checks wait for your word, or is the reviewer's finding enough?**
-   Recommendation: your word. It costs you a decision only on pruning changes, which are yours
-   anyway, and it closes the one place where a change can still weaken its own gate.
+   Recommendation: your word. It costs you a decision on pruning changes, which are yours
+   anyway, and on the rare change that moves a check (1 of 52 so far), and it closes the one place where a change can still weaken its own gate.
 5. **Three findings rounds, or two?** Recommendation: three, as in the article. The core rule's
    two is for the same problem failing twice; findings rounds usually raise different
    problems. Three would have stopped 3 of 29 pull requests; two would have stopped 9.
@@ -539,8 +545,8 @@ inside the budget it sets.
    in the diff the reviewer reads from the base's rules.
 7. **Keep Windows in every CI run?** It is the slowest job, four times the Linux one, and
    19 of the 21 failed runs failed there alone. Recommendation: keep it, and shorten the wait by running the test files in
-   parallel, after measuring. Dropping it to merges only would save 21 minutes per run and
-   move every portability failure to after the review.
+   parallel, after measuring. Dropping it to merges only would save 21 job-minutes per run, cut the wait from 21 to about
+   11 minutes (the macOS job), and move every portability failure to after the review.
 
 ## 8. Rollout
 
@@ -564,7 +570,7 @@ alone and can wait for the data of stage 2.
 | # | Issue | Touches | Merge |
 |---|---|---|---|
 | 1 | `run_all.py`: triggers and `--changed`, the file and time budgets (printing only), per-file times in the summary, the local failure record. | `tests/run_all.py`, `tests/maint_tools.py`, `HANDOFF.md` | Automatic |
-| 2 | The `Verified:` line: the format script, `ship-change` step 4, the item in `review-change` step 4, the rules read from the base in step 3. | Core plugin scripts and two skills, `tests/review_verdict.py`, `tests/skills_format.py` | Automatic |
+| 2 | The `Verified:` line: the format script, `ship-change` step 4, the item in `review-change` step 4, the rules read from the base in step 3. | Core plugin scripts and two skills, `tests/review_verdict.py`, `tests/skills_format.py` | Maintainer (`EXCLUDED` matches `tests/review_verdict.py`) |
 | 3 | The gate in observe mode: the `verification gate` row, the condition in `merge_pr.py` and `push_branch.py`. | Both scripts and their tests, `landing.py`, `HANDOFF.md` §Landing settings | Maintainer |
 | 4 | The rules in `AGENTS.md` §Test gate (admission, flaky, budget) and the `DESIGN_DECISIONS.md` entry with the review date. | `AGENTS.md`, `DESIGN_DECISIONS.md` | Maintainer |
 | 5 | `merge_pr.py`: removed checks and the third findings round refuse the automatic merge; `ship-change` step 8 says when to stop and hands earlier findings to a re-review. | `merge_pr.py`, its test, `ship-change` | Maintainer |

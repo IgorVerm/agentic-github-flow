@@ -72,8 +72,8 @@ This note paraphrases. The report is not copied here; read it at the URL.
   (§3.B.1 and its footnote 35). The higher-cost half of the tasks is 2.9 times as expensive,
   and models' time horizon on it is 2.9 times shorter (§3.B.1).
 - The effect survives four ablations, with a slope between 11.8 and 16.3 points per doubling.
-  The share of difficulty that cost explains beyond task length is 14%, falling to 3% to 6%
-  once outliers are removed (Appendix F).
+  The share of difficulty that cost explains beyond task length is 14% on all tasks and 3% to 12%
+  under the three rules that drop outliers or high-influence tasks (Appendix F).
 - Progress is not slower there: doubling times are similar on the low-cost and the high-cost
   half (§3.B.1). The report does not claim a lasting barrier, and notes that what is costly to
   check changes: rubric grading was costly in 2023 and is common now (§3.B.1).
@@ -140,12 +140,13 @@ This note paraphrases. The report is not copied here; read it at the URL.
 
 **Parallel agents help only with immediate, exact feedback (§4, Appendix J).**
 - Against a control of independent agents with the same total token spend, a swarm was
-  consistently better on one task only: the training-speed task, where submissions are
+  fairly consistently better on one task only: the training-speed task, where submissions are
   independent and each gets its exact grade at once (Appendix J).
-- Swarms were consistently worse on two tasks whose score is well defined but not shown per
-  submission, and where a run takes hours. Agents settled early on a metric of their own and
-  never checked whether it carried over to the hidden score; the gap between the self-made
-  test score and the real one grew with swarm size: "agents in larger swarms were more prone
+- Swarms were fairly consistently worse on two tasks whose score is well defined but not
+  shown per submission, and where a run takes hours. Agents settled early on a metric of
+  their own and never checked whether it carried over to the hidden score. On one of the two
+  tasks the report shows the gap between the self-made test score and the real one growing
+  with swarm size, and reads it as suggesting that "agents in larger swarms were more prone
   to misleading themselves" (Appendix J).
 - Results were mixed on two further tasks and sensitive to configuration: one swarm fell far
   behind because a self-appointed coordinator approved individual requests, and recovered
@@ -156,7 +157,7 @@ This note paraphrases. The report is not copied here; read it at the URL.
 
 **More budget buys score only up to a plateau (Appendix I).** Agents plateau on some tasks and
 not on others; a very long single run plateaued earlier and scored worse than the best of
-several independent runs (Appendices I and J).
+several independent runs (Appendix J).
 
 **Measurement itself is getting harder (§1, Appendices A, D).**
 - Human baselines back only 9% of the time estimates; the rest are researcher estimates, which

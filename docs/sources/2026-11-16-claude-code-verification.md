@@ -70,7 +70,7 @@ are the article's own headings, shortened to §1 (the introduction), §2 (three 
   is opened, enforced by a hook that runs when the agent finishes, or by a goal of a passing
   suite.
 - *Start a new gate in observe mode.* Each commit is stamped with how it was verified,
-  including the value "none", so unverified commits can be queried. A commit gate can block a
+  including the value `none`, so unverified commits can be queried. A commit gate can block a
   commit made in a session that ran neither the code review nor the verify step. It has three
   modes: off, observe (logs what it would have blocked, so false positives are seen before
   anyone is stopped) and enforce. In enforce mode a commit may explain in its message why it
@@ -96,7 +96,7 @@ are the article's own headings, shortened to §1 (the introduction), §2 (three 
 
 **Closing section.** Keep the verification layer out of reach of the changes it judges, grade
 it against the bugs that mattered, write down a lesson at each miss and prune the lessons, so
-that the person's work moves from reading diffs to defining "done" and reviewing evidence.
+that the person's work moves from reading diffs to defining what done means and reviewing evidence.
 
 ## What the article does not say
 

@@ -237,6 +237,12 @@ def hooks(base, run, claude, failures):
     os.makedirs(out)
     own = 'git -C "%s" --git-dir="%s" push origin agent/a' % (
         out, os.path.join(hk, '.git', 'worktrees', 'hk-a'))
+    out_sub = os.path.join(base, 'hk-out-sub')
+    os.makedirs(out_sub)
+    with open(os.path.join(out_sub, '.gitmodules'), 'w') as handle:
+        handle.write('[submodule "x"]\n\tpath = x\n\turl = ../x\n')
+    own_sub = 'git -C "%s" --git-dir="%s" fetch origin' % (
+        out_sub, os.path.join(hk, '.git', 'worktrees', 'hk-a'))
     cases = [  # (hook, its content, XDG_CONFIG_HOME or None, command, refused[, project])
         (None, b'', None, push, True),
         ('pre-push', template, None, push, True),
@@ -256,6 +262,8 @@ def hooks(base, run, claude, failures):
         ('pre-push', template, only_a, push, False, hk),
         ('pre-push', template, only_a, push, False),
         ('pre-push', template, both, push, True, hk_a),
+        # git reads .gitmodules in the folder it runs in (third review of #140)
+        (None, b'', None, own_sub, False),
     ]
     for name, data, xdg, command, refused, *project in cases:
         install(name, data)

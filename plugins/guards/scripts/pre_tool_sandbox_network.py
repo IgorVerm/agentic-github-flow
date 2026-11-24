@@ -55,7 +55,8 @@ nothing. Three kinds of call are refused:
    - in the session's own worktree reached another way (a subfolder, `--git-dir`): except
      `pull`, a remote given or configured as a relative path (`../x.git`, also as a push URL),
      and an option this hook does not know; with `--git-dir` from another folder git runs its
-     hooks in that folder, so there the hooks must be alike as below;
+     hooks in that folder and reads its `.gitmodules`, so there the hooks must be alike as
+     below and neither folder may have submodules;
    - in another worktree of the same repository, which shares branches, tags, remotes, hooks
      and the shallow file but not HEAD, its upstream or FETCH_HEAD: only `push`, `fetch` and
      `ls-remote` with an explicit remote (a configured name, a URL, an absolute path; `fetch
@@ -1317,6 +1318,14 @@ def alike_exempt(target_top: str, session_top: str, project: str | None) -> bool
             os.environ["CLAUDE_PROJECT_DIR"] = saved
 
 
+def no_submodules(common: str, *tops: str) -> None:
+    """Unsafe when the repository has submodules or either work tree a `.gitmodules`: git reads
+    it from the work tree it runs in, which differs between the two."""
+    if os.path.isdir(os.path.join(common, "modules")) or any(
+            top and os.path.exists(os.path.join(top, ".gitmodules")) for top in tops):
+        raise Unsafe("submodules")
+
+
 def same_hooks(sub: str, cwd: str, common: str, target_top: str, session_top: str) -> None:
     """Unsafe unless the hooks git runs for `sub` in `target_top` do the same in `session_top`."""
     hooks = git_out(cwd, "config", "core.hooksPath")
@@ -1358,6 +1367,7 @@ def lone_git(cmd: list[Word], directory: str, cwd: str, fetch_head: bool) -> lis
     if target[0] == session[0]:
         if target[2] != session[2]:  # `--git-dir` alone: git's hooks run in the folder it is in
             same_hooks(sub, cwd, session[1], target[2], session[2])
+            no_submodules(session[1], target[2], session[2])
         return [cmd[0]] + cmd[at:]
     # another worktree of the same repository
     if remote is None and not (sub == "fetch" and "--all" in options):
@@ -1387,10 +1397,7 @@ def lone_git(cmd: list[Word], directory: str, cwd: str, fetch_head: bool) -> lis
             cwd, "config", "--name-only", "--get-regexp", r"^includeif\."), re.M | re.I):
         raise Unsafe("configuration included per branch or folder")
     same_hooks(sub, cwd, session[1], target[2], session[2])
-    if os.path.isdir(os.path.join(session[1], "modules")) or any(
-            top and os.path.exists(os.path.join(top, ".gitmodules"))
-            for top in (target[2], session[2])):
-        raise Unsafe("submodules")
+    no_submodules(session[1], target[2], session[2])
     return [cmd[0]] + cmd[at:]
 
 

@@ -52,8 +52,9 @@ gh, by GitHub URLs alone, or through Codex's GitHub connector (GITHUB_MCP), whos
 fields hold `<login>/<repo>` (the configured identity on pushes and issue posts is outside the
 rule; the user's name and addresses in a connector body are not). Any other e-mail address in
 an outbound call is someone's personal data and is asked too, except placeholder, no-reply and
-git-host addresses (NOT_PERSONAL) and the public co-author addresses of the AI agents these rules
-name (AGENT_ADDRESSES: a named list, not a pattern; #84).
+git-host addresses (NOT_PERSONAL), the public co-author addresses of the AI agents these rules
+name (AGENT_ADDRESSES: a named list, not a pattern; #84) and the addresses the user lists in
+`allow-addresses` (below).
 
 The user's settings, beside `personal-data` in `${XDG_CONFIG_HOME:-~/.config}/agentic-github-flow/`
 (outside every repository, so no repository can bring them): one entry per line, blank lines and
@@ -67,11 +68,23 @@ The user's settings, beside `personal-data` in `${XDG_CONFIG_HOME:-~/.config}/ag
 - `local-mcp`: names of MCP servers that run on this machine and send nothing on; their
   `mcp__<name>__*` tools pass like LOCAL_MCP. Listing a server is the user's statement that it is
   local: the hook cannot check it.
+- `allow-addresses`: e-mail addresses approved for publication, such as a company's public
+  security or support contact (#138). Each must be a whole address, compared exactly and without
+  regard to case: no pattern, no domain, no part of an address (`x` before it or `.org` after it
+  makes another address, which is judged as before). A listed address passes everywhere: in every
+  outbound call of the hook mode, to every recipient, and in every push of every repository
+  (`--commits`), in a line, a file name, a commit or tag message and as author, committer or
+  tagger. It passes even when it is one of the user's own identifiers (git user.email, a
+  `personal-data` line), and a name or local part inside it is not matched there; the same name
+  or local part elsewhere in the text, and everything else, is judged as before. Text after `#`
+  on a line is a comment, so a line can carry its reason and date:
+  `security@company.example  # public security contact, SECURITY.md; 2026-11-23`. Only the user
+  adds a line: each is a decision to publish that address, and no agent writes this file.
 These files, like `personal-data`, turn the check off where they say so: whoever can write them
 (the user, or an agent the user lets write outside its workspace) decides what is judged. When
 the settings folder lies inside a session folder other than the home folder itself (a repository
-that points XDG_CONFIG_HOME or HOME into itself through its own settings), `exempt-dirs` and
-`local-mcp` are ignored. A line
+that points XDG_CONFIG_HOME or HOME into itself through its own settings), `exempt-dirs`,
+`local-mcp` and `allow-addresses` are ignored. A line
 that cannot be read (a NUL byte, bytes that are not UTF-8) is dropped; the rest still counts.
 
 An input it cannot read passes, as with the git guard: a fault must not stop all work.
@@ -87,14 +100,15 @@ and no UTF-16 text, as scan_secrets.py decides it: model data such as a `.glb` h
 that read as addresses, #55), each file name (reported as `(a file name)`, never
 printed), each commit message and each annotated tag's message, and the addresses of authors,
 committers and taggers other than the user's configured ones (global or the repository's
-user.email). The identity of each commit or tag is removed from its own message first, since the
+user.email) and the listed `allow-addresses`. The identity of each commit or tag is removed from its own message first, since the
 push sends it in the header anyway; the gh login passes when the remote is on GitHub;
-`exempt-dirs` applies to the repository's folder. It prints
+`exempt-dirs` and `allow-addresses` apply as in the hook mode, with the repository's folder as the
+session's folder. It prints
 `personal-data<TAB>what<TAB>where<TAB>object` per finding, never the value, and exits 0 (nothing
 found), 1 (found) or 2 (usage or git error). Unlike the hook mode it fails closed. Test:
 `python3 tests/pre_push_checks.py`.
 """
-import importlib.util, json, os, re, shlex, subprocess, sys, tempfile
+import functools, importlib.util, json, os, re, shlex, subprocess, sys, tempfile
 from urllib.parse import unquote, urlsplit
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -253,6 +267,33 @@ def _inside(path, folders):
         except ValueError:  # another drive on Windows
             pass
     return False
+
+
+def allowed_addresses(cwd):
+    """The addresses listed in `allow-addresses`, lower-cased: whole addresses only (the part of a
+    line before `#`); none when the settings folder is one a session folder brought
+    (exemptions_apply)."""
+    if not exemptions_apply(cwd):
+        return frozenset()
+    found = (line.split('#', 1)[0].strip() for line in config_lines('allow-addresses'))
+    return frozenset(a.lower() for a in found if EMAIL.fullmatch(a))
+
+
+@functools.lru_cache(maxsize=4)
+def _allowed_pattern(allowed):
+    """One pattern for the listed addresses, built once per list (a push judges every line)."""
+    return re.compile(r'(?<![A-Za-z0-9._%+-])(?:' + '|'.join(
+        re.escape(a) for a in sorted(allowed, key=len, reverse=True)) +
+        r')(?![A-Za-z0-9@-]|\.[A-Za-z0-9-])', re.I | re.A)
+
+
+def without_allowed(text, allowed):
+    """The text with every listed address that stands alone blanked out; an address that holds a
+    listed one (more local part before it, more domain or a second @ after it) stays and is
+    judged."""
+    if not allowed or '@' not in text:
+        return text
+    return _allowed_pattern(allowed).sub(' ', text)
 
 
 def exempt_session(cwd):
@@ -662,11 +703,13 @@ def judge(event):
     texts = []
     exempt = []
     ids = identifiers()
+    allowed = allowed_addresses(cwd)
     for programs, text in segs:
         if not text:
             continue
         text = home_routine(text)
         decoded = unquote(text) if '%' in text else text  # a URL sends `%40` for `@`
+        decoded = without_allowed(decoded, allowed)  # approved for publication (#138)
         texts.append(decoded)
         if programs and programs <= {'git'} and git_to_known_remote(text, cwd):
             exempt.append(decoded)
@@ -859,10 +902,11 @@ def remote_host(url):
     return scp.group(1).lower() if scp and not os.path.exists(url) else ''
 
 
-def push_labels(line, mine, github, own):
-    """What personal data one line of a push carries, as labels; never the value."""
+def push_labels(line, mine, github, own, allowed=frozenset()):
+    """What personal data one line of a push carries, as labels; never the value. The addresses
+    in `allowed` (allow-addresses) are taken out first."""
     text = home_routine(line.replace('\0', '') if '\0' in line else line)  # UTF-16 text
-    decoded = unquote(text) if '%' in text else text
+    decoded = without_allowed(unquote(text) if '%' in text else text, allowed)
     labels = [label for label, pattern, is_login in mine
               if not (is_login and github) and pattern.search(decoded)]
     labels = [h for h in labels if 'e-mail name' not in h
@@ -891,18 +935,20 @@ def push_findings(repo, ids, url):
     configured = {a.strip().lower() for a in _run(['git', '-C', repo, 'config', '--get-all',
                                                    'user.email']).splitlines() if a.strip()}
     github = is_github(remote_host(url))
+    allowed = allowed_addresses(repo)
     found = []
 
     def judge_line(line, where, oid):
-        for label in push_labels(line, mine, github, own):
+        for label in push_labels(line, mine, github, own, allowed):
             if (label, where, oid) not in found:
                 found.append((label, where, oid))
 
     def judge_header(addresses, oid):
         """Someone else's address as author, committer or tagger; the user's configured ones
-        (global or this repository's) are the identity the rule leaves out."""
+        (global or this repository's) are the identity the rule leaves out, and the listed
+        allow-addresses pass."""
         for a in addresses:
-            if a and personal_address(a) and a.strip().lower() not in configured and \
+            if a and personal_address(a) and a.strip().lower() not in configured | allowed and \
                     not any(p.fullmatch(a.strip()) for p in own):
                 finding = (HEADER_LABEL, '(header)', oid)
                 if finding not in found:
@@ -922,7 +968,7 @@ def push_findings(repo, ids, url):
                 commit = field.split()[1][:12]
             elif field and commit:
                 parts = ' '.join([field] + [os.path.splitext(p)[0] for p in field.split('/')])
-                if push_labels(parts, mine, github, own):
+                if push_labels(parts, mine, github, own, allowed):
                     shown[(commit, field)] = '(a file name)'
                     judge_line(parts, '(a file name)', commit)
         diff = _git(repo, PUSH_DIFF, stdin)

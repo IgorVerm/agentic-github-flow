@@ -343,6 +343,47 @@ def route():
         left = [n for n in os.listdir(folder) if not n.startswith((ident, deep))]
         check('route: of the calls only the cut one keeps its log, nothing else',
               sorted(left) == sorted(['ready', os.path.basename(log_path)]), str(left))
+        # The same call in this process, counting what it reads of the log: only what it prints
+        # (the head and the tail), never the cut middle.
+        read_bytes = []
+
+        class Counted:
+            def __init__(self, handle):
+                self.handle = handle
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                self.handle.close()
+
+            def read(self, *size):
+                data = self.handle.read(*size)
+                read_bytes.append(len(data))
+                return data
+
+            def __getattr__(self, name):
+                return getattr(self.handle, name)
+
+        def counting_open(path, *rest, **options):
+            handle = open(path, *rest, **options)
+            return Counted(handle) if str(path).endswith('.log') else handle
+
+        os.environ.update(AGF_CODEX_TOOLS_DIR=tools_dir, AGF_CODEX_TOOLS='echo')
+        printed = io.TextIOWrapper(io.BytesIO())
+        ct.open = counting_open
+        try:
+            with contextlib.redirect_stdout(printed):
+                code = ct.call('echo', ['hi'] + words)
+            printed.flush()
+        finally:
+            del ct.open
+        out = printed.buffer.getvalue()
+        check('route: a call reads of the log only what it prints',
+              code == 0 and out.startswith(full[:ct.HEAD_BYTES]) and
+              out.endswith(full[-ct.TAIL_BYTES:]) and
+              sum(read_bytes) <= ct.HEAD_BYTES + ct.TAIL_BYTES, '%d bytes read: %s'
+              % (sum(read_bytes), read_bytes))
         server.kill()
         server.wait()
         os.environ.update(AGF_CODEX_TOOLS_DIR=tools_dir, AGF_CODEX_TOOLS='echo')

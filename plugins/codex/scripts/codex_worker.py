@@ -1114,10 +1114,10 @@ def run_turn(args, codex, where):
             last = handle.read()
     except OSError:
         last = ''
-    if last.strip():
-        # Codex's own text, kept as text for the next round's prompt; only this script reads it.
-        state['handover'] = last[:HANDOVER_MAX]
-        write_state(where, state)
+    # Codex's own text, kept as text for the next round's prompt; only this script reads it.
+    # Every turn replaces it, so a turn that left none never hands over an older one's.
+    state['handover'] = last[:HANDOVER_MAX]
+    write_state(where, state)
     report = {'status': 'failed', 'thread_id': thread_id or args.resume, 'model': args.model,
               'effort': args.effort, 'round': kind, 'branch': branch, 'job': job,
               'time_limit_minutes': args.time_limit, 'timed_out': timed_out,

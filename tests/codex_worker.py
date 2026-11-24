@@ -688,6 +688,18 @@ def main():
         check('the next round keeps the caps',
               'tool_output_token_limit=2000' in argv and set(SUBAGENT_CAP) <= set(argv),
               str(argv))
+        # A turn that leaves no final message (it failed) hands over none: the next round must
+        # not show an older turn's message as the last one's.
+        result = run([wt] + good, STUB_MODE='fail')
+        check('a failed round exits 1', result.returncode == 1, result.stdout)
+        result = run([wt] + good, STUB_MODE='quiet')
+        handover = json.load(open(log))['stdin'].split(
+            '[Hand-over from the earlier rounds of this job]')
+        check('after a turn without a final message the hand-over says so, not an older one',
+              result.returncode == 0 and len(handover) == 2 and
+              '(the last turn left none)' in handover[1] and
+              'done; question: none' not in handover[1].split('Do the task of issue #1.')[0],
+              str(handover[-1:])[:600])
 
         # The export and the import. The export runs under the job's project denials, kept from
         # when the job was made, even after the project's settings drop them.

@@ -718,21 +718,25 @@ def serve(job, turn, spec_text):
 
 # --- inside Codex's sandbox: the call -----------------------------------------------------------
 
-def print_rest(log_path, size, out):
-    """After the head that streamed: the rest of a log of size bytes, whole when it fits in
-    TAIL_BYTES, else a line naming the full log and its last TAIL_BYTES. True when it was cut,
-    so that the log is kept for Codex to read on purpose."""
-    if size <= HEAD_BYTES:
-        return False
-    cut = size > HEAD_BYTES + TAIL_BYTES
-    start = size - TAIL_BYTES if cut else HEAD_BYTES
+def print_rest(log_path, out):
+    """After the head that streamed: the rest of the finished log, whole when it fits in
+    TAIL_BYTES, else a line naming the full log and its last TAIL_BYTES, which start at a whole
+    UTF-8 character. Reads only what it prints. True when it was cut, so that the log is kept for
+    Codex to read on purpose."""
     try:
         with open(log_path, 'rb') as handle:
+            size = os.fstat(handle.fileno()).st_size
+            if size <= HEAD_BYTES:
+                return False
+            cut = size > HEAD_BYTES + TAIL_BYTES
+            start = size - TAIL_BYTES if cut else HEAD_BYTES
             handle.seek(start)
             rest = handle.read(size - start)
     except OSError:
         return False
     if cut:
+        whole = next((i for i, byte in enumerate(rest[:4]) if byte & 0xC0 != 0x80), 0)
+        rest, start = rest[whole:], start + whole
         out.write(('\n[codex_tools: %d bytes cut here; the full log (%d bytes) is %s]\n'
                    % (start - HEAD_BYTES, size, log_path)).encode())
     out.write(rest)
@@ -786,13 +790,14 @@ def call(name, args):
         except OSError:
             gone = True
         try:
+            # The head streams while the tool runs; past it nothing is read until the end.
             with open(log_path, 'rb') as handle:
-                handle.seek(offset)
-                chunk = handle.read()
-            if offset < HEAD_BYTES:  # the head streams while the tool runs
-                out.write(chunk[:HEAD_BYTES - offset])
-                out.flush()
-            offset += len(chunk)
+                if offset < HEAD_BYTES:
+                    handle.seek(offset)
+                    chunk = handle.read(HEAD_BYTES - offset)
+                    out.write(chunk)
+                    out.flush()
+                    offset += len(chunk)
             if deadline is None:
                 deadline = time.time() + limit * 60 + GRACE_SECONDS
         except FileNotFoundError:
@@ -808,7 +813,7 @@ def call(name, args):
                   file=sys.stderr)
             return TIMED_OUT
         time.sleep(POLL)
-    kept = print_rest(log_path, offset, out)
+    kept = print_rest(log_path, out)
     try:
         with open(done_path, encoding='utf-8') as handle:
             result = json.load(handle)

@@ -304,8 +304,11 @@ from the command it stopped in to the end of the text, the guard reads the text 
 permission rules did (all of them, kept in the guard as `NET_DENY` and `NET_ASK`) and by the
 belt. A text the reader does not know is therefore stopped whenever those rules stopped it,
 a commit whose message names a rule's words included, and a misreading can no longer pass a
-command. The reading is checked against bash 3.2, zsh and dash themselves (random texts run
-with a `git` that logs its words). The hook also covers the
+command. That rest is read a second time by a reader that skips what it does not know, so
+that what the words say still counts there; the belt is for a command it had to skip in. The
+reading is checked against bash 3.2, zsh and dash themselves (`tools/fuzz_git_guard.py`:
+random texts run with a `git` that logs its words; outside the test gate, it needs those
+shells). The hook also covers the
 terminal tool. The installer removes
 the rules it added that the policy dropped, and names the user's own such rules without
 changing them.

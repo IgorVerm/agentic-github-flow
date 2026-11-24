@@ -308,6 +308,62 @@ CLAUDE_PASS += [
     'cd "$(git -C r rev-parse --show-toplevel)" && git status',
     'git -C r commit -m "fix \\`clean\\` and \\"push\\"" -- a.md',
     'for f in a b; do git -C r add "$f"; done', 'git -C r log\r\n']
+# The independent review of the strict reader (2026-11-24), each measured in bash 3.2, zsh,
+# dash or sh with a git that logs its words. The shell deletes a backslash-newline before it
+# reads tokens, so one inside a token joins it:
+BLOCK += ['git 2\\\n>/dev/null stash drop', 'git stash &\\\n>/dev/null drop',
+          '(\\\n(x<<EOF))\ngit stash drop\nEOF\n', 'git stash 1\\\n2>/dev/null drop',
+          "git stash $\\\n'drop'", 'git $\\\n{x:-stash} drop', 'git stash $\\\nx drop',
+          'git stash "$\\\nx" drop',
+          # zsh's own syntax; a descriptor of two digits (a word in zsh and sh); `+=`
+          '{ true } always { git stash drop }', 'repeat 2 git stash drop',
+          'repeat 2 do git stash drop; done', 'coproc X { git stash drop; }',
+          'git -C 12>/dev/null stash drop', 'git --namespace 12>/dev/null stash drop',
+          'a+=x git stash drop', 'a+=x git push --force',
+          # an unknown first word that is empty; an expansion whose value the text half fixes
+          "$x sh -c 'git stash drop'", "$x eval 'git stash drop'",
+          "$(true) bash -c 'git stash drop'", 'git stash ${u:+x} drop', 'git stash ${u+x} drop',
+          'gi${u:+x}t stash drop', 'git ${:-stash} drop', '${:-git} stash drop',
+          'git ${x::=stash} drop', 'git stash $=x drop', 'git stash $~x drop',
+          # a NUL ends a $'…' word in bash and zsh
+          "git stash $'drop\\0zz'", "git stash $'drop\\x00zz'", "git $'stash\\0' drop",
+          # an expansion inside the word `git`
+          '$1git stash drop', '$9git -C r push --force', 'g${x}it stash drop',
+          'gi$@t stash drop', 'gi$(true)t stash drop', 'g$()it stash drop', 'g$1it stash drop',
+          'gi"$x"t stash drop', 'g$x""it stash drop',
+          # a shell's script after other options, from standard input, another shell
+          "bash -c -- 'git stash drop'", "bash -c -x 'git stash drop'", "bash -Cc 'git stash drop'",
+          "sh -Cc 'git stash drop'", "bash -co pipefail 'git stash drop'",
+          "BASH <<'EOF'\ngit stash drop\nEOF\n", "echo 'git stash drop' | bash -s x",
+          "echo 'git stash drop' | bash /dev/stdin", "csh -c 'git stash drop'",
+          "tcsh -c 'git stash drop'", "env -u git sh -c 'git stash drop'",
+          "find . -name git -o -exec sh -c 'git stash drop' \\;",
+          # an uncertain text keeps what the words say: a redirection between them, the
+          # environment, gh, an interpreter, a body a piped shell reads
+          'echo `date`; git stash 2>/dev/null drop', '[[ -d . ]] && git stash 2>/dev/null drop',
+          'echo $((1+1)); git -C r stash 2>&1 drop', 'git stash &>/dev/null drop',
+          "cat <<'EOF' | sh\ngit stash >/dev/null drop\nEOF\n",
+          'echo $((1)) && GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath '
+          'GIT_CONFIG_VALUE_0=/x git commit -m x', 'echo $((1)) && gh alias set co "pr checkout"',
+          'echo $((1)) && python3 -c "import subprocess; subprocess.run([\'git\',\'reset\',\'--hard\'])"',
+          'git >>| out stash drop', 'git >&| out stash drop', 'git &>| out push --force',
+          # [[ … ]] is a command of words; an operator inside it is not read
+          '[[ a && git -C r clean -fd ]]', '[[ a =~ b ]] ; git -C r clean -fd',
+          # zsh opens a group at `{git`; sh ends a command at the `&` of `&>`
+          '\ncoproc {git -C r clean -fd\n-C}', 'x&> --hardgit git -Cr push --force']
+# false stops the review measured: a here-document body with backticks or `$(` inside
+# "$(cat <<'EOF' …)" (14 of this repository's 391 commit messages), a rule word as a value
+# after an uncertain command, [[ … ]] before a commit
+CLAUDE_PASS += [
+    'git -C r commit -m "$(cat <<\'EOF\'\nDrop `git -C * clean*` and $(x) rules (#33)\n\n'
+    'A `git push --force` in a message, ${y} and $[1] too.\nEOF\n)" -- a.md',
+    'gh pr create --body "$(cat <<\'EOF\'\nRuns `git push --force` never.\nEOF\n)"',
+    '[[ -n x ]] && git grep -n rebase', 'x=$((1+1)); git log --oneline --grep clean',
+    '[[ -n x ]] && git log --grep "rebase"', 'echo "`date`"; git branch --list push',
+    '[[ -n x ]] && git commit -m "prune"', 'f() { echo hi; }; git commit -m "prune" -- a',
+    '[[ -n x ]] && git commit -m "fix (#33): the git restore rule" -- a',
+    '[[ -d .git ]] && git status', 'if [[ -f a.md ]]; then git add a.md; fi',
+    'git status \\\n  --short \\\n  -b', 'git -C r log && \\\n  git -C r status']
 # a text the reader is not certain of reads as the former rules read it: also a message
 BLOCK += ['git -C r commit -m "a clean step" -- a.md `date`',
           'echo $((1+1)); git -C r commit -m "do not rebase"']
@@ -386,7 +442,9 @@ SLOW = {'3,997 shells': 'sh;:git;' * 3997 + 'git -C r stash drop',
         '2,800 comments': "# it's git\n" * 2800 + 'git -C r stash drop',
         '1,000 here-documents in $(…)': 'echo "$(cat <<\'E\'\n(x\nE\n)"\n' * 1000 + 'git -C r stash drop',
         '6,000 backticks': '`git ' * 6000 + '; git -C r stash drop',
-        '10,000 open $(': 'git ' + '$(' * 10000 + ' -C r stash drop'}
+        '10,000 open $(': 'git ' + '$(' * 10000 + ' -C r stash drop',
+        # the second, loose reading once read each nesting level again (5.2 s)
+        '6,000 open "$(': 'git ' + '"$(a ' * 6000 + '\ngit -C r stash drop'}
 for name, text in SLOW.items():
     started = time.time()
     if run_hook(text).returncode != 2 or time.time() - started > 3:

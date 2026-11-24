@@ -3,20 +3,27 @@
 
 Checks the guards plugin's policy/claude-permissions.json, the one owner of the Claude Code ask
 and deny rules that the installer merges with --guards: it parses, no rule appears twice or in
-both lists, there is no allow list, and every plain git rule has its `git -C *` twin. Claude rules
-match command text, and `git -C <dir>` puts the folder before the subcommand, so a rule without
-its twin is bypassed by the spelling agents use most. A rule that already starts with `git *` or
-`git -c` needs no twin. The opt-in `gcloud` lists (--guards gcloud, #89): ask and deny only, no
+both lists, there is no allow list, and no git rule has a `*` that can reach into a commit
+message (`git -C * …`, `git -c * …`, `git * …`, `git commit * …`, #33). Claude rules match
+command text, and such a `*` spans the whole rest of the command, so `git -C * clean*` stopped
+`git -C r commit -m "a clean step"`. The `git -C <dir>` spellings are the git guard hook's
+(`--claude`); tests/claude_git_rules.py checks that the rules and the guard together still stop
+every former form. The opt-in `gcloud` lists (--guards gcloud, #89): ask and deny only, no
 duplicate and no rule the default lists already hold, each program both bare and with arguments,
 and the gcloud configuration folder closed to reads.
 """
+import importlib.util
 import json
 import os
-import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 POLICY = os.path.join(HERE, '..', 'plugins', 'guards', 'policy', 'claude-permissions.json')
+_spec = importlib.util.spec_from_file_location(
+    'installer', os.path.join(HERE, '..', 'tools', 'installer.py'))
+_installer = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_installer)
+REACHES = _installer.REACHES_COMMIT  # owner: the installer, which also reports them
 
 
 def main():
@@ -32,11 +39,8 @@ def main():
                      if entries.count(r) > 1]
         git = [r[5:-1] for r in entries if r.startswith('Bash(git ')]
         for rule in git:
-            if re.match(r'git (-C |-c |\* )', rule):
-                continue
-            twin = f'git -C * {rule[4:]}'
-            if twin not in git:
-                findings.append(f'{name}: Bash({rule}) has no Bash({twin})')
+            if REACHES.match('Bash(%s)' % rule):
+                findings.append(f'{name}: Bash({rule}) has a * that can reach into a commit')
         print(f'{name}: {len(entries)} rules, {len(git)} git rules')
     findings += [f'in both ask and deny: {r}' for r in sorted(set(rules['ask']) & set(rules['deny']))]
     for rule in ('Bash(git push --force*)', 'Bash(git reset --hard*)', 'Bash(git push*)'):

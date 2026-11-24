@@ -496,6 +496,39 @@ class InstallerTests(unittest.TestCase):
         self.assertIsNone(self.read('.codex', 'hooks.json'))
         self.assertFalse(os.path.lexists(rules))
 
+    def test_rules_dropped_from_the_policy_leave_and_own_ones_are_named(self):
+        own = 'Bash(git * --no-verify*)'  # the user's own rule that reaches into a commit
+        settings = {'permissions': {'deny': [own]}}
+        self.write(json.dumps(settings).encode(), '.claude', 'settings.json')
+        code, out = self.install('--guards', clients=['claude'])
+        self.assertEqual(code, 0, out)
+        self.assertIn('reaches into a commit', out)
+        self.assertIn('      ' + own, out)
+        # an earlier version added a rule the policy has since dropped (#33)
+        dropped = 'Bash(git -C * clean*)'
+        state_path = self.path('.agentic-github-flow', '.state', 'install.json')
+        with open(state_path, encoding='utf-8') as f:
+            state = json.load(f)
+        state['settings']['added'].setdefault('deny', []).append(dropped)
+        with open(state_path, 'w', encoding='utf-8') as f:
+            json.dump(state, f)
+        data = json.loads(self.read('.claude', 'settings.json'))
+        data['permissions']['deny'].append(dropped)
+        self.write(json.dumps(data).encode(), '.claude', 'settings.json')
+        code, out = self.install('--update', clients=['claude'])
+        self.assertEqual(code, 0, out)
+        self.assertIn('1 dropped from the policy removed', out)
+        deny = json.loads(self.read('.claude', 'settings.json'))['permissions']['deny']
+        self.assertNotIn(dropped, deny)
+        self.assertEqual(deny.count(own), 1, 'the user\'s own rule is not changed')
+        self.assertIn('Bash(git reset --hard*)', deny)
+        with open(state_path, encoding='utf-8') as f:
+            self.assertNotIn(dropped, json.load(f)['settings']['added']['deny'])
+        code, out = self.install('--uninstall', clients=['claude'])
+        self.assertEqual(code, 0, out)
+        after = json.loads(self.read('.claude', 'settings.json'))
+        self.assertEqual(after.get('permissions'), settings['permissions'])
+
     def sandbox_entries(self):
         data = json.loads(self.read('.claude', 'settings.json') or b'{}')
         return [e for e in data.get('hooks', {}).get('PreToolUse', [])

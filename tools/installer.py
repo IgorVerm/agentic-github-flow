@@ -30,7 +30,10 @@ What it does, per client (Claude Code, Codex):
   ~/.claude/settings.json (a backup is kept), the Codex execpolicy rules (git safety and delete
   prompts) copied into ~/.codex/rules/, and the git guard and the personal-data guard (`--codex`:
   it denies, because a Codex hook cannot ask) added to ~/.codex/hooks.json beside the user's own
-  entries; --update replaces and --uninstall removes only the recorded entries. The rules
+  entries; --update replaces and --uninstall removes only the recorded entries. A rule this
+  installer added that the policy has since dropped is removed by the next install or --update;
+  the user's own git rules whose `*` reaches into a commit message are named, not changed
+  (#33). The rules
   are copies, never links, because Codex skips a symlinked .rules file without a warning;
   --update refreshes a copy and --uninstall removes it only while it is unchanged since the
   installer wrote it (a link recorded by 0.1, or a copy holding the rules 0.1 shipped, counts
@@ -86,6 +89,10 @@ INSTALLER_ONLY = ('guards', 'codex')  # chosen by --guards and the plan, never b
 # Scripts that moved between plugins: an allow rule naming the old path stops matching (#98).
 MOVED = (('plugins/issue-chats/scripts/codex_', 'plugins/codex/scripts/codex_'),)
 GUARD_EXTRAS = ('sandbox', 'gcloud')  # opt-in guards named after --guards
+# A Claude Code git rule whose `*` can reach into a commit message, so it stops correct commits
+# (#33): the git guard's --claude mode judges these spellings. tests/claude_permissions.py keeps
+# the policy free of them.
+REACHES_COMMIT = re.compile(r'Bash\(git (-C \*|-c \*|\*|commit \*) |Bash\(git commit --all\*\)$')
 BEGIN = '<!-- >>> agentic-github-flow >>> -->'
 END = '<!-- <<< agentic-github-flow <<< -->'
 NOTE = ('<!-- Managed by the agentic-github-flow installer: edit outside these markers; '
@@ -379,19 +386,39 @@ def merge_permissions(state, gcloud=False):
     data = data if data is not None else {}
     permissions = data.setdefault('permissions', {})
     record = state.setdefault('settings', {'created': created, 'added': {}})
-    added_now = 0
+    added_now = dropped_now = 0
     for kind in ('ask', 'deny'):
         current = permissions.setdefault(kind, [])
+        shipped = set(policy['permissions'][kind]) | set(policy['gcloud'][kind])
+        for rule in list(record['added'].get(kind, [])):
+            if rule not in shipped:  # added by an earlier version, since dropped from the policy
+                record['added'][kind].remove(rule)
+                if rule in current:
+                    current.remove(rule)
+                    dropped_now += 1
         for rule in wanted[kind]:
             if rule not in current:
                 current.append(rule)
                 record['added'].setdefault(kind, []).append(rule)
                 added_now += 1
-    if added_now:
+    if added_now or dropped_now:
         backup(path)
         dump_json(path, data)
-    say('ok', 'claude: %d ask and deny rules merged into %s (%d new)' % (
-        len(wanted['ask']) + len(wanted['deny']), path, added_now))
+    say('ok', 'claude: %d ask and deny rules merged into %s (%d new%s)' % (
+        len(wanted['ask']) + len(wanted['deny']), path, added_now,
+        ', %d dropped from the policy removed' % dropped_now if dropped_now else ''))
+    reaching = [r for kind in ('ask', 'deny') for r in permissions.get(kind, [])
+                if isinstance(r, str) and REACHES_COMMIT.match(r)]
+    if reaching:  # the user's own: reported, never changed
+        say('note', 'claude: %d ask and deny rules in %s have a * that reaches into a commit '
+                    'message, so they stop correct commits ("git -C * clean*" stops '
+                    '`git -C r commit -m "a clean step"`); the git guard judges these spellings '
+                    'now. Remove them yourself, or with python3 %s (a dry run; --apply removes '
+                    'them and keeps a backup):' % (
+                        len(reaching), path,
+                        os.path.join(CLONE, 'tools', 'remove_reaching_rules.py')))
+        for rule in reaching:
+            print('      %s' % rule)
     sandbox = data.get('sandbox') if isinstance(data.get('sandbox'), dict) else {}
     if gcloud and (WINDOWS or sandbox.get('enabled') is not True):
         say('note', 'claude: the gcloud folder is closed to Bash commands only with the sandbox on '

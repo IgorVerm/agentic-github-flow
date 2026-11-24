@@ -1,13 +1,13 @@
 {
-  "description": "agentic-github-flow guards: refuse destructive git commands and a bare merge the sandbox would break, ask before destructive deletes, and ask before personal data leaves the machine",
+  "description": "agentic-github-flow guards: refuse destructive git commands and ask before a push in any spelling, refuse a bare merge the sandbox would break, ask before destructive deletes, and ask before personal data leaves the machine",
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "^(Bash|mcp__.*__run_in_terminal)$",
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-python.sh\" \"${CLAUDE_PLUGIN_ROOT}/scripts/pre_tool_git_guard.py\"",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-python.sh\" \"${CLAUDE_PLUGIN_ROOT}/scripts/pre_tool_git_guard.py\" --claude",
             "timeout": 10
           }
         ]

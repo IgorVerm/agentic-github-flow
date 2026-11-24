@@ -273,6 +273,72 @@ changed would do goes back, unless its bound is stated.
 `plugins/core/skills/ship-change/SKILL.md` steps 1, 4 and 6, `local-main.md` §1 and §2.
 **Detail:** issue #37.
 
+## Git rules: the git guard judges `git -C`, not a permission `*`, 2026-11-09
+
+**Decision (the maintainer):** "laat dit oplossen door een agent betere regel dat een correcte
+commit niet gestopt wordt" (have an agent solve this: a better rule, so that a correct commit is
+not stopped); split off as #33: "Yes, open it" (2026-11-10).
+**What:** `plugins/guards/policy/claude-permissions.json` holds no git rule whose `*` can reach
+into a commit message (`git -C * …`, `git -c * …`, `git * …`, `git commit * …`; 69 deny and 10
+ask rules dropped, `git commit --all*` became `git commit --all *`). The git guard's `--claude`
+mode judges those spellings by parsing instead: it blocks the commands they denied (checked on
+an example of every former rule, `tests/claude_git_rules.py`) and asks for a push,
+`commit --amend`, `update-ref` and a remote change; a commit's option values are never flags and
+shell comments are removed first. After three review rounds each found a `#` the comment
+scanner misread, the maintainer approved "#33 nieuwe aanpak" (2026-11-23): the rest of a line
+after each removed `#` is judged as well when it may run git, and a block or an ask from either
+side wins; a comment that names a forbidden git command is refused, which costs an agent only a
+reworded comment. `git restore --staged` is refused in every spelling, as the Codex rules and
+`git restore *` already did (the dropped `git -C * restore *` had refused it too). After nine
+review rounds each found new spellings, the maintainer chose "(b) structureel vangnet"
+(2026-11-24): when a git command's subcommand slot holds no plain word (`git $(true) stash
+drop`, `git -C r <<<x stash drop`, none at all), every subcommand word after a `git` in the
+whole text is judged as the subcommand (`judge_loose`), as the dropped `git -C * …` rules
+matched. A tenth review showed that belt still was no superset of the dropped rules (zsh's
+`git -C r >! out stash drop` passed), and the maintainer had a new design made ("Ja, start
+Fable", 2026-11-24; the design is on issue #33, posted before it was built): **exact where the
+reading is certain, the former rules where it is not.** The guard's reader knows only the part
+of the shell language that bash (3.2 and later), zsh and sh read the same way, and stops at
+anything else instead of guessing. The commands before that point are judged by their words;
+from the command it stopped in to the end of the text, the guard reads the text as the former
+permission rules did (all of them, kept in the guard as `NET_DENY` and `NET_ASK`) and by the
+belt. A text the reader does not know is therefore stopped whenever those rules stopped it,
+a commit whose message names a rule's words included, and a misreading can no longer pass a
+command. That rest is read a second time by a reader that skips what it does not know, so
+that what the words say still counts there; the belt is for a command it had to skip in. The
+reading is checked against bash 3.2, zsh and dash themselves (`tools/fuzz_git_guard.py`:
+random texts run with a `git` that logs its words; outside the test gate, it needs those
+shells). A second independent review (2026-11-24) found no class this design does not close,
+and texts the reader was wrongly certain of; since then `$'…'` is never certain (no two shells
+decode it alike), nor zsh's `repeat` after `do` or `then`, a command after `]]`, `<->`, an
+`alias`; an unquoted `$IFS` in a word is also read as a split; a substitution in a
+here-document body without a quoted delimiter is judged by the rules and the belt; and the
+second reading gives up, and the text is refused, once it has read `MAX_AGAIN` characters
+again or `MAX_SECONDS` have passed (it took 38 s on 32,000 braces, where the hook has 10 s).
+A here-document body stays data unless a shell or an interpreter reads it, or a command in the
+text runs a text that is not in its own words (`eval "$(cat <<'EOF' … EOF)"`): then every
+body is judged as a shell text. A body written to a file that is run later is not seen, as
+before, though the former rules stopped it by its text: asked "Here-documents als data laten
+(zoals de branch doet) en #33 pushen?", the maintainer answered "Ja, alles" (2026-11-24), so a
+here-document body stays data. A third independent review (2026-11-24, the last findings
+round by the maintainer's rule of three) again found no class the design does not close, and
+four texts read wrongly: the word of `${@:-word}`, `${!x:-word}` and `${x/pattern/word}` is
+now read as the value it may be and any other unknown form of `${…}` is uncertain;
+`${IFS%x}` splits as `${IFS}` does; a `$'…'` inside a substitution of a here-document body;
+`/dev/fd/0` as a shell's input. Those last fixes were not reviewed again. The hook also covers the
+terminal tool. The installer removes
+the rules it added that the policy dropped, and names the user's own such rules without
+changing them; `tools/remove_reaching_rules.py` removes those for the user (a dry run unless
+`--apply`, a backup first, and only once the installed guards plugin runs the guard with
+`--claude`).
+**Why:** such a `*` spans the rest of the command, so `git -C r commit -m "a clean step"` was
+refused by `git -C * clean*` and a message saying "push" asked the user (six refused commits in
+one day in another repository).
+**Binds:** `plugins/guards/scripts/pre_tool_git_guard.py`, `plugins/guards/hooks/hooks.json`,
+`tools/installer.py` (`REACHES_COMMIT`), `tools/remove_reaching_rules.py`, `tests/claude_git_rules.py` (against
+`tests/claude_git_rules_former.json`), `tests/claude_permissions.py`, `tests/git_guard.py`.
+**Detail:** issue #33.
+
 ## Agents may merge their own pull request under a standing grant, 2026-11-09
 
 **Decision (the maintainer):** "ja zo wil ik dat het werkt" (that is how I want it to work), on

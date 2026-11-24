@@ -12,6 +12,7 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TESTS = ['skills_format.py', 'repo_checks.py', 'claude_permissions.py', 'git_guard.py',
+         'claude_git_rules.py',
          'personal_data_guard.py', 'delete_guard.py', 'sandbox_network_guard.py',
          'delete_guard_differential.py', 'scan_secrets.py', 'audit_dependencies.py',
          'skill_triggers_offline.py', 'worktree_tools.py', 'new_worktree.py', 'installer.py',
@@ -19,7 +20,7 @@ TESTS = ['skills_format.py', 'repo_checks.py', 'claude_permissions.py', 'git_gua
          'chat_archivable.py', 'merge_landing.py', 'merge_guard.py', 'archive_guard.py',
          'landing.py', 'promote_main.py', 'merge_pr.py', 'review_verdict.py', 'pre_push_checks.py',
          'push_branch.py', 'question_label.py', 'context_limit.py', 'codex_worker.py',
-         'codex_tools.py', 'maint_tools.py',
+         'codex_tools.py', 'maint_tools.py', 'remove_reaching_rules.py',
          'plugin_validate.py']
 
 

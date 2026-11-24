@@ -134,7 +134,7 @@ in the guard itself asks in the same case. tests/delete_guard_differential.py ch
 guard asks for every command the guard as it was before issue #4 (the first reading alone)
 asks for. Any other input,
 a malformed event included, passes with exit 0. Nothing is ever denied. The shell helpers it
-shares (`base`, `SHELLS`, `KEYWORDS`, `ASSIGN`, `HEREDOC`, `$'…'` decoding, the input and
+shares (`base`, `SHELLS`, `KEYWORDS`, `ASSIGN`, `HEREDOC_MARK`, `$'…'` decoding, the input and
 depth limits) have one owner, pre_tool_git_guard.py.
 
 Usage as a hook: reads the PreToolUse JSON on stdin, prints the "ask" decision on stdout or
@@ -1515,7 +1515,8 @@ def strip_heredocs(text):
         line = lines[i]
         out.append(line)
         i += 1
-        for dash, word in gg.HEREDOC.findall(line.replace('<<<', '')):
+        for dash, written in gg.HEREDOC_MARK.findall(line.replace('<<<', '')):
+            word = gg.heredoc_word(written)
             found = (tabbed if dash else exact).get(word, [])
             k = bisect.bisect_left(found, i)
             if k < len(found):

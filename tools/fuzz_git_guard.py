@@ -31,7 +31,11 @@ NOISE = ["'", '"', '\\', '\\\n', '$x', '${x}', '${x:-stash}', '${x:-}', '$(', ')
          '&>', '2>&1', '>!', '>|', '<(', '>(', "$'", '$"', 'case', 'in', 'esac', 'a[', ']', '=', 'EOF\n', "'EOF'",
          '\nEOF\n', 'if', 'then', 'fi', 'do', 'done', 'for', '!', '*', '?', '~', 'time', 'eval', 'trap', 'EXIT',
          'coproc', 'function', 'fn()', '$()', '"$@"', '1', '2', '-', '\t', '\r', '$[', '<<EOF', "<<'EOF'", '$(true)',
-         '${', '$', '\\\\', "\\'", '\\"', '#x', ' # ', "it's", '>/dev/null', '2>', 'out', '$(cat <<', '"$(']
+         '${', '$', '\\\\', "\\'", '\\"', '#x', ' # ', "it's", '>/dev/null', '2>', 'out', '$(cat <<', '"$(',
+         # the second review: what the lists above did not hold
+         '$IFS', '${IFS}', "$'\\x2d", "$'\\u002d", "$'\\0'", "$'\\c", "$'\\400'", 'repeat 1', 'alias', '<->', '(N)',
+         '[[ a ]]', 'eval --', 'env -vS', '-f4', '-fm']
+# not `source` or `bash` before a word: either would read this `git`, a script, as its script
 BASES = ['git -C r stash drop', 'git -C r clean -fd', 'git -C r push --force', 'git -C r reset --hard',
          'git stash drop', 'git -C r rebase x', 'git -C r commit -m msg --no-verify', 'git -C r push']
 

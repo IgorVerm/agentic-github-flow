@@ -413,7 +413,10 @@ def merge_permissions(state, gcloud=False):
         say('note', 'claude: %d ask and deny rules in %s have a * that reaches into a commit '
                     'message, so they stop correct commits ("git -C * clean*" stops '
                     '`git -C r commit -m "a clean step"`); the git guard judges these spellings '
-                    'now. Remove them yourself:' % (len(reaching), path))
+                    'now. Remove them yourself, or with python3 %s (a dry run; --apply removes '
+                    'them and keeps a backup):' % (
+                        len(reaching), path,
+                        os.path.join(CLONE, 'tools', 'remove_reaching_rules.py')))
         for rule in reaching:
             print('      %s' % rule)
     sandbox = data.get('sandbox') if isinstance(data.get('sandbox'), dict) else {}

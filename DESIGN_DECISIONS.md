@@ -308,15 +308,27 @@ command. That rest is read a second time by a reader that skips what it does not
 that what the words say still counts there; the belt is for a command it had to skip in. The
 reading is checked against bash 3.2, zsh and dash themselves (`tools/fuzz_git_guard.py`:
 random texts run with a `git` that logs its words; outside the test gate, it needs those
-shells). The hook also covers the
+shells). A second independent review (2026-11-24) found no class this design does not close,
+and texts the reader was wrongly certain of; since then `$'…'` is never certain (no two shells
+decode it alike), nor zsh's `repeat` after `do` or `then`, a command after `]]`, `<->`, an
+`alias`; an unquoted `$IFS` in a word is also read as a split; a substitution in a
+here-document body without a quoted delimiter is judged by the rules and the belt; and the
+second reading gives up, and the text is refused, once it has read `MAX_AGAIN` characters
+again or `MAX_SECONDS` have passed (it took 38 s on 32,000 braces, where the hook has 10 s).
+A here-document body stays data unless a shell or an interpreter reads it, or a command in the
+text runs a text that is not in its own words (`eval "$(cat <<'EOF' … EOF)"`): then every
+body is judged as a shell text. A body written to a file that is run later is not seen, as
+before. The hook also covers the
 terminal tool. The installer removes
 the rules it added that the policy dropped, and names the user's own such rules without
-changing them.
+changing them; `tools/remove_reaching_rules.py` removes those for the user (a dry run unless
+`--apply`, a backup first, and only once the installed guards plugin runs the guard with
+`--claude`).
 **Why:** such a `*` spans the rest of the command, so `git -C r commit -m "a clean step"` was
 refused by `git -C * clean*` and a message saying "push" asked the user (six refused commits in
 one day in another repository).
 **Binds:** `plugins/guards/scripts/pre_tool_git_guard.py`, `plugins/guards/hooks/hooks.json`,
-`tools/installer.py` (`REACHES_COMMIT`), `tests/claude_git_rules.py` (against
+`tools/installer.py` (`REACHES_COMMIT`), `tools/remove_reaching_rules.py`, `tests/claude_git_rules.py` (against
 `tests/claude_git_rules_former.json`), `tests/claude_permissions.py`, `tests/git_guard.py`.
 **Detail:** issue #33.
 

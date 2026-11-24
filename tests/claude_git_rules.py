@@ -145,6 +145,14 @@ SPELLINGS = [
     lambda g: 'case x in x) git ' + g + ';; esac', lambda g: 'f() { git ' + g + '; }; f',
     lambda g: 'echo "$(case x in a) echo;; esac)"; git ' + g, lambda g: 'a[1]=x; git ' + g,
     lambda g: '[[ -n x ]] && git ' + g, lambda g: 'echo "\ngit ' + g,
+    # the second review: zsh's own words, an unquoted here-document body, $IFS, a text a
+    # shell runs from a substitution or from its input
+    lambda g: 'for x in a; do repeat 1 git ' + g + '; done', lambda g: 'if [[ a ]] git ' + g,
+    lambda g: 'cat <<EOF\n$(git ' + g + ')\nEOF', lambda g: 'git${IFS}' + g,
+    lambda g: 'eval -- git ' + g, lambda g: "env -vS 'git " + g + "'",
+    lambda g: 'bash -c "$(cat <<\'EOF\'\ngit ' + g + '\nEOF\n)"',
+    lambda g: "source /dev/stdin <<'EOF'\ngit " + g + '\nEOF',
+    lambda g: 'echo ' + q('git ' + g) + ' | bash -o errexit', lambda g: "alias x='git " + g + "'\nx",
 ]
 
 

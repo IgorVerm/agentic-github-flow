@@ -369,6 +369,67 @@ BLOCK += ['git -C r commit -m "a clean step" -- a.md `date`',
           'echo $((1+1)); git -C r commit -m "do not rebase"']
 
 
+# The second independent review of the strict reader (2026-11-24): each text ran the refused
+# command in bash 3.2, zsh, dash or sh and passed the guard.
+BLOCK += [
+    # $'…' is read differently by every shell: bash 3.2 knows no \u, an octal number over
+    # \377 wraps, zsh knows no \c and ends the word at a NUL, dash reads `$` and a string
+    "git branch $'\\u002d\\u002dhelp' -D x", "git tag $'\\u002d\\u002dhelp' -d v1",
+    "$'\\547it' stash drop", "git $'\\563tash' drop", "git $'clean\\400' -fd",
+    "git $'\\clean' -fd", "git stash $'drop\\0'x", "git $'stash\\0'x drop",
+    "git branch $'\\x2d\\x2dhelp' -D x", "git branch $'--help' -D x",
+    # zsh's own words after `do`, `then`, `!`, `{`, `if`, and a command after `]]`
+    'for x in a; do repeat 1 git stash drop; done', '! repeat 1 git stash drop',
+    'if true; then repeat 1 git stash drop; fi', '{ repeat 1 git stash drop; }',
+    'if repeat 1 git stash drop; then :; fi', 'while repeat 1 git stash drop; do break; done',
+    '! repeat 1 git --no-pager clean -fd', "if [[ a ]] sh -c 'git stash drop'",
+    "if [[ a ]] eval 'git stash drop'", "if [[ a ]] env -S 'git stash drop'",
+    "if [[ a ]] trap 'git stash drop' EXIT", 'if [[ a ]] git stash drop',
+    # a substitution in a here-document body without a quoted delimiter runs
+    'cat <<EOF\n$(git --no-pager stash drop)\nEOF', 'cat <<EOF\n$(git --no-pager clean -fd)\nEOF',
+    'cat <<EOF\n$(git  -c a=b reset   --hard)\nEOF',
+    'cat <<EOF\n${x:-$(git --no-pager stash drop)}\nEOF',
+    'cat <<EOF\n`git --no-pager stash drop`\nEOF',
+    # sh splits a word at an unquoted $IFS
+    'git stash${IFS}drop', 'git${IFS}stash${IFS}drop', 'git$IFS"stash"$IFS\'drop\'',
+    'git -C r reset${IFS}--hard',
+    # zsh: <-> is a glob for a number, and .(N) a glob qualifier
+    'git branch <-> -D x', 'git checkout <-> --force', 'git reset <1-9> --hard',
+    'git add .(N)', 'git checkout .(N)', 'git -C r add .(N)', "git add '.'(N)", 'git add .(/)',
+    # a short flag with a value attached to its cluster
+    'git tag -fmv1.0 v1.0', 'git checkout -fbfix-1', 'git switch -fcfix-1',
+    'git push -f4 origin main', 'git push -4f origin main', 'git checkout -Bfix-1 origin/main',
+    'git switch -Cfix-1', 'git worktree add -Bfix-1 ../p', 'git pull -r4',
+    # unwrapping
+    'eval -- git stash drop', "env -vS 'git stash drop'", '$x env -u git git stash drop',
+    'env -vSgit -C r stash drop', 'env -iSgit stash drop',
+    "$SHELL -c 'git stash drop'", "$0 -c 'git stash drop'", 'env -uGIT_SSH git stash drop',
+    "echo 'git stash drop' | bash -o errexit", "echo 'git stash drop' | bash +e",
+    "echo 'git stash drop' | zsh -o errexit", ". /dev/stdin <<< 'git stash drop'",
+    "echo 'git --no-pager stash drop' | sh",
+    # a text that a shell runs although it is not in that shell's own words
+    'bash -c "$(cat <<\'EOF\'\ngit stash drop\nEOF\n)"',
+    'eval "$(cat <<\'EOF\'\ngit stash drop\nEOF\n)"',
+    "source /dev/stdin <<'EOF'\ngit stash drop\nEOF",
+    'sh <<< "$(cat <<\'EOF\'\ngit clean -fd\nEOF\n)"',
+    # an alias, and history expansion switched on, change how the next lines are read
+    "alias x='git stash drop'\nx", "shopt -s expand_aliases\nalias x='git stash drop'\nx",
+    'set -o history -o histexpand\necho git stash drop\n!:1-3',
+    # an expansion that is nothing inside the word git
+    'g`true`it stash drop',
+]
+ALLOW += [
+    'git switch -c fix-1', 'git checkout -b fix', "git tag -a v1 -m 'final'", 'git pull -4',
+    'git branch -m old new', 'git checkout -b agent/$n-fix', "git log --format=$'%h\\t%s'",
+    "git commit -m $'first line\\nsecond line'",
+    "if [[ -f a ]]; then git -C r commit -m 'a clean step'; fi",
+    "[[ -n $x ]] && git -C r commit -m 'clean, rebase, reset --hard'",
+    'cat <<EOF\nrun $(date) and see git status\nEOF',
+    "bash scripts/x.sh && git -C r commit -m 'a clean step'",
+    'git -C r commit -m "$(cat <<\'EOF\'\na clean step: $(x) `y` git stash drop\nEOF\n)" -- a.md',
+]
+
+
 def run(command):
     return subprocess.run([sys.executable, HOOK, '--check', command], capture_output=True, text=True)
 
@@ -445,6 +506,13 @@ SLOW = {'3,997 shells': 'sh;:git;' * 3997 + 'git -C r stash drop',
         '10,000 open $(': 'git ' + '$(' * 10000 + ' -C r stash drop',
         # the second, loose reading once read each nesting level again (5.2 s)
         '6,000 open "$(': 'git ' + '"$(a ' * 6000 + '\ngit -C r stash drop'}
+# second review: the loose reading read a word that stops at its end again from each of its
+# characters (38 s at 32,000 braces, where the hook has 10 s); it now gives up and refuses
+SLOW.update({
+    '31,900 braces in a word': 'echo ' + '{' * 31900 + '}; git stash drop',
+    '1,700 here-documents glued in a word':
+        ('git stash drop ' + '$(cat <<EOF\nEOF\n)' * 3000)[:31900],
+    "16,000 open $'": ('echo `x`; git stash drop ' + "$'\\" * 16000)[:32000]})
 for name, text in SLOW.items():
     started = time.time()
     if run_hook(text).returncode != 2 or time.time() - started > 3:

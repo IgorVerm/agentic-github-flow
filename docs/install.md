@@ -136,7 +136,9 @@ always the same version. Tell the person what changed:
   and `--uninstall`: the installer's docstring. The git rules start with `git <subcommand>`;
   the guards plugin's git guard judges the `git -C <dir>` spellings. When the install names
   rules in the person's own settings that reach into a commit message (`git -C * clean*`),
-  pass the list on: they stop correct commits, and removing them is the person's change.
+  pass the list on: they stop correct commits, and removing them is the person's change
+  (`python3 ~/.agentic-github-flow/tools/remove_reaching_rules.py` shows them; with `--apply`
+  it removes them and keeps a backup, once the updated guards plugin is installed).
 - With `--guards sandbox`, also: one `PreToolUse` entry in `~/.claude/settings.json` that runs the
   sandbox-network guard from the clone.
 - With `--guards gcloud`, also: the Google Cloud ask and deny rules merged into

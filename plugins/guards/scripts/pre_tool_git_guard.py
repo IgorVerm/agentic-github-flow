@@ -32,7 +32,8 @@ as the subcommand, on its words and on its raw text (judge_loose). Both can only
 That second reading has a budget (Reader.over): past it the text is refused, because a hook
 that runs out of its time stops nothing.
 A word the text does not fix (`$x`, `$(…)`, `st$()ash`) is read with its unknown parts empty,
-also as no word at all, `${x:-stash}` also as `stash`, an unquoted `$IFS` also as a split
+also as no word at all, `${x:-stash}`, `${@:-stash}` and `${x/a/stash}` also as `stash` (a
+form of `${…}` it does not know is uncertain), an unquoted `$IFS` also as a split
 (`git${IFS}stash${IFS}drop`), and a git command with one at or before its subcommand gets the
 belt on its words. A here-document body is data, unless a shell or an interpreter reads it,
 its delimiter is not quoted and it holds a substitution (the rules and the belt read it), or
@@ -607,10 +608,18 @@ NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
 SUBSCRIPT = re.compile(r'[A-Za-z_][A-Za-z0-9_]*\[')  # a[…]=: bash reads to the `]` on its own
 # ${…} without a quote, a blank, a `$`, a backslash or a brace inside: it ends at the first `}`
 PARAM = re.compile(r'\{([A-Za-z0-9_:#%/.,^@*!?+=~\[\]-]*)\}')
-DEFAULT = re.compile(r'[A-Za-z_0-9]*:{0,2}[-=+](.*)')  # ${x:-word}, ${x:+word}, zsh's ${:-word}
+# ${x:-word}, ${x:+word}, ${@:-word}, ${!x:-word}, zsh's ${:-word}, and ${x/pattern/word}:
+# the word may be the value
+DEFAULT = re.compile(r'(?:!?[A-Za-z_0-9]*|[@*#?$!-]):{0,2}[-=+](.*)'
+                     r'|(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*])//?[^/]*/(.*)')
+# the other forms it reads, none of which can hold a word of the text: ${x}, ${1}, ${@},
+# ${#x}, ${x%pattern}, ${x#pattern}, ${x:1:2}, ${x:?message}. Not read (Unsure): ${!x},
+# zsh's ${+x}, ${=x}, ${x:s/a/b/}
+PLAIN_PARAM = re.compile(r'(?:#?(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*])|[#?$!-])'
+                         r'(?:(?:%%?|##?|:\??|\?)[^/]*)?')
 DELIMITER = re.compile(r'''(?:([A-Za-z_][A-Za-z0-9_]*)|'([A-Za-z_][A-Za-z0-9_]*)'|'''
                        r'''"([A-Za-z_][A-Za-z0-9_]*)")(?=[ \t\n;|&)<>]|\Z)''')
-IFS = re.compile(r'\$IFS|\$\{IFS\}')
+IFS = re.compile(r'\$IFS|\$\{IFS[^}]*\}')  # also ${IFS%x}, ${IFS:-x}: still blanks
 RANGE_GLOB = re.compile(r'<[0-9]*-[0-9]*>')
 REDIRECTS = ('<<<', '<<-', '<<', '<>', '<&', '<', '>>', '>&', '>|', '>', '&>>', '&>')
 MAX_NEST = 40  # $(…) and (…) inside each other; deeper is not read
@@ -1021,7 +1030,10 @@ class Reader:
                 raise Unsure
             self.i = m.end()
             default = DEFAULT.fullmatch(m.group(1))
-            text = ALT_OPEN + default.group(1) + ALT_CLOSE if default else ''
+            if not default and not PLAIN_PARAM.fullmatch(m.group(1)):
+                raise Unsure  # ${x/#/stash}: a form whose value may be a word of the text
+            text = ALT_OPEN + (default.group(1) or default.group(2) or '') + ALT_CLOSE \
+                if default else ''
             return text, False, in_dq and '@' not in m.group(1) and '*' not in m.group(1)
         if nxt == "'" and not in_dq:
             if not self.loose:
@@ -1137,12 +1149,22 @@ LOOSE_WORD = re.compile(r'''(?:"[^"]*"|'[^']*'|\\.|[^\s"'\\]|["'\\])+''')
 LOOSE_SEGMENT = re.compile(r'(?:[^\n;|&]|(?<=[<>])&|&(?=>))+')  # `>&` and `&>` split nothing
 ALL_SHELLS = SHELLS | {'csh', 'tcsh', 'fish'}
 SOURCES = {'.', 'source'}
+STDIN = {'-s', '-', '/dev/stdin', '/dev/fd/0', '/proc/self/fd/0'}
 SHELL_C = re.compile(r'-[A-Za-z]*c[A-Za-z]*')  # a shell's -c, also in a cluster (-lc)
 ENV_S = re.compile(r'-[A-Za-z0-9]*S(.*)', re.S)  # env's -S, also in a cluster (-vS)
 SETS = re.compile(r'[A-Za-z_][A-Za-z0-9_]*\+?=.*', re.S)  # an assignment, also `a+=x`
 # quotes and what opens or closes a substitution or a group, as blanks: the belt then reads a
 # text that is not a command line (a here-document body, a text piped into a shell)
 UNWORD = re.compile(r'[\'"`(){}]|\$\(|\$\{\w*:?[-=+]?')
+UNQUOTE = re.compile(r'\$?[\'"]')  # a quote, and the `$` of a $'…'
+
+
+def unworded(text):
+    """The belt on a text that is not a command line: with each quote as a blank, and with the
+    quotes dropped (`$(git stash d$'r'op)` in a here-document body)."""
+    return judge_loose(UNWORD.sub(' ', text)) or judge_loose(UNWORD.sub(' ', UNQUOTE.sub('', text)))
+
+
 LOOSE_PART = re.compile(r'\$?\{\w*:?[-=+]?')  # the start of what is left of a `${x:-word}`
 
 
@@ -1235,7 +1257,7 @@ def net(text):
     uncertain text is stopped whenever those rules stopped it: also a commit whose message
     names a rule's words, which is the cost of not being certain."""
     flat = ' '.join(text.replace('\\\n', '').split())
-    bare = re.sub(r'[\'"\\]', '', flat)
+    bare = re.sub(r'\$?[\'"]|\\', '', flat)  # also the `$` of a $'…'
     apart = NET_APART.sub(' ', bare)
     empty = EXPANSION.sub('', bare)  # g`true`it: an expansion that is nothing
     forms = (flat, ' '.join(bare.split()), ' '.join(apart.split()), ' '.join(empty.split()))
@@ -1412,7 +1434,7 @@ def judge_command(tokens, depth, cmd=None, scan=True):
         elif cmd is not None:
             rest = [t for j, t in enumerate(tokens[1:], 1)  # without `-o errexit`, `+e`
                     if t[:1] not in ('-', '+') and tokens[j - 1] not in ('-o', '+o', '-O', '+O')]
-            if not rest or {'-s', '-', '/dev/stdin'} & set(tokens[1:]):
+            if not rest or STDIN & set(tokens[1:]):
                 cmd.stdin = True  # no script: it reads one from a pipe, `echo git … | bash`
     elif name in INTERPRETERS:
         for j, tok in enumerate(tokens[1:], 1):
@@ -1423,7 +1445,7 @@ def judge_command(tokens, depth, cmd=None, scan=True):
             cmd.runs = True  # eval "$(cat <<'EOF' … EOF)"
         return judge(' '.join(tokens[2:] if tokens[1:2] == ['--'] else tokens[1:]), depth + 1)
     elif name in SOURCES:
-        if cmd is not None and {'-', '/dev/stdin', '/dev/fd/0'} & set(tokens[1:]):
+        if cmd is not None and STDIN & set(tokens[1:]):
             cmd.stdin = True  # . /dev/stdin <<< 'git …'
     elif name == 'trap':
         for tok in tokens[1:]:  # the action runs later, as a shell text
@@ -1522,7 +1544,7 @@ def judge(text, depth=0, lenient=False):
         if reason:
             return reason
     for body in nets:
-        reason = net(body) or judge_loose(UNWORD.sub(' ', body))
+        reason = net(body) or unworded(body)
         if reason:
             return reason
     for cmd in commands:
@@ -1544,7 +1566,7 @@ def judge(text, depth=0, lenient=False):
                 reason = judge(body, depth + 1)
                 if reason:
                     return reason
-        return net(text) or judge_loose(UNWORD.sub(' ', text))
+        return net(text) or unworded(text)
     return None
 
 

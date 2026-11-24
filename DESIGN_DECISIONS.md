@@ -320,7 +320,12 @@ text runs a text that is not in its own words (`eval "$(cat <<'EOF' … EOF)"`):
 body is judged as a shell text. A body written to a file that is run later is not seen, as
 before, though the former rules stopped it by its text: asked "Here-documents als data laten
 (zoals de branch doet) en #33 pushen?", the maintainer answered "Ja, alles" (2026-11-24), so a
-here-document body stays data. The hook also covers the
+here-document body stays data. A third independent review (2026-11-24, the last findings
+round by the maintainer's rule of three) again found no class the design does not close, and
+four texts read wrongly: the word of `${@:-word}`, `${!x:-word}` and `${x/pattern/word}` is
+now read as the value it may be and any other unknown form of `${…}` is uncertain;
+`${IFS%x}` splits as `${IFS}` does; a `$'…'` inside a substitution of a here-document body;
+`/dev/fd/0` as a shell's input. Those last fixes were not reviewed again. The hook also covers the
 terminal tool. The installer removes
 the rules it added that the policy dropped, and names the user's own such rules without
 changing them; `tools/remove_reaching_rules.py` removes those for the user (a dry run unless

@@ -415,12 +415,28 @@ BLOCK += [
     # an alias, and history expansion switched on, change how the next lines are read
     "alias x='git stash drop'\nx", "shopt -s expand_aliases\nalias x='git stash drop'\nx",
     'set -o history -o histexpand\necho git stash drop\n!:1-3',
+    # The third independent review (2026-11-24). A default or alternative word of a special
+    # parameter, and a form of ${…} whose value may be a word of the text
+    'git stash ${@:-drop}', 'git reset ${@:---hard}', 'git ${@:-clean} -fd', 'git add ${@:--A}',
+    'git commit ${@:--n} -m x', 'git branch ${*:--D} old', 'git tag ${#:+-d} v1',
+    'git push ${@:---force}', 'git stash ${!x:-drop}', 'git ${x/#/stash} drop',
+    'git stash ${x/#/drop}',
+    # $IFS with an operator still expands to its blanks
+    'git${IFS%x}stash${IFS%x}drop', 'git stash${IFS:-x}drop', 'git${IFS#x}stash${IFS##x}drop',
+    'git stash${IFS:0:1}drop', 'git${IFS?}stash${IFS?}drop',
+    # $'…' inside a substitution of an unquoted here-document body
+    "cat <<EOF\n$(git stash $'drop')\nEOF", "cat <<EOF\n$(git stash $'dr'op)\nEOF",
+    "cat <<EOF\n$(git stash d$'r'op)\nEOF",
+    # other names of a shell's standard input
+    'echo git stash drop | bash /dev/fd/0', 'echo git stash drop | sh /proc/self/fd/0',
     # an expansion that is nothing inside the word git
     'g`true`it stash drop',
 ]
 ALLOW += [
     'git switch -c fix-1', 'git checkout -b fix', "git tag -a v1 -m 'final'", 'git pull -4',
-    'git branch -m old new', 'git checkout -b agent/$n-fix', "git log --format=$'%h\\t%s'",
+    'git branch -m old new', 'git checkout -b agent/$n-fix', 'git checkout -b fix/${n%.*}',
+    'git -C r commit -m "${msg:-clean}"', 'git log -n ${#} --grep "${1:-clean}"',
+    'git -C "${dir:?}" status', 'git fetch origin "${b##*/}"', "git log --format=$'%h\\t%s'",
     "git commit -m $'first line\\nsecond line'",
     "if [[ -f a ]]; then git -C r commit -m 'a clean step'; fi",
     "[[ -n $x ]] && git -C r commit -m 'clean, rebase, reset --hard'",

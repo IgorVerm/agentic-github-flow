@@ -34,7 +34,10 @@ NOISE = ["'", '"', '\\', '\\\n', '$x', '${x}', '${x:-stash}', '${x:-}', '$(', ')
          '${', '$', '\\\\', "\\'", '\\"', '#x', ' # ', "it's", '>/dev/null', '2>', 'out', '$(cat <<', '"$(',
          # the second review: what the lists above did not hold
          '$IFS', '${IFS}', "$'\\x2d", "$'\\u002d", "$'\\0'", "$'\\c", "$'\\400'", 'repeat 1', 'alias', '<->', '(N)',
-         '[[ a ]]', 'eval --', 'env -vS', '-f4', '-fm']
+         '[[ a ]]', 'eval --', 'env -vS', '-f4', '-fm',
+         # the third review
+         '${@:-drop}', '${@:---hard}', '${*:-stash}', '${IFS%x}', '${IFS:-x}', '${x/#/stash}', '${x/#/drop}',
+         '${!x:-drop}', '${#:+clean}', "$'drop'", "d$'r'op", '/dev/fd/0']
 # not `source` or `bash` before a word: either would read this `git`, a script, as its script
 BASES = ['git -C r stash drop', 'git -C r clean -fd', 'git -C r push --force', 'git -C r reset --hard',
          'git stash drop', 'git -C r rebase x', 'git -C r commit -m msg --no-verify', 'git -C r push']

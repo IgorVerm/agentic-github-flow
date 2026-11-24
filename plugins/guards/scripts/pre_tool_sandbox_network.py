@@ -22,7 +22,7 @@ strictest answer of all hooks. It reads `sandbox.enabled` and `sandbox.excludedC
 user's Claude Code settings (`$CLAUDE_CONFIG_DIR/settings.json`, else `~/.claude/settings.json`)
 and checks every rewrite with the client's matching rules (`matches()`); with the sandbox not
 enabled there, no entries, or on native Windows (no sandbox there; WSL2 counts as Linux), it does
-nothing. Two kinds of call are refused:
+nothing. Three kinds of call are refused:
 1. `cd <dir> && ...` (also `;`, a newline, several `cd`s, a later literal `cd`, `$HOME`) whose
    remainder runs a network command:
    - gh: `-R owner/repo`, right after the subcommand, for the repository gh itself would pick in
@@ -40,7 +40,7 @@ nothing. Two kinds of call are refused:
      another folder than in an excluded call (measured with Claude Code on macOS,
      2026-11-10). A variable is filled in when the call assigns it a literal once, in a part
      that surely runs, and names it nowhere else;
-   - `git fetch|pull|push|ls-remote`: loses the `cd` when `<dir>` is the session's folder;
+   - `git fetch|pull|push|ls-remote`: see 3;
    - a script called by path whose `bash "<absolute path>"` form matches an entry: when `<dir>`
      is the session's folder, or when the script is listed in the user's `sandbox-scripts`
      (below), because only then does it do the same from the session's folder. A script without
@@ -49,6 +49,33 @@ nothing. Two kinds of call are refused:
    sandbox: through `..`, or with a `*` in the middle of the entry spanning a quote or a space
    (`bash "<dir>/evil.sh" "/tools/…"`). Also, without a `cd`, a call to such a script in a form
    its entry does not match.
+3. `git fetch|pull|push|ls-remote` run in another folder, after a `cd` or with `-C <dir>`,
+   `--git-dir` or `--work-tree` (#122), becomes the lone `git <subcommand> …` (`lone_git()`):
+   - always, when git runs in the session's folder;
+   - in the session's own worktree reached another way (a subfolder, `--git-dir`): except
+     `pull`, a remote given or configured as a relative path (`../x.git`, also as a push URL),
+     and an option this hook does not know; with `--git-dir` from another folder git runs its
+     hooks in that folder and reads its `.gitmodules`, so there the hooks must be alike as
+     below and neither folder may have submodules;
+   - in another worktree of the same repository, which shares branches, tags, remotes, hooks
+     and the shallow file but not HEAD, its upstream or FETCH_HEAD: only `push`, `fetch` and
+     `ls-remote` with an explicit remote (a configured name, a URL, an absolute path; `fetch
+     --all`), `push` with a refspec or `--all`, `--branches`, `--tags` or `--mirror`, no
+     per-worktree ref (`HEAD`, `@`, `refs/worktree/`, ...), `fetch` only into
+     `refs/remotes/` or `refs/tags/` and never when the call names FETCH_HEAD, only the
+     options in GIT_FLAGS, no submodules, no relative `core.hooksPath`, no per-worktree
+     configuration beyond the sparse-checkout keys (WORKTREE_LOCAL_KEYS), and no configuration
+     included per branch or folder (`includeIf "onbranch:"`, `"gitdir:"`). Hooks run in the
+     session's worktree instead of the other one (`hooks_alike()`, the maintainer's choice (b) on the
+     review of #140): no `reference-transaction` hook, and for a push no `pre-push` hook or the
+     agentic-github-flow one, byte for byte a version of `templates/pre-push` in this clone's
+     history, with both worktrees alike in its personal-data check's `exempt-dirs`, judged with
+     and without CLAUDE_PROJECT_DIR (the hook has it, a push from Bash does not); a push with
+     `--work-tree` passes.
+   Any other global option (`-c`, `--no-pager`), a `..` in a `-C` folder (git follows a symlink
+   before it, unlike `cd`), or a `~` the shell leaves literal (`--git-dir=~/x`, a quoted `~`)
+   passes the call. Where no lone call exists, a
+   `git` after a `cd` is named with `-C` beside the other rewrites, as a form that runs inside.
 
 It passes, so the call runs as before, whenever a faithful lone call does not exist or cannot be
 shown to match:
@@ -105,6 +132,7 @@ from __future__ import annotations
 
 import fnmatch
 import functools
+import hashlib
 import importlib.util
 import json
 import os
@@ -118,6 +146,41 @@ REASON_MARKER = "sandbox-network guard"  # a measurement can count refusals by t
 GIT_NETWORK = {"fetch", "pull", "push", "ls-remote"}
 GIT_VALUE_OPTS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path",
                   "--config-env"}
+GIT_WHERE_OPTS = {"-C", "--git-dir", "--work-tree"}  # where git runs; any other global passes
+# per subcommand: the options known to mean the same from any worktree of the repository, and
+# those of them that take the next word as their value; any other option passes the call
+GIT_FLAGS = {
+    "push": {"-f", "--force", "-u", "--set-upstream", "--all", "--branches", "--tags",
+             "--mirror", "-d", "--delete", "-n", "--dry-run", "--porcelain", "-q", "--quiet",
+             "-v", "--verbose", "--progress", "--no-progress", "--follow-tags",
+             "--no-follow-tags", "--verify", "--no-verify", "--atomic", "--no-atomic",
+             "--force-with-lease", "--no-force-with-lease", "--force-if-includes",
+             "--no-force-if-includes", "--prune", "--thin", "--no-thin", "-4", "--ipv4", "-6",
+             "--ipv6", "--no-recurse-submodules", "--signed", "--no-signed", "-o",
+             "--push-option"},
+    "fetch": {"--all", "-a", "--append", "--atomic", "--dry-run", "-f", "--force", "-k", "--keep",
+              "--multiple", "-p", "--prune", "-P", "--prune-tags", "-n", "--no-tags", "-t",
+              "--tags", "--auto-gc", "--no-auto-gc", "--write-fetch-head",
+              "--no-write-fetch-head", "-q", "--quiet", "-v", "--verbose", "--progress",
+              "--no-progress", "--unshallow", "--update-shallow", "-4", "--ipv4", "-6", "--ipv6",
+              "--no-recurse-submodules", "--prefetch", "--refetch", "--show-forced-updates",
+              "--no-show-forced-updates", "--write-commit-graph", "--no-write-commit-graph",
+              "--depth", "--deepen", "--shallow-since", "--shallow-exclude", "-j", "--jobs", "-o",
+              "--server-option", "--negotiation-tip"},
+    "ls-remote": {"-h", "--heads", "-b", "--branches", "-t", "--tags", "--refs", "-q", "--quiet",
+                  "--exit-code", "--get-url", "--symref", "-o", "--server-option", "--sort"},
+}
+GIT_TAKES_VALUE = {"-o", "--push-option", "--server-option", "--depth", "--deepen",
+                   "--shallow-since", "--shallow-exclude", "-j", "--jobs", "--negotiation-tip",
+                   "--sort"}
+GIT_EVERY_REF = {"--all", "--branches", "--tags", "--mirror"}  # push: refs without a refspec
+# per-worktree configuration keys that do not change a network command (merge_landing.py and
+# sparse checkouts set them); any other key in a worktree's config.worktree passes the call
+WORKTREE_LOCAL_KEYS = {"core.sparsecheckout", "core.sparsecheckoutcone", "core.untrackedcache",
+                       "index.sparse", "sparse.expectfilesoutsideofpatterns"}
+# a ref whose meaning differs between worktrees: HEAD and its kin (ORIG_HEAD, FETCH_HEAD ...),
+# `@` and `@{...}`, and the per-worktree ref namespaces
+WORKTREE_REF = re.compile(r"HEAD|@|^(refs/(worktree|bisect|rewritten)/|main-worktree/|worktrees/)")
 # gh: commands that take -R; those that do not depend on the folder; those that act on it
 GH_REPO_FLAG = {"issue", "pr", "release", "run", "workflow", "label", "cache", "ruleset",
                 "variable", "secret", "browse"}
@@ -1083,9 +1146,276 @@ def rewrite_ssh(cmd: list[Word], directory: str) -> list[Word]:
     return out + cmd[end:]
 
 
-def rewrite(kind: str, cmd: list[Word], directory: str, cwd: str) -> list[Word]:
+def git_where(cmd: list[Word]) -> tuple[list[tuple[str, str]], int]:
+    """git's `-C`, `--git-dir` and `--work-tree` before the subcommand, as (option, literal
+    value) pairs, and the subcommand's index; Unsafe for any other global option (`-c` and the
+    like change what git does) or a value the shell computes."""
+    pairs, i = [], 1
+    while i < len(cmd) and cmd[i].value.startswith("-"):
+        name, eq, attached = cmd[i].raw.partition("=")
+        if name in ("--git-dir", "--work-tree") and eq:
+            raw, i = attached, i + 1
+        elif cmd[i].value in GIT_WHERE_OPTS and i + 1 < len(cmd):
+            name, raw, i = cmd[i].value, cmd[i + 1].raw, i + 2
+        else:
+            raise Unsafe(f"the git option {cmd[i].value}")
+        value = dequote(raw)
+        if re.search(r"[$`]", raw) or not value or value.startswith("~") and (
+                eq or not raw.startswith("~")):  # the shell keeps `~` after `=` and in quotes
+            raise Unsafe("a computed or literal-tilde git folder")
+        if name == "-C" and ".." in value.split("/"):  # git follows a symlink before `..`
+            raise Unsafe("`..` in a -C folder")
+        pairs.append((name, os.path.expanduser(value) if raw.startswith("~") else value))
+    return pairs, i
+
+
+def where_args(pairs: tuple[tuple[str, str], ...]) -> list[str]:
+    args = []
+    for name, value in pairs:
+        args += [name, value] if name == "-C" else [f"{name}={value}"]
+    return args
+
+
+def git_repository(directory: str, pairs: tuple[tuple[str, str], ...]) -> tuple[str, str, str]:
+    """(git dir, common dir, top level or '') of what git finds in `directory` with these
+    options; Unsafe when it finds no repository."""
+    args = where_args(pairs)
+    found = git_out(directory, *args, "rev-parse", "--path-format=absolute", "--absolute-git-dir",
+                    "--git-common-dir").splitlines()
+    if len(found) != 2:
+        raise Unsafe("no repository there")
+    top = git_out(directory, *args, "rev-parse", "--show-toplevel")
+    return (os.path.realpath(found[0]), os.path.realpath(found[1]),
+            os.path.realpath(top) if top else "")
+
+
+def git_folder(directory: str, pairs: list[tuple[str, str]]) -> str:
+    """The folder git works in after its `-C` options."""
+    for name, value in pairs:
+        if name == "-C":
+            directory = absolute(value, directory)
+    return os.path.realpath(directory)
+
+
+def git_arguments(sub: str, args: list[Word]) -> tuple[set[str], list[str]]:
+    """The options and the positional words of a network subcommand; Unsafe for an option this
+    hook does not know to mean the same from another worktree."""
+    known, options, positional, i = GIT_FLAGS.get(sub, set()), set(), [], 0
+    while i < len(args):
+        v = args[i].value
+        if v == "--":
+            positional += [w.value for w in args[i + 1:]]
+            break
+        if v.startswith("--"):
+            name, eq, value = v.partition("=")
+            if name not in known or (eq and name == "--force-with-lease"
+                                     and WORKTREE_REF.search(value)):
+                raise Unsafe(f"the {sub} option {v}")
+            options.add(name)
+            i += 2 if name in GIT_TAKES_VALUE and not eq else 1
+        elif v.startswith("-") and len(v) > 1:
+            letters = [f"-{c}" for c in v[1:]]
+            if any(c not in known for c in letters) or any(
+                    c in GIT_TAKES_VALUE for c in letters[:-1]):
+                raise Unsafe(f"the {sub} option {v}")
+            options.update(letters)
+            i += 2 if letters[-1] in GIT_TAKES_VALUE else 1
+        else:
+            positional.append(v)
+            i += 1
+    return options, positional
+
+
+def fixed_url(value: str) -> bool:
+    """A repository URL that names the same repository from every folder: a URL with a scheme
+    (`file://` only with an absolute path), `host:path`, an absolute path or `~/…`."""
+    if value.startswith("file://"):
+        return value.startswith("file:///")
+    return (value.startswith(("/", "~")) or remote_operand(value)
+            or bool(re.match(r"[A-Za-z][A-Za-z0-9+.-]*://", value)))
+
+
+def git_remote(value: str, session: str) -> bool:
+    """A remote the same from every folder: a fixed URL, or a configured remote whose every
+    URL and push URL is one (a relative one names another repository from another folder)."""
+    lines = [line.split() for line in git_out(session, "remote", "-v").splitlines()]
+    urls = [parts[1] for parts in lines if len(parts) >= 2 and parts[0] == value]
+    return all(fixed_url(u) for u in urls) if urls else fixed_url(value)
+
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+@functools.lru_cache(maxsize=1)
+def template_blobs() -> frozenset[str]:
+    """The git blob ids of every version of templates/pre-push in the clone this script lives
+    in (its history, and the file as it is now): an installed hook equal to one of them is the
+    agentic-github-flow pre-push hook, whatever version the repository copied."""
+    root = os.path.normpath(os.path.join(HERE, "..", "..", ".."))
+    blobs = set()
+    try:
+        with open(os.path.join(root, "templates", "pre-push"), "rb") as handle:
+            blobs.add(blob_id(handle.read()))
+    except OSError:
+        pass
+    for line in git_out(root, "log", "--format=", "--raw", "--no-abbrev", "--",
+                        "templates/pre-push").splitlines():
+        parts = line.split()
+        if len(parts) >= 5 and parts[0].startswith(":"):
+            blobs.update(p for p in parts[2:4] if p.strip("0"))
+    return frozenset(blobs)
+
+
+def blob_id(data: bytes) -> str:
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+@functools.lru_cache(maxsize=1)
+def personal_data():
+    """The personal-data guard beside this file, the owner of `exempt-dirs`."""
+    spec = importlib.util.spec_from_file_location(
+        "pre_tool_personal_data", os.path.join(HERE, "pre_tool_personal_data.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def hooks_alike(sub: str, hooks_dir: str, target_top: str, session_top: str) -> bool:
+    """Whether the repository's hooks do the same for this command run from the session's
+    worktree as from the other one (review of #140, finding 2; the maintainer chose (b)): no
+    reference-transaction hook, and for a push no pre-push hook or the agentic-github-flow one,
+    which reads refs and objects only, apart from its personal-data check, which `exempt-dirs`
+    switches off by the worktree's folder: both worktrees must be treated alike there."""
+    if os.path.lexists(os.path.join(hooks_dir, "reference-transaction")):
+        return False
+    pre_push = os.path.join(hooks_dir, "pre-push")
+    if sub != "push" or not os.path.lexists(pre_push):
+        return True
+    try:
+        with open(pre_push, "rb") as handle:
+            if blob_id(handle.read()) not in template_blobs():
+                return False
+        return bool(target_top) and all(alike_exempt(target_top, session_top, project)
+                                        for project in (os.environ.get("CLAUDE_PROJECT_DIR"),
+                                                        None))
+    except Exception:  # unreadable hook, a missing or failing personal-data guard
+        return False
+
+
+def alike_exempt(target_top: str, session_top: str, project: str | None) -> bool:
+    """Both worktrees alike in `exempt-dirs` with CLAUDE_PROJECT_DIR as given: the hook judges
+    with Claude Code's variable set, the pre-push hook of a push from Bash runs without it
+    (review of #140, finding 3 of the second round), so the guard asks under both."""
+    saved = os.environ.pop("CLAUDE_PROJECT_DIR", None)
+    try:
+        if project:
+            os.environ["CLAUDE_PROJECT_DIR"] = project
+        exempt = personal_data().exempt_session
+        return exempt(target_top) == exempt(session_top)
+    finally:
+        os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        if saved is not None:
+            os.environ["CLAUDE_PROJECT_DIR"] = saved
+
+
+def no_submodules(common: str, *tops: str) -> None:
+    """Unsafe when the repository has submodules or either work tree a `.gitmodules`: git reads
+    it from the work tree it runs in, which differs between the two."""
+    if os.path.isdir(os.path.join(common, "modules")) or any(
+            top and os.path.exists(os.path.join(top, ".gitmodules")) for top in tops):
+        raise Unsafe("submodules")
+
+
+def same_hooks(sub: str, cwd: str, common: str, target_top: str, session_top: str) -> None:
+    """Unsafe unless the hooks git runs for `sub` in `target_top` do the same in `session_top`."""
+    hooks = git_out(cwd, "config", "core.hooksPath")
+    if hooks and not os.path.isabs(os.path.expanduser(hooks)):
+        raise Unsafe("hooks found relative to the worktree")
+    if not hooks_alike(sub, os.path.expanduser(hooks) if hooks else
+                       os.path.join(common, "hooks"), target_top, session_top):
+        raise Unsafe("a hook that may do otherwise in the session's worktree")
+
+
+def lone_git(cmd: list[Word], directory: str, cwd: str, fetch_head: bool) -> list[Word]:
+    """`git <subcommand> …` run from `cwd` where it does the same as `cmd` run from `directory`;
+    Unsafe when that cannot be shown.
+
+    The session's own folder: always the same. The same worktree from another folder (a
+    subfolder, `--git-dir`): the same HEAD and upstream, so only a relative path, pull (it
+    changes the folder's files) and unknown options pass. Another worktree of the same
+    repository: branches, tags, remotes, hooks and the shallow file are shared, HEAD, its
+    upstream and FETCH_HEAD are not; so it needs an explicit remote, a refspec or `--all`-like
+    option for push, refs that are not per-worktree, no pull, no FETCH_HEAD read anywhere in
+    the call, no submodules and no per-worktree configuration."""
+    pairs, at = git_where(cmd)
+    sub, args = cmd[at].value, cmd[at + 1:]
+    here = os.path.realpath(cwd)
+    if git_folder(directory, pairs) == here and all(name == "-C" for name, _ in pairs):
+        return [cmd[0]] + cmd[at:]
+    target = git_repository(directory, tuple(pairs))
+    session = git_repository(cwd, ())
+    if target[1] != session[1]:
+        raise Unsafe("another repository")
+    if sub == "pull":
+        raise Unsafe("pull changes the other folder's files")
+    options, positional = git_arguments(sub, args)
+    remote = positional[0] if positional else None
+    if remote is not None and not git_remote(remote, cwd):
+        raise Unsafe("a local path or an unknown remote")
+    if sub == "push" and any(name == "--work-tree" for name, _ in pairs):
+        raise Unsafe("the push's hooks would run in another work tree")
+    if target[0] == session[0]:
+        if target[2] != session[2]:  # `--git-dir` alone: git's hooks run in the folder it is in
+            same_hooks(sub, cwd, session[1], target[2], session[2])
+            no_submodules(session[1], target[2], session[2])
+        return [cmd[0]] + cmd[at:]
+    # another worktree of the same repository
+    if remote is None and not (sub == "fetch" and "--all" in options):
+        raise Unsafe("the remote depends on the other worktree's branch")
+    if sub == "fetch" and fetch_head:
+        raise Unsafe("FETCH_HEAD is each worktree's own")
+    if "--multiple" in options and not all(git_remote(p, cwd) for p in positional):
+        raise Unsafe("fetch --multiple with an unknown remote")
+    refs = positional[1:] if "--multiple" not in options else []
+    if sub == "push" and not refs and not options & GIT_EVERY_REF:
+        raise Unsafe("what is pushed depends on the other worktree's branch")
+    for ref in refs if sub != "ls-remote" else []:
+        if ref == "tag":
+            continue
+        src, _, dst = ref.lstrip("+").partition(":")
+        if WORKTREE_REF.search(src) or WORKTREE_REF.search(dst):
+            raise Unsafe("a per-worktree ref")
+        if sub == "fetch" and dst and not dst.startswith(("refs/remotes/", "refs/tags/")):
+            raise Unsafe("fetch into a local branch")
+    if git_out(cwd, "config", "--bool", "extensions.worktreeConfig") == "true" and any(
+            key not in WORKTREE_LOCAL_KEYS
+            for folder, args in ((directory, where_args(tuple(pairs))), (cwd, []))
+            for key in git_out(folder, *args, "config", "--worktree", "--name-only",
+                               "--list").lower().splitlines()):
+        raise Unsafe("per-worktree configuration")
+    if re.search(r"^includeif\.(onbranch|gitdir)", git_out(
+            cwd, "config", "--name-only", "--get-regexp", r"^includeif\."), re.M | re.I):
+        raise Unsafe("configuration included per branch or folder")
+    same_hooks(sub, cwd, session[1], target[2], session[2])
+    no_submodules(session[1], target[2], session[2])
+    return [cmd[0]] + cmd[at:]
+
+
+def rewrite_git(cmd: list[Word], directory: str, cwd: str, fetch_head: bool) -> list[Word]:
+    """The lone git call that does the same from `cwd`, else the call with `-C <directory>`,
+    which matches no entry (measured) and so is only named, never asked for."""
+    try:
+        return lone_git(cmd, directory, cwd, fetch_head)
+    except Unsafe:
+        return [cmd[0], quote("-C"), quote(directory)] + cmd[1:]
+
+
+def rewrite(kind: str, cmd: list[Word], directory: str, cwd: str,
+            fetch_head: bool = False) -> list[Word]:
     """The command as a lone call that does the same from `cwd`; Unsafe when there is none."""
     same = os.path.realpath(directory) == os.path.realpath(cwd)
+    if kind == "git":
+        return rewrite_git(cmd, directory, cwd, fetch_head)
     if kind == "gh":
         return rewrite_gh(cmd, directory, same)
     if kind == "script":
@@ -1097,9 +1427,7 @@ def rewrite(kind: str, cmd: list[Word], directory: str, cwd: str) -> list[Word]:
         return cmd
     if kind in ("scp", "rsync"):
         return rewrite_copy(kind, cmd, directory)
-    if kind == "ssh":
-        return rewrite_ssh(cmd, directory)
-    return [cmd[0], quote("-C"), quote(directory)] + cmd[1:]  # git: matches no entry (measured)
+    return rewrite_ssh(cmd, directory)
 
 
 # --- the decision ------------------------------------------------------------------------------
@@ -1218,22 +1546,25 @@ def judge(command: str, cwd: str, patterns: list[str] | None = None) -> str | No
                             for w in ftokens[1:])):
                     raise Unsafe("output piped into a command, or a filter that writes a file")
                 filters.append(rest[k])
-            new = prefix + (script_form or rewrite(kind, cmd, directory, cwd))
+            new = prefix + (script_form or rewrite(kind, cmd, directory, cwd,
+                                                   "FETCH_HEAD" in command))
             ok = matches(" ".join(w.raw for w in new[len(prefix):]), patterns)
             written_ok = (matches(" ".join(w.raw for w in cmd), patterns) and not filters
                           and not part["heredoc"] and not part["subst"])
             lone_all = lone_all and written_ok
-            found.append((kind, new, ok, bool(filters), written_ok))
+            moved = kind == "git" and len(new) - len(prefix) < len(cmd)  # lost -C or --git-dir
+            found.append((kind, new, ok, bool(filters), written_ok, moved))
     except (Unsafe, Unparsed):
         return None
     if not found:
         return None
     if had_cd:
-        if not any(ok for _, _, ok, _, _ in found):
+        if not any(f[2] for f in found):
             return None  # e.g. only git for another folder: no form of it is excluded
-    else:  # without a cd only a script outside its excluded form is refused
-        if not any(kind == "script" and ok and not (written_ok and lone_all)
-                   for kind, _, ok, _, written_ok in found):
+    else:  # without a cd: a script outside its excluded form, or git through -C or --git-dir
+        if not any(ok and ((kind == "script" and not (written_ok and lone_all))
+                           or (kind == "git" and moved))
+                   for kind, _, ok, _, written_ok, moved in found):
             return None
     return reason(found, had_cd, directory)
 
@@ -1274,15 +1605,24 @@ def loose_match(parts: list[dict], patterns: list[str]) -> str | None:
 
 
 def reason(found: list, had_cd: bool, directory: str) -> str:
-    lines = [f"Refused by the {REASON_MARKER}: "
-             + ("a Bash call that starts with `cd` stays in the sandbox, where this network "
-                "command fails." if had_cd else
-                "this script call does not match its excluded entry, so it stays in the "
-                "sandbox, where it cannot reach the network.")
+    if had_cd:
+        why = ("a Bash call that starts with `cd` stays in the sandbox, where this network "
+               "command fails.")
+    elif any(f[0] == "script" for f in found):
+        why = ("this script call does not match its excluded entry, so it stays in the "
+               "sandbox, where it cannot reach the network.")
+    else:
+        why = ("`git -C <dir>` and `--git-dir` never match an excluded command, so this call "
+               "stays in the sandbox, where git cannot reach the remote. From your own "
+               "worktree the lone call does the same: worktrees of one repository share "
+               "branches, tags and remotes.")
+        if any(f[0] == "git" and any(w.value == "fetch" for w in f[1]) for f in found):
+            why += " A fetch fills FETCH_HEAD in your own worktree."
+    lines = [f"Refused by the {REASON_MARKER}: " + why
              + " Run it as its own call; this form matches an entry of your "
                "`sandbox.excludedCommands`, so it runs outside the sandbox as configured:"]
     filtered, needs_value = False, False
-    for kind, new, ok, filters, _ in found:
+    for kind, new, ok, filters, *_ in found:
         line = "    " + " ".join(w.raw for w in new)
         if not ok:
             line += ("   [matches no excluded command (`git -C` and `--git-dir` never do), so "
@@ -1301,7 +1641,7 @@ def reason(found: list, had_cd: bool, directory: str) -> str:
     if needs_value:
         lines.append("A variable in it has no value in a new call: put the value in literally "
                      "(compute it in an earlier call).")
-    if any(w.value == "<file>" for _, new, _, _, _ in found for w in new):
+    if any(w.value == "<file>" for _, new, *_ in found for w in new):
         lines.append("Write the body with the Write tool and pass its path as `--body-file`.")
     return "\n".join(lines)
 

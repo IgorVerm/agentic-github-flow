@@ -219,7 +219,11 @@ matches an entry of `sandbox.excludedCommands`. A call such as `cd <repo> && gh 
 matches: it runs inside, `gh` or `ssh` fails there, and the agent retries it with the sandbox
 disabled. The guard turns such a call away and names the lone call that does the same and
 matches one of the person's entries, for example `gh pr list -R owner/repo`. It only refuses: it
-never lets a call run that would not run without it.
+never lets a call run that would not run without it. `git -C <dir> push|fetch|pull|ls-remote`
+and `--git-dir` never match an entry either: when `<dir>` is the session's folder, or another
+worktree of the same repository and the call names its remote and ref (`git -C <worktree> push
+origin <branch>`), the guard names the lone `git push origin <branch>`, which does the same from
+the session's own worktree.
 
 It does nothing until `sandbox.enabled` is true in `~/.claude/settings.json` and
 `excludedCommands` lists the network commands (for example `gh *`, `ssh *`, `git push *`), and

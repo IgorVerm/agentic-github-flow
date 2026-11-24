@@ -57,8 +57,10 @@ Checked on 2026-11-22.
     Claude Code settings (#116, `codex_tools.py`). What a turn keeps in its context (#149): each
     tool output capped at 2,000 tokens (`tool_output_token_limit`), a tool call's full log in a
     file, and a fresh thread per round with the worker's hand-over instead of `--resume`; offline
-    tests only, not yet in a live job (the Codex weekly limit was spent). A cap on Codex's own
-    subagents waits on the maintainer's choice of number (measured on #149).
+    tests only, not yet in a live job (the Codex weekly limit was spent); and at most 2 of
+    Codex's own subagents at a time (Igor, "2 is goed"), with the note asking for subagents
+    without the parent's context. Not measured live: which of the two keys Codex's multi-agent
+    v2 honours, and whether the root thread counts toward the 2.
 - Efficient design (#37): the core skill `efficient-design` is a checklist at design and review
   (work per frame, request or job run grows with what changed, not with all data), and the core
   rule *Work grows with what changed* has the author write an `Efficient design:` line in the

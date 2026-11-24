@@ -50,7 +50,8 @@ A row of the repository's `## Issue chats settings` (the method's §1), owned he
    `~/.ssh`, `~/.aws`, `~/.netrc`, `~/.gnupg`, `~/.config/gh`, `.env` files, `*.pem`, `*.key`,
    `*.p12`, and what the user's and the managed Claude Code settings and the project settings of
    the worktree it is given deny reads of, read at each run); approval `never`, the person's
-   Codex configuration and rules ignored, no hooks, no apps or plugins. The time limit is the
+   Codex configuration and rules ignored, no hooks, no apps or plugins, at most 2 of Codex's
+   own subagents at a time, each tool output capped in its context. The time limit is the
    settings row's number after the model, else 60 minutes. The effort is its value from the
    effort list, passed as `--effort` on every turn, each `--resume` too (a resume does not keep
    the effort of the turn before it, measured 2026-11-22); without it a turn runs at the model's

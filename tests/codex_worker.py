@@ -36,7 +36,8 @@ a network host only the project allows, a call outside the rules or to a tool no
 running, Codex not told its tools, a tool's server outside its own sandbox profile or still
 running after the turn, or a tool list that is not JSON accepted (a stand-in for `sandbox-exec`;
 `tests/codex_tools.py` runs the real one); a turn, a resume or the next round without the cap on
-each tool output, a next round (a turn without `--resume` in a job) that resumes the thread or
+each tool output or on Codex's subagents at a time (under both keys), a note that does not ask
+for subagents without the parent's context, a next round (a turn without `--resume` in a job) that resumes the thread or
 lacks the hand-over, or a first turn or a resume that gets one (#149). On Windows only the
 refusals run. Offline.
 """
@@ -55,6 +56,8 @@ TOOL = os.path.join(SCRIPTS, 'codex_worker.py')
 IMPORT = os.path.join(SCRIPTS, 'codex_import.py')
 THREAD = '01a1f914-a724-7ab3-8ad0-ce1133d3c4f7'
 NEW_THREAD = '01a1f999-0000-7000-8000-000000000001'
+SUBAGENT_CAP = ('agents.max_concurrent_threads_per_session=2',
+                'features.multi_agent_v2.max_concurrent_threads_per_session=2')
 WINDOWS = os.name == 'nt'
 ENV = dict(os.environ, GIT_AUTHOR_NAME='Test', GIT_AUTHOR_EMAIL='test@example.com',
            GIT_COMMITTER_NAME='Test', GIT_COMMITTER_EMAIL='test@example.com',
@@ -546,6 +549,11 @@ def main():
         check('report effort', report.get('effort') == 'xhigh', str(report))
         check('each tool output Codex keeps is capped (#149)',
               'tool_output_token_limit=2000' in configs, str(configs))
+        check('at most 2 subagents at a time, under both keys (#149)',
+              set(SUBAGENT_CAP) <= set(configs), str(configs))
+        check('the note asks for subagents without the parent\'s context',
+              'fork_turns="none"' in call['stdin'] and 'At most 2' in call['stdin'],
+              call['stdin'])
         check('a new job is the first round, with no hand-over', report.get('round') == 'first'
               and '[Hand-over' not in call['stdin'], str(report.get('round')))
         check('the note tells Codex the cap and asks for a final message to carry on from',
@@ -623,7 +631,9 @@ def main():
             inner = [called['argv'][i + 1] for i, v in enumerate(called['argv']) if v == '-c']
             profile = [c for c in configs if not c.startswith(('model_reasoning_effort=',
                                                                'approval_policy=',
-                                                               'tool_output_token_limit='))]
+                                                               'tool_output_token_limit=',
+                                                               'agents.',
+                                                               'features.multi_agent_v2.'))]
             expected = profile[:3]
             if called['argv'][called['argv'].index('--') + 4] == 'settings':
                 # Read before the project's rules are known: the profile without them.
@@ -655,8 +665,8 @@ def main():
         check('resume reports the thread', report_of(result).get('thread_id') == THREAD)
         check('resume makes no new setup', 'setup' not in report_of(result))
         check('a resume keeps the cap and carries on the thread without a hand-over',
-              'tool_output_token_limit=2000' in configs and
-              report_of(result).get('round') == 'resume' and '[Hand-over' not in call['stdin'],
+              'tool_output_token_limit=2000' in configs and set(SUBAGENT_CAP) <= set(configs)
+              and report_of(result).get('round') == 'resume' and '[Hand-over' not in call['stdin'],
               str(configs))
 
         # The next round (#149): a turn without --resume in the job is a fresh thread whose
@@ -675,8 +685,9 @@ def main():
               before in handover[1] and
               handover[1].index('done; question: none') <
               handover[1].index('Do the task of issue #1.'), call['stdin'])
-        check('the next round keeps the cap',
-              '-c' in argv and 'tool_output_token_limit=2000' in argv, str(argv))
+        check('the next round keeps the caps',
+              'tool_output_token_limit=2000' in argv and set(SUBAGENT_CAP) <= set(argv),
+              str(argv))
 
         # The export and the import. The export runs under the job's project denials, kept from
         # when the job was made, even after the project's settings drop them.

@@ -27,7 +27,7 @@ PLAIN_NEVER_FIRST = '[]{}>|*&!%@`,?-#'  # YAML indicators that cannot start a pl
 # bytes; set 2026-11-23 (#125). Raise a number only in the change that grows the skill.
 BODY_BUDGET = {
     'archive-finished-chats': 6157, 'check-web-deploy': 5275, 'cleanup-merged': 7737,
-    'codex-issue-chats': 7232, 'codex-worker': 9348, 'efficient-design': 3676,
+    'codex-issue-chats': 7232, 'codex-worker': 9437, 'efficient-design': 3676,
     'issue-handover': 19051, 'open-issue': 2852, 'repo-docs': 3472, 'requirements': 7191,
     'review-change': 5701, 'review-security': 5732, 'ship-change': 13265, 'spec-first': 1250,
 }

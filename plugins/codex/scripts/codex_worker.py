@@ -96,6 +96,8 @@ resumes with it; `--json` events do not carry it):
              --skip-git-repo-check --ignore-user-config --ignore-rules
              [-c model_reasoning_effort="<effort>"]
              -c approval_policy="never" -c tool_output_token_limit=2000
+             -c agents.max_concurrent_threads_per_session=2
+             -c features.multi_agent_v2.max_concurrent_threads_per_session=2
              -c default_permissions="agf_codex_worker"
              -c permissions.agf_codex_worker.filesystem={…}
              -c permissions.agf_codex_worker.network.enabled=false
@@ -110,6 +112,15 @@ of pax_deorum#1019, 99% of the 14.6M characters of text output came from Codex's
 and 0.6% from the project's tools, so the cap belongs here, where it covers every command, not in
 each project's tools; `codex_tools.py` adds a file with the full log of a tool's call. The note
 tells Codex to send long output to a file and read the part it needs.
+
+Codex's own subagents stay on (the maintainer on #149: Codex needs them), at most `SUBAGENTS`
+(2) at a time (his word, 2026-11-24: "2 is goed"), under both keys that load in
+0.171.0-alpha.13: `agents.max_concurrent_threads_per_session` and the v2 table's own (measured on
+#149; Codex refuses unknown keys in both tables, and setting the v2 table does not switch v2 on).
+In that job 37 subagents made 55% of the requests, and 35 of them were forks of the whole
+context: `spawn_agent` takes `fork_turns`, `all` by default, and no setting forces `none`, so
+the note asks for `fork_turns="none"` with a self-contained task. Not measured live yet: which
+key v2 honours, and whether the root thread counts toward the 2.
 
 **A round** is one task the chat hands Codex in a prompt of its own (a part of the issue, a
 round of a model); the chat decides where one ends, since it writes the prompts and reads the
@@ -258,6 +269,11 @@ FEATURES_OFF = ('hooks', 'shell_snapshot', 'apps', 'plugins', 'skill_mcp_depende
 # about 8,000 characters. Measured on the job of pax_deorum#1019: 99% of the text output came
 # from Codex's own commands, and an 8,000-character cap cuts 30% of it.
 OUTPUT_TOKENS = 2000
+# Codex's own subagents at a time (the maintainer on #149, 2026-11-24: "2 is goed"), under both keys that
+# load in 0.171.0-alpha.13 (measured on #149); setting the v2 table does not switch v2 on.
+SUBAGENTS = 2
+SUBAGENT_KEYS = ('agents.max_concurrent_threads_per_session',
+                 'features.multi_agent_v2.max_concurrent_threads_per_session')
 HANDOVER_MAX = 6000  # characters of a turn's last message kept for the next round's hand-over
 REPORT_MAX = 8 * 1024 * 1024  # a 1 MiB prompt, JSON-escaped
 LOG_DAYS = 30
@@ -270,7 +286,9 @@ already has, so `git status`, `git add` and `git commit` work as usual. Do not c
 folder, do not unset or change those variables, and never push (you have no network). Commit
 your work on this branch. You cannot ask a question while you work: put a question or a blocker
 in your final message. A command's output beyond about %(tokens)d tokens is cut in the middle:
-send long output to a file under $TMPDIR and read the part you need. Write your final message so
+send long output to a file under $TMPDIR and read the part you need. At most %(subagents)d
+subagents run at a time; when you spawn one, pass fork_turns="none" and a message that holds
+the whole task, since a fork of your context re-sends all of it. Write your final message so
 that a fresh thread can carry on from it alone: what you did and committed, what is left, where
 your outputs are, and any question.
 
@@ -824,6 +842,7 @@ def codex_command(codex, model, effort, resume, job, last_message, marker, extra
     variables.update(extra or {})
     values = ['model_reasoning_effort=%s' % toml_string(effort)] if effort else []
     values += ['approval_policy="never"', 'tool_output_token_limit=%d' % OUTPUT_TOKENS]
+    values += ['%s=%d' % (key, SUBAGENTS) for key in SUBAGENT_KEYS]
     values += profile_config(job)
     values += ['shell_environment_policy.set.%s=%s' % (name, toml_string(value))
                for name, value in variables.items()]
@@ -1029,7 +1048,7 @@ def run_turn(args, codex, where):
         handover = HANDOVER % {'base': state.get('base'),
                                'message': message.strip() or '(the last turn left none)'}
     prompt = NOTE % {'work': os.path.join(job, 'work'), 'branch': branch,
-                     'tokens': OUTPUT_TOKENS} + \
+                     'tokens': OUTPUT_TOKENS, 'subagents': SUBAGENTS} + \
         codex_tools.note(served, sys.executable) + handover + prompt
 
     marker = secrets.token_hex(16)

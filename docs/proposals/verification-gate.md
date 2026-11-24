@@ -30,8 +30,8 @@ testable goal on every piece of work, set before the work starts.
    Where no cheap check exists, the issue says so and names who judges.
 2. **A `verify` skill** that holds the procedure, and a `## Verification` section in each
    repository's `HANDOFF.md` that holds that repository's facts: its fast command, its full
-   command, how to run the product, and its critical systems, which an audit agent lists
-   and an independent reviewer checks.
+   command, how to run the product, and its critical systems, which an audit agent lists.
+   That an independent reviewer checks the list is this proposal's design, not your words.
 3. **One line per landing,** `Verified:`, naming the kind of evidence, or `none` with a
    reason. Checked by the reviewer and by the two landing scripts, starting in observe mode.
 4. **A check made for an issue stays with that issue,** on the issue itself, not in the
@@ -91,7 +91,7 @@ overview chat.
 
 | Question | His words | Ruling, as read here |
 |---|---|---|
-| 1. Does the audit agent's list of critical systems wait for the maintainer's word at the merge? | "audit agent kiest er zijn veel teveel tests om als mens door te gaan" (the audit agent chooses; there are far too many tests to go through as a person). | No. The audit agent decides and the independent reviewer checks. The section stays guarded against an agent that is working on a change (§B.2). |
+| 1. Does the audit agent's list of critical systems wait for the maintainer's word at the merge? | "audit agent kiest er zijn veel teveel tests om als mens door te gaan" (the audit agent chooses; there are far too many tests to go through as a person). | No. The audit agent decides. Beyond his words, and the proposal's own design (§B.2): an independent reviewer checks the audit, and the section stays guarded against an agent that is working on a change. |
 | 2. "May be left behind", or "is left behind"? | "wat raadt fable aan ik ben open voor allebei" (what does Fable recommend; I am open to both). | Left to the author: the strict reading (§B.6). |
 | 3. Does a check that once caught something stay, although it protects nothing critical? | "nee want dan kan je een test die een mini bug opvangt zogezegd eeuwig moeten houden dat is onwerkbaar en beschermt niets in de toekomst" (no, because then a test that catches a tiny bug would have to be kept forever, so to speak; that is unworkable and protects nothing in the future). | No. Having caught something is no reason to keep a check, in the first pruning pass as in every later one (§B.4). |
 | 4. Where does a task check live until the landing? | "laat fable de beste optie kiezen" (let Fable choose the best option). | Left to the author: on the issue (§B.6). |
@@ -179,11 +179,19 @@ two halves:
 
 - **The commands and the gate** (`fast`, `full`, `drive`, `check paths`,
   `verification gate`) change on the maintainer's word, as the other guarded sections do.
-- **The list of critical systems** does not wait for him (ruling 1 of the third round). A
-  change to `critical paths` lands as an audit change: a pull request that changes that
-  list and nothing else, written by an audit agent and approved by an independent
-  reviewer. `merge_pr.py` refuses the automatic merge of any other change that touches
-  the list, so an agent cannot narrow it in the change it is working on. Where a
+- **The list of critical systems** does not wait for him (ruling 1 of the third round).
+  How it changes without him is this proposal's design. The list is the `critical paths`
+  row and, under the table, one line per entry with its reason. A change to it lands as
+  an audit change: a landing that changes those lines and nothing else, for an issue of
+  its own, written by an audit agent and approved by an independent reviewer. In
+  local-main mode it is its own landing, with the verdict on the audit's issue.
+
+  What each part can enforce: `merge_pr.py` sees only the shape of the diff. It refuses
+  the automatic merge of a change that touches the list together with anything else, so
+  no agent narrows the list in the change it is working on. It cannot see who wrote a
+  list-only change: every agent posts under one account. That a list-only change comes
+  from an audit is for the reviewer to establish (below). So the guard against narrowing
+  the list in a second, separate change is the reviewer, not the script. Where a
   repository has automatic merging off, the maintainer's merge of an audit change is the
   ordinary one: he is not asked to read the list.
 
@@ -211,10 +219,13 @@ section is first written, and again at each `Review by:` date. An agent that is 
 a change never edits the list for that change (P2). If it thinks a part is missing from
 the list, it says so on an issue for the next audit.
 
-The reviewer of an audit change checks what a person would not have time to: that every
-entry answers the audit's question with a reason that names the loss, that every removed
-entry says what changed since it was listed, that no part with an irreversible loss is
-missing (the reviewer names any it finds), and that the pull request holds nothing else.
+The reviewer of an audit change checks what a person would not have time to: that the
+change belongs to an audit issue and its session has no other change open or in hand
+that the list bears on (otherwise it is refused, whatever it says); that every
+entry answers the audit's question with a reason that names the loss; that every removed
+entry says what changed in the code since it was listed, and a removal without that is
+refused; that no part with an irreversible loss is missing (the reviewer names any it
+finds); and that the change holds nothing else.
 The maintainer can read the list at any time and overrule an entry; nothing waits for him
 to do so.
 
@@ -235,7 +246,7 @@ Verified: <kind>: <evidence>
 
 | Kind | Meaning | Example of evidence |
 |---|---|---|
-| `goal` | The issue's check was run and met. A script made for it is named by its comment on the issue (§B.4). | `the check of #212: cargo test -p sim save_roundtrip, passes; failed before the fix` |
+| `goal` | The issue's check was run and met. A script or patch made for it is named by the URL of its comment on the issue (§B.4). | `the check of #212 (<comment URL>, a patch adding the test save_roundtrip): cargo test -p sim save_roundtrip, passes; failed before the fix` |
 | `tests` | Existing checks ran and passed. | `verify.py fast, 71 s` |
 | `standing-check` | A check was added to those that run on every change, for a critical system; names the defect it fails on. | `save_roundtrip fails when the version field is dropped` |
 | `run` | The product or tool was run and its behaviour observed. | `headless run, 600 frames, seed 7, no panic` |
@@ -311,7 +322,7 @@ gate.
 | | A task check | A standing check |
 |---|---|---|
 | Made for | One issue: it shows that issue's goal was met (§B.1). | A critical system: it shows that system still works after any change. |
-| Lives | On its issue, never in the repository (§B.6 gives the reasons). A command that uses what exists is the issue's `Check:` itself. A script made for the occasion is posted as a signed comment on the issue, in a code block with the command that runs it, at the moment it first fails, before the fix. The `Verified:` line names that comment and what the check showed. The reviewer saves the script outside the checkout, reads it and runs it against the head. | In the repository, under `check paths`, run by `fast` when its trigger matches and by `full` always. |
+| Lives | On its issue, never in the repository (§B.6 gives the reasons). A command that uses what exists is the issue's `Check:` itself. What was made for the occasion is posted as a signed comment on the issue, in a code block with the command that runs it, at the moment it first fails, before the fix. It is a script that drives the product from outside, or, where a check must be built with the code (a unit test in a compiled crate), a patch that adds it. The `Verified:` line names that comment by its URL and what the check showed. The reviewer reads it, then runs the script from outside the checkout against the head, or applies the patch in a throwaway worktree at the head, runs it and discards the worktree. The patch is never committed. | In the repository, under `check paths`, run by `fast` when its trigger matches and by `full` always. |
 | May be | Quick and specific: a script, a one-off command, a failing-then-passing test, a screenshot. | Only what passes the admission test below. |
 | Count and time | Not limited. | Not limited. They are measured and reported (§B.5), never a reason by themselves to refuse or to remove a check. |
 
@@ -344,7 +355,9 @@ for a judgment (P4). No coverage target: coverage rewards exactly the tests this
 
 A formatter, a linter or a type checker is not a standing check in this sense. It is a tool
 the `fast` command names: nobody in the repository writes or maintains its cases, so it is
-neither admitted nor pruned.
+neither admitted nor pruned. This is part of the author's first choice in §B.6, not the
+maintainer's words. A lint or format check written in the repository is a standing check
+like any other, and falls under both rules.
 
 **4. Which standing checks go: the pruning rule.** It is the admission test, applied to
 what exists. A standing check is kept when it protects a path under `critical paths` and a
@@ -439,9 +452,9 @@ check is added, and a task check always stays with its issue.
   looser reading an author could add such a check because it seemed useful, and the next
   pruning pass would remove it by that rule. Admission and pruning must be one criterion,
   or every pass undoes what was let in since the last one.
-- *One criterion needs no pruning routine.* With the strict reading the set of standing
-  checks changes only when the list of critical systems does, so a pruning pass follows an
-  audit and nothing else (§B.4, item 5).
+- *One criterion needs no pruning routine.* With the strict reading nothing outside the
+  list of critical systems can enter, so a pruning pass is needed only when the list
+  changes: after an audit and at no other time (§B.4, item 5).
 - *"When it seems useful" has been measured.* It is how this repository went from 12 to 34
   test files in a month with none removed (C.1).
 - *The agent loses nothing it needs.* It still works against a testable goal on every issue
@@ -462,16 +475,19 @@ pull request body, or a script committed outside `check paths`. Neither is chose
 |---|---|---|
 | A script committed outside `check paths` | The reviewer gets it with the checkout, at the exact head. | It stays in the repository after the landing, so the folder only grows, which is the problem this proposal exists to solve, moved one folder over. A later agent finds it, maintains it or runs it. Removing it before the merge moves the head the review verdict is pinned to. It needs a setting for the folder. |
 | The pull request body | Nothing in the repository. The reviewer sees it. | Local-main mode has no pull request. The author rewrites the body freely, so nothing shows the check existed before the fix. The check then belongs to the landing, while the goal it proves belongs to the issue. |
-| **A comment on the issue** (chosen) | Nothing in the repository. Both landing modes have the issue. The check sits beside the `Check:` it carries out, which the issue's author wrote (P2). Posted when it first fails, the comment's time and edit history show the check came before the fix, which is the first step of §B.1 made visible. If the defect returns a year later, the script is where the next agent looks first. | A comment holds one file of at most 65,536 characters. It leaves the machine, so the rules for secrets and personal data apply to it as to any comment. |
+| **A comment on the issue** (chosen) | Nothing in the repository. Both landing modes have the issue. The check sits beside the `Check:` it carries out, which the issue's author wrote (P2). Posted when it first fails, the comment's creation time against the first push of the fix shows the check came first, which is the first step of §B.1 made visible. If the defect returns a year later, the check is where the next agent looks first. | A comment holds at most 65,536 characters. It leaves the machine, so the rules for secrets and personal data apply to it as to any comment. A patch can stop applying once the code moves on; it has to apply at the head it proves, and no later. |
 
-What does not fit in a comment is not a task check. A check that needs several files or
+A test that must compile with the code fits as a patch (§B.4): the reviewer applies it at
+the head in a throwaway worktree, and it lands nowhere. What does not fit in a comment is
+not a task check. A check that needs several files or
 fixtures is the second kind of goal of §B.1: the harness is part of the work. A harness is
 a tool, committed and reviewed like the rest of the change and named under `drive`; the
 task check is then again a command that uses it. So nothing is committed that is not
 product, tool or standing check, and the section needs no folder for task checks.
 
-The reviewer runs only the comment the `Verified:` line names, signed by the author's
-agent, and reads it first, as it reads the change's own code.
+The reviewer runs only the comment the `Verified:` line names by URL, checks that the
+account that posted it is the one the change comes from (a signature can be typed by
+anyone who may comment), and reads it first, as it reads the change's own code.
 
 **One question left.** Your first-round ruling 4 has removed checks wait for you. Your
 third-round answer on the audit list gives as its reason that there are far too many tests
@@ -479,9 +495,15 @@ for a person to go through, and a pruning pass is where the most tests change at
 The proposal keeps ruling 4 as you gave it and makes your part one summary per pass
 (§B.3). The alternative that follows your newer reason: a removal outside the critical
 systems merges on the reviewer's approval, and only the removal of a check that protects a
-critical system waits for you. Recommendation: the alternative, after the first pruning
-pass of a repository has gone through you once, so that you have seen the rule applied
-before it runs without you.
+critical system waits for you. Its consequence, for you to weigh: the list changes on a
+reviewer's approval (§B.2), so under the alternative two changes in a row, one that drops
+an entry from the list and one that removes its checks, would pass with no person in
+between; the reviewer of the audit change is then the only guard. Recommendation: the
+alternative, after the first pruning pass of a repository has gone through you once, so
+that you have seen the rule applied before it runs without you. If the two changes in a
+row worry you, the remedy is that an audit change which removes an entry waits for you;
+that would narrow your ruling 1 of the third round, so it is yours to choose and not
+proposed here.
 
 # Part C. This repository as the first case
 
@@ -582,9 +604,9 @@ proposal's pull request, 184,566 tokens in 7 minutes.
 
 | Setting | Value | From |
 |---|---|---|
-| `fast` | `python3 tests/run_all.py --changed`: each entry of `TESTS` gets the path patterns that trigger it; `skills_format.py` and `repo_checks.py` always run (0.8 s together) | The reader's table in `HANDOFF.md`, made usable by a script |
+| `fast` | `python3 tests/run_all.py --changed`: each entry of `TESTS` gets the path patterns that trigger it; `skills_format.py` and `repo_checks.py` run on every change (0.8 s together) for as long as they stand, which the audit decides (next row) | The reader's table in `HANDOFF.md`, made usable by a script |
 | `full` | `python3 tests/run_all.py`, in CI on three systems | Today |
-| `critical paths` | For the audit agent to decide. A first guess, from the paths `merge_pr.py` already holds for the maintainer's word: `plugins/guards/**`, `plugins/core/scripts/merge_pr.py`, `push_branch.py`, `push_paths.py`, `landing.py`, `review_verdict.py`, `templates/pre-push`, `tools/installer.py`, `install.sh`, `install.ps1` | `EXCLUDED` in `merge_pr.py` |
+| `critical paths` | For the audit agent to decide. A first guess, from the paths `merge_pr.py` already holds for the maintainer's word: `plugins/guards/**`, `plugins/core/scripts/merge_pr.py`, `push_branch.py`, `push_paths.py`, `landing.py`, `review_verdict.py`, `templates/pre-push`, `tools/installer.py`, `install.sh`, `install.ps1`. Under the new pruning rule that guess would remove `repo_checks.py` and `skills_format.py`, which protect none of those paths; until this version both stayed because they had failed in CI. They are this repository's only checks that no personal data or home path is published (which cannot be taken back), that a plugin's three version numbers agree (or installed copies keep old files) and that a skill stays inside what both clients accept, and `AGENTS.md` rests its budgets on them. So the first guess adds what they protect: `rules/**`, the plugin manifests and `.claude-plugin/marketplace.json`, `plugins/*/skills/**`, and the repository-wide scan for personal data, which is a property of every path and has to be listed as such | `EXCLUDED` in `merge_pr.py`; `AGENTS.md` §Rules of this repository |
 | Windows in every CI run | Kept (ruling 7) | 19 of 21 failed runs |
 | First `REVIEW.md` item | A script or test that handles paths, symlinks or child processes: does it hold on Windows? | 19 Windows-only failures on 14 branches |
 | The pruning pass, now | By the rule of §B.4, after the audit. On the first guess above, the test files outside the critical paths are the ones to go, whether or not they ever failed in CI, and the files inside them shrink to the cases a named defect makes fail; the eight files above 20 seconds are looked at first | C.1 |

@@ -251,6 +251,67 @@ CLAUDE_PASS += ['git -C r log >"$out" 2>&1', 'git -C r log 2>"$(mktemp)"', 'git 
                 'git -C r log >`mktemp` 2>&1 && echo ok', 'git -C r diff > >(tee d.txt)',
                 'git -C r log >${out:-x.txt}', "git -C r log >'a b.txt' 2>&1"]
 
+# The strict reader (#33, the design of 2026-11-24): exact where bash, zsh and sh read a text the
+# same, the former rules (net) from the first construct it does not know. The six misreads the
+# module docstring once named, each with a command the old scanner took for a here-document body:
+BLOCK += ['echo ${x:-<<E}\ngit -C r stash drop\nE', 'echo $[1<<E]\ngit -C r stash drop\nE',
+          'echo $(( ((((1<<E)))) ))\ngit -C r stash drop\nE',
+          'echo $(cat <<E)\ngit -C r stash drop\nE', 'x=$(cat <<E\n)\ngit -C r stash drop\nE',
+          'cat <<E\nx\\\nE\ngit -C r stash drop\nE',
+          'echo "$(case x in a) echo hi;; esac)"; git -C r stash drop',
+          'echo $(case x in a) echo hi;; esac) git -C r stash drop',
+          # the classes of the tenth review: a redirection in or glued to a word, a
+          # substitution of several commands, a default value, an empty substitution in a word,
+          # zsh's >!, a continuation inside `git`, trap, coproc
+          'git $(true; true) -C r stash drop', 'git -C r stash>/dev/null drop',
+          'git>/dev/null -C r stash drop', 'git -C r stash 2>&1 drop', 'git -C r ${x:-stash} drop',
+          'git -C r st$()ash drop', 'git -C r >! out stash drop', 'git -C r >>| out stash drop',
+          'g\\\nit -C r stash drop', 'git -C r sta\\\nsh drop', "trap 'git -C r stash drop' EXIT",
+          'coproc git -C r stash drop', 'time git -C r stash drop', '{ git -C r stash drop; }',
+          # found by running random texts in bash 3.2, zsh and dash with a git that logs its
+          # words: a word that may be no word, an unknown part glued to `git`, a carriage
+          # return (a character of a word), sh's reading of `&>`, bash's `>&-`, zsh's `-` and
+          # its `}` that ends a word, a redirection glued to `git`
+          'git stash "$@" drop', 'git stash $x drop', '$(true)git stash drop',
+          '${x:-}git -C r clean -fd', 'git>| --hard\rgit -C r clean -fd',
+          '&> \r git -C r commit -m msg --no-verify;', 'x &> out git -C r clean -fd',
+          '>& -git stash drop', '- git -C r commit -m msg --no-verify',
+          'git>!2>git-C rdone commit -m msg --no-verify', 'git<<EOF-C $r $(true) push --force',
+          "${x:-}git stash <<'EOF' drop git commit[[", 'git -C r ${x:-}clean a[-fd x -fd',
+          '{ git push origin -fd} ; echo 2', 'git `true` -c core.hooksPath=/dev/null commit -m x',
+          # bash reads a[…]= to its `]` on its own: no comment, no here-document inside it
+          "a[1 #'\n']=x; git -C r clean -fd; echo '\n'", 'a[1<<E]=x\ngit -C r clean -fd\nE',
+          '[[ a << E ]]\ngit -C r clean -fd\nE', 'if [[ a << E ]]; then :; fi\ngit -C r clean -fd\nE',
+          # bash 3.2 (macOS /bin/sh) ends a $(…) by counting parentheses and quotes, without
+          # knowing the here-document in it: measured, this body runs its command there
+          'echo "$(cat <<\'EOF\'\nx)" ; git -C r clean -fd ; echo "$(echo y\nEOF\n)" end',
+          'git -C r commit -m "$(cat <<\'EOF\'\nx)" ; git -C r stash drop ; echo "$(echo y\nEOF\n)"',
+          # a here-document body runs its substitutions unless the delimiter is quoted
+          'cat <<EOF\n$(git -C r stash drop)\nEOF', 'cat <<EOF\n`git -C r clean -fd`\nEOF',
+          # a backslash ends no comment; a word with a literal part is a word; "$@" glued
+          'echo a #bash\\\ngit -C r clean -fd2>&1', 'git $(true)stash $(true) drop  << EXIT',
+          'git -C fircommit >&-m msg "$@"--no-verify']
+ASK += ['git -C r >! out push', 'git $(true; true) -C r push', "trap 'git -C r push' EXIT",
+        'git -C r pu\\\nsh origin main', 'x &> out git -C r push', '$(true)git -C r push']
+CLAUDE_PASS += [
+    # a here-document is data, also inside $(…): parentheses in pairs, an apostrophe that no
+    # later quote closes, a `#`
+    'git -C r commit -m "$(cat <<\'EOF\'\nA clean step (#33): stash drop, push --force\n\n'
+    'It isn\'t a rebase.\nEOF\n)" -- a.md',
+    'git -C r commit -F - <<\'EOF\'\nrebase, clean and reset --hard explained (#33)\nEOF',
+    'git -C r commit -m "$(cat <<\'EOF\'\nSee #12 (clean) and "push"\nEOF\n)" -- a.md',
+    'cat <<EOF\nstash drop $x and clean\nEOF', "cat > notes.md <<'EOF'\n$(git clean -fd)\nEOF",
+    # exact words: a rule's word as a value, in another command, after a certain separator
+    'git -C r log --grep clean', 'git -C r status && make clean', 'git -C r log; echo stash drop',
+    'git -C "$repo" log --grep clean', 'git -C r status &>/dev/null', 'git -C r log 2>&1 >&-',
+    'git -C r show HEAD@{1} -- a.md', 'git -C r log --format="%h %s" -5 | cat',
+    'cd "$(git -C r rev-parse --show-toplevel)" && git status',
+    'git -C r commit -m "fix \\`clean\\` and \\"push\\"" -- a.md',
+    'for f in a b; do git -C r add "$f"; done', 'git -C r log\r\n']
+# a text the reader is not certain of reads as the former rules read it: also a message
+BLOCK += ['git -C r commit -m "a clean step" -- a.md `date`',
+          'echo $((1+1)); git -C r commit -m "do not rebase"']
+
 
 def run(command):
     return subprocess.run([sys.executable, HOOK, '--check', command], capture_output=True, text=True)
@@ -319,6 +380,17 @@ targets = run_hook('>$( ' * 7700 + '; git -C r clean -fdx')
 if targets.returncode != 2 or time.time() - started > 3:
     failures.append('7,700 unclosed targets must block within 3 s (took %.1f s)'
                     % (time.time() - started))
+# tenth review: each `sh` once had the whole text searched again (17.6 s); and inputs built to
+# make the reader, the net or the bash 3.2 count read the text more than once
+SLOW = {'3,997 shells': 'sh;:git;' * 3997 + 'git -C r stash drop',
+        '2,800 comments': "# it's git\n" * 2800 + 'git -C r stash drop',
+        '1,000 here-documents in $(…)': 'echo "$(cat <<\'E\'\n(x\nE\n)"\n' * 1000 + 'git -C r stash drop',
+        '6,000 backticks': '`git ' * 6000 + '; git -C r stash drop',
+        '10,000 open $(': 'git ' + '$(' * 10000 + ' -C r stash drop'}
+for name, text in SLOW.items():
+    started = time.time()
+    if run_hook(text).returncode != 2 or time.time() - started > 3:
+        failures.append('%s must block within 3 s (took %.1f s)' % (name, time.time() - started))
 
 
 def run_claude(command):

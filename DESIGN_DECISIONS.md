@@ -294,7 +294,18 @@ review rounds each found new spellings, the maintainer chose "(b) structureel va
 (2026-11-24): when a git command's subcommand slot holds no plain word (`git $(true) stash
 drop`, `git -C r <<<x stash drop`, none at all), every subcommand word after a `git` in the
 whole text is judged as the subcommand (`judge_loose`), as the dropped `git -C * …` rules
-matched. This closes the class rather than one spelling at a time. The hook also covers the
+matched. A tenth review showed that belt still was no superset of the dropped rules (zsh's
+`git -C r >! out stash drop` passed), and the maintainer had a new design made ("Ja, start
+Fable", 2026-11-24; the design is on issue #33, posted before it was built): **exact where the
+reading is certain, the former rules where it is not.** The guard's reader knows only the part
+of the shell language that bash (3.2 and later), zsh and sh read the same way, and stops at
+anything else instead of guessing. The commands before that point are judged by their words;
+from the command it stopped in to the end of the text, the guard reads the text as the former
+permission rules did (all of them, kept in the guard as `NET_DENY` and `NET_ASK`) and by the
+belt. A text the reader does not know is therefore stopped whenever those rules stopped it,
+a commit whose message names a rule's words included, and a misreading can no longer pass a
+command. The reading is checked against bash 3.2, zsh and dash themselves (random texts run
+with a `git` that logs its words). The hook also covers the
 terminal tool. The installer removes
 the rules it added that the policy dropped, and names the user's own such rules without
 changing them.

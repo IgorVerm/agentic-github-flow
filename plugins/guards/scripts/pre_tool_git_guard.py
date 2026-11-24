@@ -7,44 +7,59 @@ rules cannot see (a flag after another argument, `git -C <dir> …`, a command i
 `zsh -lc "…"`, `env X=y git …`): the Codex prefix rules miss those, and Claude's deny rules miss
 some of them.
 
-It parses the command into simple commands, unwraps shell `-c` strings, `eval`, `ssh`, command
-substitutions and wrappers such as `timeout`, and judges every `git` invocation by its subcommand
-and flags, wherever they stand. It is a guardrail, not a boundary: git started from a script
-file or built from variables is not seen, and `git checkout <path>` cannot be told from
-`git checkout <branch>`. Known misreads (#33, sixth review): `<<` inside `${x:-<<y}`, `$[…]` or
-arithmetic nested deeper than two levels is taken for a here-document, as is a marker inside
-`$(…)` closed on its own line, a backslash-newline inside a here-document body is not joined,
-and a `case` pattern's `)` ends a `$(…)`; the lines such a misread takes for a body go unjudged.
-The belt behind the parser (#33, ninth review): when a git command's subcommand slot holds no
-plain word (`git $(true) stash drop`, `git -C r <<<x stash drop`, nothing at all), every
-subcommand word after a `git` in the whole text is judged as the subcommand (judge_loose), as
-the dropped `git -C * stash drop*` rules matched. An input it cannot parse passes, except where the parse would hide git:
-it blocks, rather than guesses, a command that may run git and is longer than MAX_INPUT
-characters, holds an unquoted brace expansion (`git push origin {-f,main}`), an ANSI-C string it
-cannot decode (`$'…'` strings are decoded first), or is nested deeper than MAX_DEPTH (eval in
-eval in …). Hook input that is JSON but not an object is blocked too. A command the user asks for
-by name the user runs in their own terminal. Shell comments are removed before anything is
-judged (`strip_comments`), and a commit's option values are never read as flags
-(`commit_flags`): `git commit -m "--no-verify"` is a message, not a hook bypass. An option
-before the subcommand that is in neither GIT_VALUE_OPTS nor GIT_FLAG_OPTS is judged both ways,
-as a flag and as `<option> <value>`, so a new git option cannot hide the subcommand.
+It reads the command into simple commands, unwraps shell `-c` strings, `eval`, `trap`, `ssh`,
+command substitutions and wrappers such as `timeout`, and judges every `git` invocation by its
+subcommand and flags, wherever they stand. It is a guardrail, not a boundary: git started from a
+script file or built from variables is not seen, and `git checkout <path>` cannot be told from
+`git checkout <branch>`.
+
+Exact where the reading is certain, the former rules where it is not (#33, the design of
+2026-11-24, after ten review rounds each found a spelling a scanner of the whole shell language
+read differently from the shell). The Reader knows a small part of the language, the part bash
+(3.2 and later), zsh and sh read the same way, and reads nothing else: at a backtick, `$((`,
+`[[`, `case`, a function, zsh's `>!`, a quote that does not close, it stops. The commands before
+that point are judged by their words, which is exact: no rule word in a message or after
+`--grep` stops a command, and a `;` splits only where the shell splits. From the start of the
+command it stopped in to the end of the text, net() reads the text as Claude Code's former
+permission rules did (every one of them, searched from any `git` on) and by the belt
+(judge_loose: every subcommand word after a `git` is judged as the subcommand; the maintainer,
+2026-11-24). So a text the reader does not know is stopped whenever those rules stopped it,
+also a commit whose message names a rule's words, and is never passed because of a misreading.
+A word the text does not fix (`$x`, `$(…)`, `st$()ash`, `${x:-stash}`) is read with its unknown
+parts empty, also as no word at all, and a git command with one at or before its subcommand
+gets the belt on its words. The reading was checked against the shells themselves: random texts
+run in bash 3.2, zsh and dash with a `git` that logs its words, and every logged command the
+guard refuses had to be stopped for its text.
+
+Not covered: an interactive shell's own reading (history expansion with `!`, aliases, zsh
+without comments, where the rest of a line after `#` is judged only as a text of its own).
+A command that may run git and is longer than MAX_INPUT characters, holds an unquoted brace
+expansion in a git command (`git push origin {-f,main}`) or is nested deeper than MAX_DEPTH
+(eval in eval in …) is blocked. Hook input that is JSON but not an object is blocked too. A
+command the user asks for by name the user runs in their own terminal. A commit's option values
+are never read as flags (`commit_flags`): `git commit -m "--no-verify"` is a message, not a
+hook bypass. An option before the subcommand that is in neither GIT_VALUE_OPTS nor GIT_FLAG_OPTS
+is judged both ways, as a flag and as `<option> <value>`, so a new git option cannot hide the
+subcommand.
 
 Claude Code (`--claude`, #33): the same blocks, plus "ask" for what the user approves per call:
 a push, `commit --amend`, `update-ref` and changing a remote, in any spelling. It replaces the
 permission rules whose `*` could reach into a commit message (`git -C * clean*` stopped
 `git -C r commit -m "a clean step"`); the rules left in policy/claude-permissions.json start
 with `git <subcommand>`. A call is judged for blocks first, so a block anywhere in it wins over
-an ask. Under `--claude`, git text the parser cannot read (an open quote) is asked. The guards
+an ask. Under `--claude`, git text that ends inside an open quote is asked. The guards
 plugin's hooks.json runs it for Bash and for the terminal tool (`mcp__*__run_in_terminal`),
 which gets no permission rules. tests/claude_git_rules.py checks the rules and this mode
-together against the rules as they stood before #33.
+together against the rules as they stood before #33, each in some fifty spellings.
 
 How it fails in Claude Code, where the `git -C` spellings now rest on this hook alone: a missing
 script makes Python exit 2, which blocks every Bash call; a crash before main() (a broken
 import) exits 1, which Claude Code lets through unchecked. Errors inside main() pass on purpose
-(below). Dropping the rules and wiring `--claude` ship together, in one plugin version.
+(below); a fault inside the Reader does not: the text is then uncertain and goes to net().
+Dropping the rules and wiring `--claude` ship together, in one plugin version.
 
-pre_tool_personal_data.py and pre_tool_delete_guard.py reuse its shell parsing: run
+pre_tool_personal_data.py and pre_tool_delete_guard.py reuse its older shell parsing
+(split_commands, strip_heredocs, substitutions), which this guard itself no longer uses: run
 tests/personal_data_guard.py and tests/delete_guard.py too.
 
 Usage as a hook: reads JSON on stdin (`--claude` for Claude Code). For tests:
@@ -129,117 +144,6 @@ def heredoc_at(text, i, shifts):
     return m and (m.group(1), heredoc_word(m.group(2)))
 
 
-def join_continuations(text):
-    """The text with each backslash-newline removed, as the shell does outside single quotes;
-    an escaped backslash before a newline (`C:\\\\<newline>`) ends the line."""
-    out, i, n, quote = [], 0, len(text), None
-    while i < n:
-        c = text[i]
-        if quote == "'":
-            quote = None if c == "'" else quote
-        elif c == '\\' and i + 1 < n:
-            if text[i + 1] != '\n':
-                out.append(text[i:i + 2])
-            i += 2
-            continue
-        elif c in '"\'' and quote in (None, c):
-            quote = None if quote else c
-        out.append(c)
-        i += 1
-    return ''.join(out)
-
-
-REDIRECT = re.compile(r'(?:&>>?|\d*(?:>>|>&|>\||<>|<&|<<-?|>|<))(?!\()')
-
-
-def drop_redirections(text):
-    """The text with its unquoted redirections and their targets blanked (`2>&1`, `>/dev/null`,
-    `&>log`, a here-document marker left on its line), so `git -C r 2>&1 stash drop` reads as
-    `git -C r stash drop`: shlex would make `2>` and `1` words, one of them the subcommand.
-    A target is one shell word (word_end); one that does not close ends at the next blank.
-    A here-string (`<<<`) and process substitution (`<(…)`) stay: they are judged as input."""
-    out, i, n, quote, closes = [], 0, len(text), None, True
-    while i < n:
-        c = text[i]
-        if quote == "'":
-            quote = None if c == "'" else quote
-        elif c == '\\' and i + 1 < n:
-            out.append(text[i:i + 2])
-            i += 2
-            continue
-        elif c == '"':
-            quote = None if quote else '"'
-        elif c == "'" and quote is None:
-            quote = "'"
-        elif quote is None and text.startswith('<<<', i):
-            out.append('<<<')
-            i += 3
-            continue
-        elif quote is None and (
-                c in '<>' or text.startswith('&>', i) or
-                c.isdigit() and (i == 0 or text[i - 1] in ' \t\n;&|()')):
-            m = REDIRECT.match(text, i)
-            if m:
-                j = m.end()
-                while j < n and text[j] in ' \t':  # the target: `1` of 2>&1, a file, `$(…)`
-                    j += 1
-                end = word_end(text, j) if closes else None
-                if end is None:  # a target the scanner cannot close: to the next blank,
-                    closes = False  # and so every later target, so the text is read once
-                    end = j
-                    while end < n and text[end] not in ' \t\n':
-                        end += 1
-                out.append(' ')
-                i = end
-                continue
-        out.append(c)
-        i += 1
-    return ''.join(out)
-
-
-def word_end(text, j):
-    """Where the shell word that starts at j ends, or None when it does not close: quotes,
-    `$(…)`, `${…}` and backticks (an escaped one does not close) inside it, also within double
-    quotes. Linear: each character is read once."""
-    n, stack, dq = len(text), [], 0  # the open '"', '{' (of ${) and '`'; how many '"'
-    while j < n:
-        c, top = text[j], stack[-1] if stack else None
-        if c == '\\':
-            j += 2
-            continue
-        if top == '`':
-            if c == '`':
-                stack.pop()
-        elif c == "'" and not dq:  # within "${…}" a quote is a character (zsh, dash)
-            k = text.find("'", j + 1)
-            if k < 0:
-                return None
-            j = k + 1
-            continue
-        elif c == '"':
-            if top == '"':
-                stack.pop()
-                dq -= 1
-            else:
-                stack.append('"')
-                dq += 1
-        elif text.startswith('$(', j):
-            j = closing_paren(text, j + 2)
-            if j >= n:
-                return None
-        elif c == '`':
-            stack.append('`')
-        elif text.startswith('${', j):
-            stack.append('{')
-            j += 1
-        elif c == '}' and top == '{':
-            stack.pop()
-        elif top is None and c in ' \t\n;&|()<>':
-            return j
-        j += 1
-    return None if stack else n
-
-
 def closing_tick(text, j):
     """Where the backtick substitution whose body starts at j closes, or -1: a backtick after
     a backslash does not close it."""
@@ -251,107 +155,6 @@ def closing_tick(text, j):
             return j
         j += 1
     return -1
-
-
-def strip_comments(text):
-    """The text without shell comments; split_comments() says how."""
-    return split_comments(text)[0]
-
-
-def split_comments(text):
-    """(the text without shell comments, the rest of the line after each removed `#`, the text
-    with its comments but without here-document bodies).
-
-    A comment is an unquoted `#` at the start of a word (not right after an escaped character:
-    `a\\ #b` is one word), to the end of its line, or inside backticks to the closing one. A
-    backslash-newline is removed, as the shell does, except inside single quotes, a comment
-    (`# C:\\` ends at its newline) and here-document bodies, which are copied as they are,
-    without reading quotes in them. It runs before the here-document and substitution passes,
-    so they see the same quoting as the shell: an apostrophe in `git -C r stash drop # don't`
-    once left them an open quote, which hid the command (#33). Quoting starts over inside `$(…)`
-    and backticks, also within double quotes, as in the shell. The scanner is not the shell, and
-    three review rounds each found a `#` it took for a comment where bash runs the rest of the
-    line (`` echo \\`#a ; git … ``); so judge() also judges each removed rest of a line that
-    may run git, and a block or an ask from either side wins (#33, approved by the user
-    2026-11-23). When a removed rest holds a quote or a parenthesis, judge() also judges the
-    third text, up to the first quote it cannot close (a fourth review)."""
-    out, kept, removed, stack, marks, i, n = [], [], [], [], [], 0, len(text)
-    shifts = [m.span() for m in ARITHMETIC.finditer(text)] if '((' in text else []
-    escaped = -1  # where the last backslash escape ended: a `#` there starts no comment
-    last_eol = -1  # the line of the last removed rest: a later `#` on it gives only a suffix
-
-    def emit(part):
-        out.append(part)
-        kept.append(part)
-
-    while i < n:
-        c, top = text[i], stack[-1] if stack else None
-        if top == "'":
-            emit(c)
-            stack.pop() if c == "'" else None
-            i += 1
-            continue
-        if c == '\\' and i + 1 < n:
-            if text[i + 1] == '\n':  # a continuation: the word goes on unless a blank ended it
-                escaped = i + 2 if i and text[i - 1] not in ' \t\n;&|()`' else escaped
-            else:
-                emit(text[i:i + 2])
-                escaped = i + 2
-            i += 2
-            continue
-        if c == '\n':
-            emit(c)
-            i += 1
-            if marks and top not in ('"', "'"):
-                for dash, word in marks:  # the body, verbatim, up to its closing line
-                    while i < n:
-                        j = text.find('\n', i)
-                        line = text[i:n if j < 0 else j]
-                        out.append(line + ('' if j < 0 else '\n'))
-                        i = n if j < 0 else j + 1
-                        if (line.lstrip('\t') if dash else line) == word:
-                            kept.append(line + ('' if j < 0 else '\n'))
-                            break
-                marks = []
-            continue
-        if text.startswith('$(', i):
-            stack.append(')')
-            emit('$(')
-            i += 2
-            continue
-        if top == '"':
-            if c == '"':
-                stack.pop()
-            elif c == '`':
-                stack.append('`')
-        elif c in '"\'':
-            stack.append(c)
-        elif c == '`':
-            stack.pop() if top == '`' else stack.append('`')
-        elif c == '(' and top == ')':
-            stack.append(')')
-        elif c == ')' and top == ')':
-            stack.pop()
-        elif c == '#' and i != escaped and (i == 0 or text[i - 1] in ' \t\n;&|()`'):
-            eol = text.find('\n', i)
-            eol = n if eol < 0 else eol
-            if eol != last_eol:  # to the end of the line, whatever ends it
-                removed.append(text[i + 1:eol])
-                last_eol = eol
-            tick = text.find('`', i) if '`' in stack else -1
-            end = tick if 0 <= tick < eol else eol  # inside backticks it ends at the closing one
-            kept.append(text[i:end])
-            i = end
-            continue
-        elif text.startswith('<<', i) and heredoc_at(text, i, shifts):
-            marks.append(heredoc_at(text, i, shifts))
-            end = HEREDOC_MARK.match(text, i).end()
-            emit(text[i:end])
-            i = end
-            continue
-        emit(c)
-        i += 1
-    return ''.join(out), removed, ''.join(kept)
 
 
 def strip_heredocs(text):
@@ -401,16 +204,6 @@ def substitutions(text):
     backtick body the shell drops a backslash before ` $ or \\, so a nested `\\`git …\\`` runs."""
     return [re.sub(r'\\([`$\\])', r'\1', text[a:b]) if text[a - 1] == '`' else text[a:b]
             for a, b in substitution_spans(text)]
-
-
-def without_substitutions(text):
-    """The text with the bodies of its substitutions emptied (`$()`, ``), which judge() judges
-    on their own: shlex cannot read quotes nested in "$(…)" (`-m "$(echo "don't")"`)."""
-    out, pos = [], 0
-    for a, b in substitution_spans(text):
-        out.append(text[pos:a])
-        pos = b
-    return ''.join(out) + text[pos:]
 
 
 def substitution_spans(text):
@@ -527,20 +320,6 @@ def decode_ansi_c(body):
     return ''.join(out)
 
 
-def unquote_ansi_c(text):
-    """(text with every $'…' replaced by its decoded, single-quoted value, ok)."""
-    ok = True
-
-    def plain(m):
-        nonlocal ok
-        value = decode_ansi_c(m.group(1))
-        if value is None:
-            ok = False
-            return m.group(0)
-        return shlex.quote(value)
-    return ANSI_C.sub(plain, text), ok
-
-
 def brace_expansion(text):
     """True when text holds an unquoted brace expansion: {a,b} or {1..3}, not ${x} or @{1}.
     One pass with a stack of the braces open in the current word, so the time stays linear
@@ -575,8 +354,11 @@ def may_run_git(text):
     """True when git or gh can appear as a command word, or a GIT_ variable is set, once quotes,
     escapes and braces are resolved; everything else is no business of this guard. Only whole
     words count, so `src/{high,low}`, `night.txt{,.bak}` and `.github/{a,b}` are not git."""
-    return "$'" in text or any(GIT_WORD.search(re.sub(r'[\'"\\{},$]', gap, text))
-                               for gap in ('', ' '))  # g''it, and -S'git …'
+    if "$'" in text or re.search(r'[<>]&[ \t]*-git', text):  # >&-git: bash closes, runs git
+        return True
+    joined = text.replace('\\\n', '')  # g\<newline>it; in a comment the lines stay apart
+    return any(GIT_WORD.search(re.sub(r'[\'"\\{},$]', gap, form))
+               for form in {text, joined} for gap in ('', ' '))  # g''it, and -S'git …'
 
 
 def commit_flags(rest):
@@ -744,51 +526,564 @@ def judge_git(args):
     return None
 
 
-ASKING = False  # set by judge_ask(): judge_command then reports ask_git() reasons
-UNSURE = False  # set by judge_command() for a git command without a plain subcommand word
-PLAIN_SUB = re.compile(r'[A-Za-z][\w.-]*')
+class Unsure(Exception):
+    """The reader met text it does not read for certain."""
+
+
+class Word(str):
+    """A shell word as the reader read it: its literal text, with the parts the text does not
+    fix (`$x`, `$(…)`) left out. known: every part is literal. one: it is exactly one word (an
+    unquoted `$x` or a glob may be none or several). brace: an unquoted brace expansion."""
+    known, one, brace = True, True, False
+
+    def __new__(cls, value, known=True, one=True, brace=False):
+        word = str.__new__(cls, value)
+        word.known, word.one, word.brace = known, one, brace
+        return word
+
+
+class Command:
+    """One simple command: its words, the here-document bodies and here-strings it reads, and
+    whether it is a shell that reads its script from standard input."""
+
+    def __init__(self):
+        self.words, self.bodies, self.strings, self.stdin = [], [], [], False
+        self.both = False  # it has a `&>`: more words after it are another command in sh
+
+
+# characters that are themselves in a word, in every shell (a carriage return too: only blank,
+# tab and newline end a word); a glob or a brace changes only the word's value, never its end
+PLAIN = re.compile(r'[A-Za-z0-9_./:=@%+,^~\-{}\[\]*?!#\r\x80-\U0010ffff]+')
+DQ_PLAIN = re.compile(r'[^"\\$`]+')
+NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
+SUBSCRIPT = re.compile(r'[A-Za-z_][A-Za-z0-9_]*\[')  # a[…]=: bash reads to the `]` on its own
+# ${…} without a quote, a blank, a `$`, a backslash or a brace inside: it ends at the first `}`
+PARAM = re.compile(r'\{([A-Za-z0-9_:#%/.,^@*!?+=~\[\]-]*)\}')
+DEFAULT = re.compile(r'[A-Za-z_][A-Za-z0-9_]*:?[-=+](.*)')  # ${x:-word}: word when x is unset
+DELIMITER = re.compile(r'''(?:([A-Za-z_][A-Za-z0-9_]*)|'([A-Za-z_][A-Za-z0-9_]*)'|'''
+                       r'''"([A-Za-z_][A-Za-z0-9_]*)")(?=[ \t\n;|&)<>]|\Z)''')
+REDIRECTS = ('<<<', '<<-', '<<', '<>', '<&', '<', '>>', '>&', '>|', '>', '&>>', '&>')
+MAX_NEST = 40  # $(…) and (…) inside each other; deeper is not read
+
+
+class Reader:
+    """Reads a shell text once, left to right, into simple commands, as far as it is certain.
+
+    It knows only what bash (3.2 and later), zsh and sh read the same way: words of plain
+    characters, `'…'`, `"…"`, `\\x`, `$name`, `${name}` and `${…}` without quotes inside,
+    `$'…'`, `$(…)`, `<(…)`, a `#` comment, the separators `; & | newline`, `(…)`, the
+    redirections in REDIRECTS with a word as target, and a here-document whose delimiter is a
+    plain name. Everything else raises Unsure: a backtick, `$((`, `$[`, `((`, `[[`, `case`, a
+    function, `a[…`, zsh's `>!`, a quote that does not close, a control character. It never
+    guesses: `uncertain` is then where the command it was reading started, and judge() reads
+    the text from there to the end as the former permission rules did (net); the words it had
+    read of that command stay, as a command.
+
+    Where it leaves text out it is strictest, because that is where a misreading hides a
+    command: a comment only at the start of a word and outside `$(…)`, its rest kept in
+    `rests`; a here-document body only for a delimiter it read whole, and inside `$(…)` only
+    when bash 3.2 would end the substitution at the same `)` (old_bash)."""
+
+    def __init__(self, text, comments=True):
+        self.t, self.n, self.i = text, len(text), 0
+        self.comments = comments  # False: `#` is a character (the rest of a comment, re-read)
+        self.commands, self.rests, self.nets = [], [], []
+        self.uncertain, self.quote = None, False
+        self.open, self.pending = [], []  # commands being read; here-documents without body
+        self.depth = self.subs = self.docs = 0
+        self.old_dead = False  # bash 3.2 stopped at a `$(` it could not close: it runs no more
+        try:
+            self.read_list()
+        except Exception:  # Unsure, and a fault in the reader: uncertain, never passed
+            self.uncertain = self.open[0][0] if self.open else min(self.i, self.n)
+            # the words read so far of the commands it was in are words for certain
+            self.commands += [cmd for _, cmd in self.open]
+
+    def blanks(self):
+        t, n = self.t, self.n
+        while self.i < n and (t[self.i] in ' \t' or t.startswith('\\\n', self.i)):
+            self.i += 2 if t[self.i] == '\\' else 1
+
+    def read_list(self, closer=None):
+        """Commands up to the end of the text, or up to the `)` that closes a `(` or `$(`."""
+        t, n = self.t, self.n
+        while True:
+            self.blanks()
+            if self.i >= n:
+                if closer:
+                    raise Unsure
+                return
+            c = t[self.i]
+            if c == '\n':
+                self.i += 1
+                self.read_bodies()
+            elif c in ';|' or c == '&' and not t.startswith('&>', self.i):
+                self.i += 1
+            elif c == ')':
+                if not closer:
+                    raise Unsure  # a `case` pattern, or a `)` too many
+                self.i += 1
+                return
+            elif c == '(':
+                if t.startswith('((', self.i):
+                    raise Unsure  # arithmetic: `<<` is a shift there
+                self.i += 1
+                self.nest()
+                self.read_list(')')
+                self.depth -= 1
+            else:
+                self.read_command()
+
+    def nest(self):
+        self.depth += 1
+        if self.depth > MAX_NEST:
+            raise Unsure
+
+    def read_command(self):
+        t, n = self.t, self.n
+        cmd = Command()
+        self.open.append((self.i, cmd))
+        while True:
+            self.blanks()
+            if self.i >= n or t[self.i] in '\n;|)':
+                break
+            c = t[self.i]
+            if c == '&':
+                if not t.startswith('&>', self.i):
+                    break
+                self.redirect(cmd)
+                cmd.both = True
+            elif c in '<>' and t[self.i + 1:self.i + 2] != '(':
+                self.redirect(cmd)
+            elif c == '#' and self.comments:
+                if self.subs:
+                    raise Unsure  # bash 3.2 looks for the `)` inside the comment
+                eol = t.find('\n', self.i)
+                eol = n if eol < 0 else eol
+                self.rests.append(t[self.i + 1:eol])
+                self.i = eol
+                break
+            else:
+                at = self.i
+                word = self.read_word()
+                if self.i < n and t[self.i] in '<>':
+                    raw = t[at:self.i]
+                    if raw.isascii() and raw.isdigit():  # 2>…: the file descriptor
+                        self.redirect(cmd)
+                        continue
+                    if raw.startswith('{'):
+                        raise Unsure  # {fd}>…
+                if cmd.both:
+                    raise Unsure  # `a &>f b`: bash runs `a b`, sh runs `a &` and then `b`
+                cmd.words.append(word)
+                if word in ('case', 'esac') and (self.subs or len(cmd.words) == 1) or \
+                        word == '[[' or len(cmd.words) == 1 and word in ('select', 'function'):
+                    raise Unsure  # a case pattern's `)` would end a $(…); [[ reads < > itself
+        self.open.pop()
+        self.commands.append(cmd)
+
+    def redirect(self, cmd):
+        t, n = self.t, self.n
+        op = next(o for o in REDIRECTS if t.startswith(o, self.i))
+        self.i += len(op)
+        if op in ('<<', '<<-'):
+            while self.i < n and t[self.i] in ' \t':
+                self.i += 1
+            m = DELIMITER.match(t, self.i)
+            if not m:
+                raise Unsure
+            self.i = m.end()
+            self.pending.append((cmd, op == '<<-', m.group(1) or m.group(2) or m.group(3),
+                                 not m.group(1), self.subs))
+            return
+        if t[self.i:self.i + 1] in ('|', '!', '&'):
+            raise Unsure  # zsh: >! >>| >&| &>!
+        self.blanks()
+        if self.i >= n or t[self.i] in '\n;|&()#!' or \
+                t[self.i] in '<>' and t[self.i + 1:self.i + 2] != '(':
+            raise Unsure  # no target, or one another shell reads as part of the operator
+        if op in ('>&', '<&') and t[self.i] == '-':
+            self.i += 1  # >&- closes; bash ends it there (`>&-git` runs git), other shells do not
+            if self.i < n and t[self.i] not in ' \t\n;|&)':
+                raise Unsure
+            return
+        word = self.read_word()
+        if op == '<<<':
+            cmd.strings.append(word)
+
+    def read_bodies(self):
+        """After a newline: the bodies of the here-documents opened on the line before it."""
+        t, n = self.t, self.n
+        pending, self.pending = self.pending, []
+        for cmd, dash, word, quoted, level in pending:
+            if level != self.subs:
+                raise Unsure  # opened outside this $(…), or inside one that closed already
+            lines = []
+            while self.i < n:
+                j = t.find('\n', self.i)
+                end = n if j < 0 else j
+                line = t[self.i:end]
+                self.i = min(end + 1, n)
+                if (line.lstrip('\t') if dash else line) == word:
+                    break
+                if not quoted and line.endswith('\\'):
+                    raise Unsure  # a backslash-newline joins the lines of an unquoted body
+                lines.append(line)
+            body = '\n'.join(lines)
+            cmd.bodies.append(body)
+            if not quoted and ('$(' in body or '`' in body):
+                self.nets.append(body)  # an unquoted body runs its substitutions
+            self.docs += 1
+
+    def read_word(self):
+        t, n = self.t, self.n
+        start, parts, known, one, braces = self.i, [], True, True, 0
+        if t[start] in '<>':  # <(…) or >(…)
+            self.i += 2
+            self.sub(self.i)
+            known = one = False
+        elif SUBSCRIPT.match(t, start):
+            raise Unsure
+        while self.i < n:
+            c = t[self.i]
+            if c in ' \t\n;|&<>)':
+                break
+            m = PLAIN.match(t, self.i)
+            if m:
+                run = m.group()
+                if '*' in run or '?' in run or '[' in run:
+                    if run[0] == '[' and not known:
+                        raise Unsure  # $x[…]: zsh reads a subscript
+                    known = one = False  # a glob: the text stays, the words are not fixed
+                if '}' in run:
+                    for ch in run:
+                        braces += (ch == '{') - (ch == '}')
+                        if braces < 0 and run != '}':
+                            raise Unsure  # zsh ends the word, and a `{ …` group, at this `}`
+                    braces = max(braces, 0)
+                elif '{' in run:
+                    braces += run.count('{')
+                parts.append(run)
+                self.i = m.end()
+            elif c == '\\':
+                if self.i + 1 >= n:
+                    raise Unsure
+                if t[self.i + 1] != '\n':
+                    parts.append(t[self.i + 1])
+                self.i += 2
+            elif c == "'":
+                j = t.find("'", self.i + 1)
+                if j < 0:
+                    self.quote = True
+                    raise Unsure
+                parts.append(self.quoted(t[self.i + 1:j]))
+                self.i = j + 1
+            elif c == '"':
+                text, fixed, single = self.read_dq()
+                parts.append(text)
+                known, one = known and fixed, one and single
+            elif c == '$':
+                text, fixed, single = self.read_dollar(False)
+                parts.append(text)
+                known, one = known and fixed, one and single
+            else:
+                raise Unsure  # a backtick, `(`, a control character
+        raw = t[start:self.i]
+        return Word(''.join(parts), known, one, '{' in raw and brace_expansion(raw))
+
+    def quoted(self, text):
+        if self.pending and '\n' in text:
+            raise Unsure  # a quoted newline before a here-document's body
+        return text
+
+    def read_dq(self):
+        """(text, known, one) of the double-quoted string at i."""
+        t, n = self.t, self.n
+        self.i += 1
+        out, known, one = [], True, True
+        while self.i < n:
+            c = t[self.i]
+            if c == '"':
+                self.i += 1
+                return ''.join(out), known, one
+            if c == '\\':
+                if self.i + 1 >= n:
+                    break
+                nxt = t[self.i + 1]
+                if nxt == '\n':
+                    self.quoted(nxt)
+                else:
+                    out.append(nxt if nxt in '$`"\\' else '\\' + nxt)
+                self.i += 2
+            elif c == '$':
+                text, fixed, single = self.read_dollar(True)
+                out.append(text)
+                known, one = known and fixed, one and single
+            elif c == '`':
+                raise Unsure
+            else:
+                m = DQ_PLAIN.match(t, self.i)
+                out.append(self.quoted(m.group()))
+                self.i = m.end()
+        self.quote = True
+        raise Unsure
+
+    def read_dollar(self, in_dq):
+        """(text, known, one) of what starts at the `$` at i."""
+        t, i = self.t, self.i
+        nxt = t[i + 1:i + 2]
+        if nxt == '(':
+            if t.startswith('$((', i):
+                raise Unsure
+            self.i += 2
+            self.sub(self.i)
+            return '', False, in_dq
+        if nxt == '{':
+            m = PARAM.match(t, i + 1)
+            if not m:
+                raise Unsure
+            self.i = m.end()
+            default = DEFAULT.fullmatch(m.group(1))
+            return default.group(1) if default else '', False, in_dq and '@' not in m.group(1)
+        if nxt == "'" and not in_dq:
+            m = ANSI_C.match(t, i)
+            value = decode_ansi_c(m.group(1)) if m and "'" not in m.group(1) else None
+            if value is None:  # no bash escape, or `\'`, where sh ends the quote
+                raise Unsure
+            self.i = m.end()
+            return self.quoted(value), True, True
+        if nxt in ('"', '[') and not in_dq or nxt == '[':
+            raise Unsure  # $"…", $[…]
+        m = NAME.match(t, i + 1)
+        if m:
+            self.i = m.end()
+            if t.startswith('[', self.i):
+                raise Unsure  # $x[…]: zsh reads a subscript
+            return '', False, in_dq
+        if nxt and (nxt.isascii() and nxt.isdigit() or nxt in '@*#?$!-'):
+            self.i += 2
+            return '', False, in_dq and nxt not in '@*'
+        self.i += 1
+        return '$', True, True
+
+    def sub(self, opened):
+        """The commands of a `$(…)`, `<(…)` or `>(…)` whose text starts at opened."""
+        self.nest()
+        docs = self.docs
+        self.subs += 1
+        self.read_list(')')
+        if any(p[4] == self.subs for p in self.pending):
+            raise Unsure  # a here-document whose body would start after the `)`
+        self.subs -= 1
+        self.depth -= 1
+        if self.docs > docs and not self.old_dead:
+            self.old_bash(opened, self.i - 1)
+
+    def old_bash(self, opened, closed):
+        """A here-document inside the `$(…)` from opened to closed. bash 3.2 (macOS /bin/sh)
+        finds the `)` by counting parentheses and quotes, without knowing the body: measured,
+        a body `x)" ; cmd ; echo "$(echo y` runs cmd there. So the body is trusted only when
+        that count ends at the same `)`, with and without its reading of a `#`; when the count
+        never ends, that shell runs nothing from here on; otherwise Unsure."""
+        ends = {self.old_scan(opened, comments) for comments in (False, True)}
+        if ends == {-1}:
+            self.old_dead = True
+        elif ends != {closed}:
+            raise Unsure
+
+    def old_scan(self, i, comments):
+        """Where a count of parentheses and quotes from i ends the `$(…)`: -1 for never, -2
+        when it meets what this guard does not know bash 3.2's count of."""
+        t, n, count = self.t, self.n, 1
+        while i < n:
+            c = t[i]
+            if c == '\\':
+                i += 1
+            elif c == "'":
+                i = t.find("'", i + 1)
+                if i < 0:
+                    return -1
+            elif c == '"':
+                i += 1
+                while i < n and t[i] != '"':
+                    if t[i] == '`' or t[i] == '$' and t[i + 1:i + 2] in ('(', '{', '['):
+                        return -2
+                    i += 2 if t[i] == '\\' else 1
+                if i >= n:
+                    return -1
+            elif c == '`' or c == '$' and t[i + 1:i + 2] in ('(', '{', '['):
+                return -2
+            elif c == '#' and comments and t[i - 1] in ' \t\n':
+                i = t.find('\n', i)
+                if i < 0:
+                    return -1
+            elif c == '(':
+                count += 1
+            elif c == ')':
+                count -= 1
+                if not count:
+                    return i
+            i += 1
+        return -1
+
+
+ASKING = False  # set by judge_ask(): the judges then report what the user is asked about
 # the subcommands judge_git() or ask_git() can refuse or ask about
 RULED = {'push', 'pull', 'reset', 'clean', 'restore', 'checkout', 'switch', 'stash', 'rebase',
          'tag', 'branch', 'filter-branch', 'filter-repo', 'replace', 'reflog', 'gc', 'prune',
          'update-ref', 'worktree', 'commit', 'add', 'config', 'remote'}
 MAX_LOOSE = 16
 LOOSE_WORD = re.compile(r'''(?:"[^"]*"|'[^']*'|\\.|[^\s"'\\]|["'\\])+''')
+LOOSE_SEGMENT = re.compile(r'(?:[^\n;|&]|(?<=[<>])&|&(?=>))+')  # `>&` and `&>` split nothing
+# words before a command that are not the command (zsh: `- git …`, `nocorrect git …`)
+LEADING = KEYWORDS | {'{', '}', 'coproc', '-', 'nocorrect'}
+
+# Claude Code's git permission rules as they stood before #33, each without its `git `; every
+# one also stood as `git -C * <rule>`. The rules whose `*` reached into a commit message were
+# dropped from policy/claude-permissions.json; net() reads a text by all of them where the
+# reader is not certain of it. tests/claude_git_rules.py checks the list against
+# tests/claude_git_rules_former.json.
+NET_DENY = (
+    'push --force*|push -f*|push * --force*|push * -f*|push --mirror*|push * --mirror*|'
+    'push --prune*|push * --prune*|push * +*|reset --hard*|reset * --hard*|branch -D*|'
+    'branch * -D*|branch -f*|branch * -f*|branch --force*|branch * --force*|clean*|restore *|'
+    'checkout -- *|checkout * -- *|checkout .|checkout * .|checkout -f*|checkout * -f*|'
+    'checkout * --force*|switch -f*|switch * -f*|switch * --force*|switch --discard-changes*|'
+    'stash drop*|stash clear*|rebase*|tag -d*|tag --delete*|tag -f*|tag * -f*|'
+    'worktree remove*|filter-branch*|filter-repo*|replace*|reflog expire*|reflog delete*|'
+    'gc --prune*|gc * --prune*|prune*|update-ref -d*|update-ref * -d*|* --no-verify*|'
+    'commit -n*|commit * -n *|-c core.hooksPath*|-c * core.hooksPath*|config --global *|'
+    'config --system *|config core.*|config credential*|config user.*|config * --unset*|'
+    'add -A*|add * -A*|add --all*|add .|add -f*|add * -f*|add --force*|add * --force*|'
+    'commit -a*|commit --all*').split('|')
+NET_ASK = ('push*|commit --amend*|commit * --amend*|update-ref*|remote add*|remote set-url*|'
+           'remote remove*|remote rm*|remote rename*').split('|')
+NET_REASON = {'push': 'pushes to a remote', 'commit': 'amends a commit (commit --amend)',
+              'update-ref': 'moves a ref (update-ref)', 'remote': 'changes a remote'}
+NET_END = ' ;|&)<>"\'`'  # what may follow a rule that does not end in `*`
+# read as a blank by net(): `<` and `>` (`git>f`, `drop<<E`: a redirection glued to a word) and
+# a substitution without another inside it (`git `true` -C r …`), which may be no word at all
+NET_APART = re.compile(r'[<>]|`[^`]*`|\$\([^()]*\)|\$\{[^{}]*\}|\$[A-Za-z_]\w*|\$[@*#?!$0-9-]')
 
 
-def git_slot(args):
-    """Where the subcommand stands in args (the tokens after `git`), options read as flags
-    unless GIT_VALUE_OPTS says they take a value; len(args) when there is none."""
-    i = 0
-    while i < len(args) and args[i].startswith('-'):
-        i += 2 if args[i] in GIT_VALUE_OPTS else 1
-    return i
+def net_rules(rules):
+    """[(rule, its literal parts in order, whether the last part must end the command)] for
+    each rule and its `git -C * ` form. A `*` is any text; one trailing ` *` also matches no
+    arguments (the client's rule, pattern_regex in pre_tool_sandbox_network.py)."""
+    out = []
+    for rule in ['git ' + r for r in rules] + ['git -C * ' + r for r in rules]:
+        if rule.count('*') == 1 and rule.endswith(' *'):
+            out.append((rule, [rule[:-2]], True))
+        else:
+            parts = rule.split('*')
+            out.append((rule, [p for p in parts if p], parts[-1] != ''))
+    return out
+
+
+NET = {False: net_rules(NET_DENY), True: net_rules(NET_ASK)}
+
+
+def glob_hit(flat, parts, ends):
+    """True when the parts stand in flat in this order, the first where a command can start
+    (not inside a word) and, with ends, the last where one can end. The leftmost place for each
+    part is enough, since a `*` between them is any text: linear, a few str.find calls."""
+    pos, last = 0, len(parts) - 1
+    for k, part in enumerate(parts):
+        while True:
+            p = flat.find(part, pos)
+            if p < 0:
+                return False
+            pos, end = p + 1, p + len(part)
+            if k == 0 and p and (flat[p - 1].isalnum() or flat[p - 1] == '_'):
+                continue
+            if k == last and ends and end < len(flat) and flat[end] not in NET_END:
+                continue
+            break
+        pos = end
+    return True
+
+
+def net(text):
+    """The reason to stop a text the reader is not certain of, or None: the text read as the
+    former permission rules read it, and by the belt (judge_loose).
+
+    Each rule is searched in the raw text from any `git` on, blanks and newlines as one blank,
+    backslash-newlines removed; once more with quotes and backslashes removed; and once more
+    with NET_APART as blanks. The client
+    matched a rule against the whole call and each command of it; a search that may start at
+    any `git` and span any text matches at least that, whatever the client split. So an
+    uncertain text is stopped whenever those rules stopped it: also a commit whose message
+    names a rule's words, which is the cost of not being certain."""
+    if 'git' not in text:
+        return None
+    flat = ' '.join(text.replace('\\\n', '').split())
+    bare = re.sub(r'[\'"\\]', '', flat)
+    apart = NET_APART.sub(' ', bare)
+    for form in (flat, ' '.join(bare.split()), ' '.join(apart.split())):
+        for rule, parts, ends in NET[ASKING]:
+            if glob_hit(form, parts, ends):
+                if ASKING:
+                    return NET_REASON[rule.replace('git -C * ', 'git ').split()[1].rstrip('*')]
+                return 'cannot be read for certain and matches the rule `%s`' % rule
+    return judge_loose(text) or judge_loose(NET_APART.sub(' ', text))
 
 
 def judge_loose(text):
-    """The belt: in each simple command of text (split at newlines, ; | &, not at parentheses),
-    every word in RULED after a `git` word, up to the next one, is judged as the subcommand
-    with the words after it. A quoted stretch stays in its word (`-m "push it"` is no push), a
-    quote that does not close is a character; then quotes and backslashes are dropped and a word
-    is read without the `$(`, `(`, `{` or backtick before it and the `)`, `}` or backtick after
-    it. Linear: each word belongs to one git; past MAX_LOOSE candidates for one git it gives up
-    and refuses."""
+    """The belt (the maintainer, 2026-11-24): in each stretch of text between newlines and
+    `; | &`, every word in RULED after a `git` word, up to the next one, is judged as the
+    subcommand with the words after it. A quoted stretch stays in its word (`-m "push it"` is
+    no push), a quote that does not close is a character; then quotes and backslashes are
+    dropped and a word is read without the `$(`, `(`, `{` or backtick before it and the `)`,
+    `}` or backtick after it. Linear: each word belongs to one git; past MAX_LOOSE candidates
+    for one git it gives up and refuses."""
     one = ask_git if ASKING else judge_git
-    for segment in SEGMENT.findall(text):
+    for segment in LOOSE_SEGMENT.findall(text):
         if 'git' not in segment:
             continue
         words = [re.sub(r'[\'"\\]', '', w).lstrip('$(`{').rstrip(')`}')
                  for w in LOOSE_WORD.findall(segment)]
         starts = [k for k, w in enumerate(words) if base(w) == 'git'] + [len(words)]
         for a, b in zip(starts, starts[1:]):
-            tried = 0
-            for k in range(a + 1, b):
-                if words[k] in RULED:
-                    tried += 1
-                    if tried > MAX_LOOSE:
-                        return 'cannot be read by the git guard (git with many subcommand words)'
-                    reason = one(words[k:b])
-                    if reason:
-                        return reason
+            reason = belt(words[a + 1:b], one, 0)
+            if reason:
+                return reason
+    return None
+
+
+def belt(args, one, first):
+    """Every word in RULED from args[first] on, judged as the subcommand with the words after
+    it, and every `-c` as git's own option (`git >! out -c core.hooksPath=… commit`); None when
+    none is refused."""
+    tried = 0
+    for k in range(first, len(args)):
+        if args[k] in RULED or args[k] in ('-c', '--config-env') or \
+                args[k].startswith('--config-env='):
+            tried += 1
+            if tried > MAX_LOOSE:
+                return 'cannot be read by the git guard (git with many subcommand words)'
+            reason = one(args[k:])
+            if reason:
+                return reason
+    return None
+
+
+def unfixed(args):
+    """Where the words of a git command (after `git`) stop being fixed by the text, at or
+    before the subcommand: an unknown word where an option or the subcommand stands, or an
+    unquoted one as an option's value, which may be no word at all. None when the subcommand
+    is a known word."""
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if not getattr(a, 'known', True):
+            return i
+        if not a.startswith('-'):
+            return None
+        if a in GIT_VALUE_OPTS:
+            if i + 1 < len(args) and not getattr(args[i + 1], 'one', True):
+                return i + 1
+            i += 1
+        i += 1
     return None
 
 
@@ -832,9 +1127,15 @@ def judge_ask(text):
         ASKING = False
 
 
-def judge_command(tokens, depth):
-    """Judge one simple command, given as tokens."""
-    while tokens and (ASSIGN.fullmatch(tokens[0]) or base(tokens[0]) in KEYWORDS):
+def command_name(word):
+    """The command a word names: without its folder, zsh's `=`, and in lower case (a
+    case-insensitive disk runs `GIT`)."""
+    return base(word).lstrip('=').lower()
+
+
+def judge_command(tokens, depth, cmd=None):
+    """Judge one simple command, given as its words; cmd is the Command they came from."""
+    while tokens and (ASSIGN.fullmatch(tokens[0]) or base(tokens[0]) in LEADING):
         if tokens[0].startswith('GIT_CONFIG'):
             return 'changes git configuration through the environment'
         tokens = tokens[1:]
@@ -842,12 +1143,28 @@ def judge_command(tokens, depth):
         return None
     if depth > MAX_DEPTH:
         return 'is nested too deeply to check'
-    name = base(tokens[0])
-    if name == 'git':
-        global UNSURE
-        i = git_slot(tokens[1:])
-        UNSURE = i >= len(tokens) - 1 or not PLAIN_SUB.fullmatch(tokens[1 + i])
-        return ask_git(tokens[1:]) if ASKING else judge_git(tokens[1:])
+    name = command_name(tokens[0])
+    if getattr(tokens[0], 'brace', False) and 'git' in name:
+        return 'uses brace expansion, which the guard cannot read safely'
+    if not getattr(tokens[0], 'known', True):  # `$pfx git …`: whatever it is may run the rest
+        for j, tok in enumerate(tokens[1:], 1):
+            if command_name(tok) == 'git':
+                reason = judge_command(tokens[j:], depth + 1, cmd)
+                if reason:
+                    return reason
+                break
+    if name == 'git':  # also `$(true)git`: read with its unknown part empty
+        args = tokens[1:]
+        if any(getattr(a, 'brace', False) for a in args):
+            return 'uses brace expansion, which the guard cannot read safely'
+        one = ask_git if ASKING else judge_git
+        reason, first = one(args), unfixed(args)
+        if not reason and first is not None:  # the belt, on the words as read
+            reason = belt(args, one, first + 1)
+        if not reason and not all(a or getattr(a, 'one', True) for a in args):
+            # `git stash "$@" drop`: a word that may be no word at all, read as none
+            reason = one([a for a in args if a or getattr(a, 'one', True)])
+        return reason
     if name == 'gh':
         if tokens[1:2] in (['config'], ['alias']) and tokens[2:3] in (
                 ['set'], ['delete'], ['import'], ['clear-cache']):
@@ -856,20 +1173,25 @@ def judge_command(tokens, depth):
         for j, tok in enumerate(tokens[1:], 1):
             if re.fullmatch(r'-[a-z]*c[a-z]*', tok) and j + 1 < len(tokens):
                 return judge(tokens[j + 1], depth + 1)
-            if tok.startswith('<<<'):
-                return judge(tok[3:] or ' '.join(tokens[j + 1:j + 2]), depth + 1)
+        if cmd is not None and all(t.startswith('-') for t in tokens[1:]):
+            cmd.stdin = True  # no script: it reads one from a pipe, `echo git … | bash`
     elif name in INTERPRETERS:
         for j, tok in enumerate(tokens[1:], 1):
             if tok in ('-c', '-e') and j + 1 < len(tokens):
                 return judge_raw(tokens[j + 1], needs_exec=True)
     elif name == 'eval':
         return judge(' '.join(tokens[1:]), depth + 1)
+    elif name == 'trap':
+        for tok in tokens[1:]:  # the action runs later, as a shell text
+            reason = judge(tok, depth + 1) if may_run_git(tok) else None
+            if reason:
+                return reason
     elif name == 'ssh':
         for j, tok in enumerate(tokens[1:], 1):
             if 'git' in tok:
                 return judge(' '.join(tokens[j:]), depth + 1)
     elif name in WRAPPERS:
-        runs = SHELLS | INTERPRETERS | WRAPPERS | {'git', 'eval', 'ssh'}
+        runs = SHELLS | INTERPRETERS | WRAPPERS | {'git', 'eval', 'ssh', 'trap'}
         for j, tok in enumerate(tokens[1:], 1):
             if name == 'env' and (tok in ('-S', '--split-string') or
                                   tok.startswith(('-S', '--split-string='))):
@@ -882,92 +1204,52 @@ def judge_command(tokens, depth):
                 return judge(' '.join([split] + [shlex.quote(t) for t in after]), depth + 1)
             if ASSIGN.fullmatch(tok) and tok.startswith('GIT_CONFIG'):
                 return 'changes git configuration through the environment'
-            if base(tok) in runs:
-                return judge_command(tokens[j:], depth + 1)
+            if command_name(tok) in runs:
+                return judge_command(tokens[j:], depth + 1, cmd)
     return None
 
 
-def judge(text, depth=0, comments=True, lenient=False):
+def judge(text, depth=0, lenient=False):
     """The reason to block (or, under judge_ask, to ask about) a shell text, or None.
 
-    comments=False judges the text with its comments in, as words, the way origin/main did:
-    for the rest of a line after a removed `#`, and for the whole text when such a rest holds a
-    quote or a parenthesis, which would change how the shell reads the lines after it if the
-    scanner took a `#` for a comment that the shell does not (#33). lenient=True judges only
-    the commands before an open quote, which the shell runs before it fails on that quote."""
+    Exact where the reading is certain, the former rules where it is not (#33): the commands
+    the Reader is certain of are judged by their words; from where it stops being certain, the
+    rest of the text is judged by net(). Both can only add a reason, so what the reader does
+    not know is never passed on its account. The rest of a line after a `#` is judged too, as a
+    text of its own in which `#` is a character (lenient): a shell that reads no comments there
+    runs it (the maintainer, 2026-11-23)."""
     if depth > MAX_DEPTH:
         return 'is nested too deeply to check'
-    text, decoded = unquote_ansi_c(text)
-    if not decoded and may_run_git(text):
-        return "holds a $'…' string the guard cannot decode"
-    full = text  # comments in, for the belt
-    if comments:
-        text, removed, whole = split_comments(text)
-        for rest in removed:  # what the shell may run after all, if the scanner misread a `#`
-            if not may_run_git(rest):
-                continue
-            reason = judge(rest, depth, comments=False, lenient=True)
-            if not reason and set(rest) & set('\'"'):  # the lenient reading stopped at a quote
-                reason = judge_raw(rest)  # that the shell may have opened earlier (sixth review)
-            if reason:
-                return reason
-        if any(set(rest) & set('\'"`()') for rest in removed) and may_run_git(whole):
-            # the text with its comments in as words, here-document bodies left out
-            reason = judge(whole, depth, comments=False, lenient=True)
-            if reason:
-                return reason
-    else:
-        text = join_continuations(text)
-    if not lenient and brace_expansion(text) and may_run_git(text):
-        return 'uses brace expansion, which the guard cannot read safely'
-    text, bodies = strip_heredocs(text)
-    for line, body in bodies:
-        readers = {base(w) for w in re.findall(r'[\w./-]+', line)}
-        reason = judge(body, depth + 1) if readers & SHELLS else \
-            judge_raw(body, needs_exec=True) if readers & INTERPRETERS else None
+    read = Reader(text, comments=not lenient)
+    piped = False
+    for cmd in read.commands:
+        reason = judge_command(cmd.words, depth, cmd)
         if reason:
             return reason
-    for inner in substitutions(text):
-        reason = judge(inner, depth + 1)
-        if reason:
-            return reason
-    commands, plain = [], drop_redirections(text)
-    try:
-        for tokens in split_commands(plain):
-            commands.append(tokens)
-    except ValueError:
-        if not lenient:  # lenient: the shell stops at the open quote, after these commands
-            try:
-                commands = list(split_commands(without_substitutions(plain)))
-            except ValueError:
-                reason = judge_commands(commands, text, depth, full)  # the ones before it run
-                if reason:
-                    return reason
-                if ASKING and re.search(r'\bgit\b', text):
-                    return 'cannot be read by the git guard (an open quote?)'
-                return judge_raw(text)
-    return judge_commands(commands, text, depth, full)
-
-
-def judge_commands(commands, text, depth, full):
-    """judge_command() for each of commands, parsed from text; full is text with its comments.
-    A git command whose subcommand slot the parser could not fill with a plain word turns on
-    the belt (judge_loose) over full."""
-    global UNSURE
-    loosened = False  # the belt reads full once, however many git commands turn it on
-    for tokens in commands:
-        UNSURE = False
-        reason = judge_command(tokens, depth)
-        if not reason and UNSURE and not loosened:
-            reason, loosened = judge_loose(full), True
-        UNSURE = False
-        if reason:
-            return reason
-        if base(tokens[0]) in SHELLS and all(t.startswith('-') for t in tokens[1:]):
-            # a shell without a script reads its commands from a pipe: `echo git … | bash`
-            reason = judge_raw(text)
+        readers = {base(w) for w in cmd.words}
+        for body in cmd.bodies + cmd.strings:  # data, unless a shell or an interpreter reads it
+            reason = judge(body, depth + 1) if readers & SHELLS else \
+                judge_raw(body, needs_exec=True) if readers & INTERPRETERS else None
             if reason:
                 return reason
+        piped = piped or cmd.stdin and not cmd.bodies and not cmd.strings
+    for rest in read.rests:
+        reason = judge(rest, depth, lenient=True) if may_run_git(rest) else None
+        if reason:
+            return reason
+    for body in read.nets:
+        reason = net(body)
+        if reason:
+            return reason
+    if read.uncertain is not None:
+        rest = text[read.uncertain:]
+        reason = net(rest)
+        if reason:
+            return reason
+        if ASKING and read.quote and not lenient and re.search(r'\bgit\b', rest):
+            return 'cannot be read by the git guard (an open quote?)'
+    if piped:  # a shell reads the output of the other commands: any of the text may be run
+        return net(text)
     return None
 
 
@@ -1003,10 +1285,9 @@ def in_order(segment, patterns):
 
 
 def judge_raw(code, needs_exec=False):
-    """Plain pattern search, for text shlex cannot parse and for code handed to an
-    interpreter. Interpreter code is judged only when it can start a process: code that
-    merely prints or compares such a string passes. Under judge_ask it searches for the asked
-    commands (RAW_ASK)."""
+    """Plain pattern search, for code handed to an interpreter. It is judged only when it can
+    start a process: code that merely prints or compares such a string passes. Under judge_ask
+    it searches for the asked commands (RAW_ASK)."""
     if needs_exec and not EXEC_HINT.search(code):
         return None
     for segment in SEGMENT.findall(code):

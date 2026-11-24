@@ -107,6 +107,47 @@ def example(rule, folder):
     return text
 
 
+def q(command):
+    return "'" + command + "'"  # the examples hold no single quote
+
+
+# Spellings that keep an example a git command some shell runs (#33): each must stay stopped.
+# Where the guard's reader is certain it judges the words; where it is not (a backtick, `$((`,
+# zsh's `>!`, `case`, a function) it reads the text as the former rules did, so no spelling can
+# pass what they stopped. `g` is the example with `git ` cut off.
+SPELLINGS = [
+    # a redirection anywhere, also the forms only one shell knows
+    lambda g: 'git 2>&1 ' + g, lambda g: 'git >/dev/null ' + g, lambda g: 'git >! out ' + g,
+    lambda g: 'git >| out ' + g, lambda g: 'git &>log ' + g, lambda g: 'git <<<x ' + g,
+    lambda g: 'git < <(echo) ' + g, lambda g: 'git>&2 ' + g, lambda g: '2>&1 git ' + g,
+    lambda g: 'git ' + g + ' 2>&1', lambda g: 'git ' + g + ' >! out', lambda g: 'git ' + g + ' &>log',
+    # words the text does not fix, which may be no word at all
+    lambda g: 'git $(true; true) ' + g, lambda g: 'git ${x:-} ' + g, lambda g: 'git `true` ' + g,
+    lambda g: 'git $x ' + g, lambda g: '$(true)git ' + g, lambda g: '$pfx git ' + g,
+    # continuations, comments, quotes around what follows
+    lambda g: 'g\\\nit ' + g, lambda g: 'git \\\n' + g, lambda g: 'git ' + g.replace(' ', ' \\\n '),
+    lambda g: 'git ' + g + " # don't", lambda g: "echo x # it's\ngit " + g,
+    lambda g: 'git ' + g + "; echo '", lambda g: 'git ' + g + '\n\\', lambda g: "g''it " + g,
+    # other commands, groups, keywords and wrappers around it
+    lambda g: ': ; git ' + g, lambda g: 'true && git ' + g, lambda g: '( git ' + g + ' )',
+    lambda g: '{ git ' + g + '; }', lambda g: '! git ' + g, lambda g: 'coproc git ' + g,
+    lambda g: 'time git ' + g, lambda g: 'A=b git ' + g, lambda g: 'command git ' + g,
+    lambda g: '- git ' + g, lambda g: 'if true; then git ' + g + '; fi',
+    lambda g: "cat <<E\nit's\nE\ngit " + g, lambda g: "cat <<'E'\n$(x\nE\ngit " + g,
+    # run from a string or a substitution
+    lambda g: 'echo "$(git ' + g + ')"', lambda g: 'echo `git ' + g + '`',
+    lambda g: 'x=$(git ' + g + ')', lambda g: 'eval ' + q('git ' + g),
+    lambda g: 'bash -c ' + q('git ' + g), lambda g: 'trap ' + q('git ' + g) + ' EXIT',
+    lambda g: 'bash <<EOF\ngit ' + g + '\nEOF', lambda g: 'echo ' + q('git ' + g) + ' | sh',
+    # text the reader is not certain of, before, around and after it
+    lambda g: 'echo `date`; git ' + g, lambda g: 'git ' + g + ' `date`',
+    lambda g: 'echo $((1<<2)); git ' + g, lambda g: 'git ' + g + ' $[1]',
+    lambda g: 'case x in x) git ' + g + ';; esac', lambda g: 'f() { git ' + g + '; }; f',
+    lambda g: 'echo "$(case x in a) echo;; esac)"; git ' + g, lambda g: 'a[1]=x; git ' + g,
+    lambda g: '[[ -n x ]] && git ' + g, lambda g: 'echo "\ngit ' + g,
+]
+
+
 def message_words(rule):
     text = re.sub(r'^(git -C \* |git \* |git )', '', rule[5:-1])
     return re.sub(r'\s+', ' ', text.replace('*', ' ')).strip()
@@ -128,6 +169,18 @@ def main():
                 stopped += 1
                 if got == 'allow' or (name == 'deny' and got != 'deny'):
                     failures.append(f'STOPPED {command!r} (from {rule}): {got}, wanted {name}')
+                for k, spell in enumerate(SPELLINGS):
+                    spelled = spell(command[4:])
+                    got = decide(spelled, rules)
+                    stopped += 1
+                    if got == 'allow' or (name == 'deny' and got != 'deny'):
+                        failures.append(f'SPELLING {k} {spelled!r} (from {rule}): {got}, '
+                                        f'wanted {name}')
+        # the net reads an uncertain text by every former rule: the guard's list holds them all
+        net = {rule for rule, _, _ in guard.NET[name == 'ask']}
+        for rule in FORMER[name]:
+            if rule[5:-1] not in net:
+                failures.append(f'NET lacks the former {name} rule {rule}')
     for command in ("git -C /repo push origin main # it's ready", 'git -C /repo commit -m "open'):
         stopped += 1  # a comment or unreadable text is asked, not passed
         if decide(command, rules) != 'ask':

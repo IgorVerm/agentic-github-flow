@@ -2,7 +2,8 @@
 
 Status: proposal for the maintainer, issue #146, fourth version. Nothing here is implemented.
 The first version was written around this repository's own test suite; the maintainer sent it
-back twice and then answered the four questions the third version left (rulings below). This
+back twice, answered the four questions the third version left and then the one the
+fourth left (rulings below). This
 version describes one way of working for every repository that
 installs the method, and treats this repository as its first case, in
 [Part C](#part-c-this-repository-as-the-first-case).
@@ -49,8 +50,8 @@ After the third round: the audit agent's list no longer waits for you, a check t
 caught something gets no exemption, and the two choices you left to me are made and argued
 in [§B.6](#b6-the-two-choices-left-to-the-author).
 
-**One question is left,** at the end of §B.6: your third-round answer on the audit list
-may also bear on your earlier ruling that removed checks wait for you.
+**No question is left.** The one the fourth version ended on, whether removed checks
+still wait for you, you answered with "Reviewer, en merge" (rulings below; §B.3).
 
 ## The maintainer's rulings on the first version, 2026-11-24
 
@@ -95,6 +96,15 @@ overview chat.
 | 2. "May be left behind", or "is left behind"? | "wat raadt fable aan ik ben open voor allebei" (what does Fable recommend; I am open to both). | Left to the author: the strict reading (§B.6). |
 | 3. Does a check that once caught something stay, although it protects nothing critical? | "nee want dan kan je een test die een mini bug opvangt zogezegd eeuwig moeten houden dat is onwerkbaar en beschermt niets in de toekomst" (no, because then a test that catches a tiny bug would have to be kept forever, so to speak; that is unworkable and protects nothing in the future). | No. Having caught something is no reason to keep a check, in the first pruning pass as in every later one (§B.4). |
 | 4. Where does a task check live until the landing? | "laat fable de beste optie kiezen" (let Fable choose the best option). | Left to the author: on the issue (§B.6). |
+
+## The maintainer's ruling on the fourth version, 2026-11-24
+
+His answer to the one question the fourth version left, relayed word for word by the
+overview chat.
+
+| Question | His words | Ruling, as read here |
+|---|---|---|
+| Do removed checks still wait for the maintainer, as ruling 4 of the first round had it? | "Reviewer, en merge" (the reviewer, and merge). | The recommendation he was answering: once a repository's first pruning pass has gone through him, a removal outside the critical systems merges on the reviewer's approval, and only the removal of a check that protects a critical system still waits for him. This narrows ruling 4 of the first round. The condition on the first pruning pass comes from the recommendation, not from his words. The consequence stated with the question stands with the ruling (§B.3). |
 
 # Part A. What the two sources establish
 
@@ -178,7 +188,7 @@ cannot rewrite the rules it is judged by (P2). It joins the sections `merge_pr.p
 two halves:
 
 - **The commands and the gate** (`fast`, `full`, `drive`, `check paths`,
-  `verification gate`) change on the maintainer's word, as the other guarded sections do.
+  `verification gate`, `removed checks`) change on the maintainer's word, as the other guarded sections do.
 - **The list of critical systems** does not wait for him (ruling 1 of the third round).
   How it changes without him is this proposal's design. The list is the `critical paths`
   row and, under the table, one line per entry with its reason. A change to it lands as
@@ -203,6 +213,7 @@ two halves:
 | `check paths` | Where checks live, as patterns. | `**/tests/**`, `**/*_test.rs` | `tests/**` |
 | `critical paths` | The critical systems, as path patterns: the parts whose checks are kept. Listed by an audit agent, checked by the reviewer. | Save-game format, the simulation core | a first guess until the audit: the guards, the merge and push gates, the pre-push hook, the installer (Part C) |
 | `verification gate` | `off`, `observe` or `enforce`; `off` when missing. | `observe` | `observe` |
+| `removed checks` | Who approves a change that removes checks (§B.3): `maintainer` or `reviewer`; `maintainer` when missing. | `maintainer` until the first pruning pass has merged | `maintainer` until the first pruning pass has merged |
 
 A project with a heavy harness (a game, a mobile app) keeps it as its own skill or script and
 names it under `drive`; the article's advice to put a `verify` skill next to the code (§3)
@@ -291,15 +302,31 @@ requests behind it. An item enters only when the pattern was seen in at least tw
 requests and can be recognised from a diff (article §3, *Turn misses into rules*), which is
 also this repository's rule for rules. It merges without the maintainer's word (ruling 6).
 
-**Removed checks wait for the maintainer** (ruling 4). `merge_pr.py` refuses the automatic
-merge when a change deletes a file under `check paths`, or removes more test definitions
-from any one file than it adds there (a default pattern covers `def test_`, `#[test]`, `it(` and `test(`; a
-repository may set its own). The maintainer then decides, which costs a minute for the rare
-change that only moves a check. For a pruning pass his word is on a summary, not on each
-test: the audit's list, and the removed checks counted per part of the code with the one
-reason they share (outside the critical systems, or no defect makes it fail); the reviewer
-has checked each removal against the list. Whether this ruling still stands after the third
-round is the one question left (§B.6).
+**Removed checks: the reviewer, and for a critical system the maintainer** (ruling 4 of
+the first round, narrowed by the ruling on the fourth version). `merge_pr.py` notices a
+removal when a change deletes a file under `check paths`, or removes more test definitions
+from any one file than it adds there (a default pattern covers `def test_`, `#[test]`,
+`it(` and `test(`; a repository may set its own). What happens then depends on a row of
+the section, `removed checks`, which is in the half that changes on the maintainer's word
+(§B.2):
+
+- **`maintainer`,** the value until a repository's first pruning pass has merged: every
+  removal waits for him. For that pass his word is on a summary, not on each test: the
+  audit's list, and the removed checks counted per part of the code with the one reason
+  they share (outside the critical systems, or no defect makes it fail); the reviewer has
+  checked each removal against the list.
+- **`reviewer`,** which he sets after that pass: a removal outside the critical systems
+  merges on the reviewer's approval. The removal of a check that protects a critical
+  system still waits for him: `merge_pr.py` refuses the automatic merge when the paths
+  that trigger the removed check (§B.4, item 2) match `critical paths`, and also when it
+  cannot tell which paths trigger it.
+
+The consequence, stated with the question and kept here: the list of critical systems
+changes on a reviewer's approval (§B.2), so two changes in a row, one that drops an entry
+from the list and one that removes its checks, can pass with no person in between. The
+reviewer of the audit change is then the only guard. The remedy, if it is ever wanted, is
+that an audit change which removes an entry waits for the maintainer; that would narrow
+ruling 1 of the third round, so it is his to choose and not proposed.
 
 **Not proposed: a hook that runs the checks when the agent finishes** (the article's
 suggestion, §3). It would be a second place that decides what runs, per client, in a plugin
@@ -367,8 +394,8 @@ Having caught something is no reason to keep a check (ruling 3 of the third roun
 that once caught a small defect outside the critical systems would otherwise have to be
 kept forever, and it protects nothing in the future. That holds in the first pruning pass
 too, so the record of failures (CI, `verify.py`) is a measurement and never an exemption.
-A removed check is recorded with its reason in the commit, and the change waits for the
-maintainer (§B.3).
+A removed check is recorded with its reason in the commit; who must approve the removal
+is in §B.3.
 
 **5. When pruning happens.** Now, as the first step in every repository that adopts the
 method: the audit agent lists the critical systems, and one pruning pass applies the rule
@@ -489,21 +516,12 @@ The reviewer runs only the comment the `Verified:` line names by URL, checks tha
 account that posted it is the one the change comes from (a signature can be typed by
 anyone who may comment), and reads it first, as it reads the change's own code.
 
-**One question left.** Your first-round ruling 4 has removed checks wait for you. Your
-third-round answer on the audit list gives as its reason that there are far too many tests
-for a person to go through, and a pruning pass is where the most tests change at once.
-The proposal keeps ruling 4 as you gave it and makes your part one summary per pass
-(§B.3). The alternative that follows your newer reason: a removal outside the critical
-systems merges on the reviewer's approval, and only the removal of a check that protects a
-critical system waits for you. Its consequence, for you to weigh: the list changes on a
-reviewer's approval (§B.2), so under the alternative two changes in a row, one that drops
-an entry from the list and one that removes its checks, would pass with no person in
-between; the reviewer of the audit change is then the only guard. Recommendation: the
-alternative, after the first pruning pass of a repository has gone through you once, so
-that you have seen the rule applied before it runs without you. If the two changes in a
-row worry you, the remedy is that an audit change which removes an entry waits for you;
-that would narrow your ruling 1 of the third round, so it is yours to choose and not
-proposed here.
+**The question the fourth version left, answered.** Ruling 4 of the first round had
+removed checks wait for the maintainer; his third-round reason, that there are far too
+many tests for a person to go through, bears on a pruning pass most of all. Asked whether
+removals outside the critical systems could merge on the reviewer's approval once the
+first pruning pass of a repository had gone through him, he answered "Reviewer, en merge"
+(rulings above). The mechanism and the consequence that goes with it are in §B.3.
 
 # Part C. This repository as the first case
 
@@ -592,7 +610,7 @@ proposal's pull request, 184,566 tokens in 7 minutes.
 | A checklist triggered by the diff | A table for readers in `HANDOFF.md` §What to read for which work. | Triggers in `tests/run_all.py`; `REVIEW.md`. |
 | Rounds that build on each other | A re-review reads only the new commits when the head moved, without the earlier findings. | §B.3. |
 | Rules read from the default branch | `merge_pr.py` and `templates/pre-push` read their settings from the default branch. `review-change` step 3 does not say from which commit it reads. | §B.3. |
-| Changes cannot modify their own checks | Strong for the gate itself: `merge_pr.py` runs from the installed plugin and holds rules, guards, hooks, CI and its own files for the maintainer (`EXCLUDED`), including the gate scripts' tests by name. Not for the other tests: CI runs the pull request's tests, so a change can remove one and merge automatically if the reviewer misses it. | Removed checks wait for the maintainer. |
+| Changes cannot modify their own checks | Strong for the gate itself: `merge_pr.py` runs from the installed plugin and holds rules, guards, hooks, CI and its own files for the maintainer (`EXCLUDED`), including the gate scripts' tests by name. Not for the other tests: CI runs the pull request's tests, so a change can remove one and merge automatically if the reviewer misses it. | Removed checks need the reviewer's approval, and the maintainer's for a critical system or before the first pruning pass (§B.3). |
 | A review belongs to one commit | `review_verdict.py` pins the verdict to a SHA. | Exists. |
 | A stamp and a gate with three modes | Body lines `Overlap check:` and `Efficient design:`; `merge_pr.py` refuses without the first. | The `Verified:` line and the gate row. |
 | Review the reviewers | Nothing; C.1 was collected by hand. | The report script. |
@@ -604,7 +622,7 @@ proposal's pull request, 184,566 tokens in 7 minutes.
 
 | Setting | Value | From |
 |---|---|---|
-| `fast` | `python3 tests/run_all.py --changed`: each entry of `TESTS` gets the path patterns that trigger it; `skills_format.py` and `repo_checks.py` run on every change (0.8 s together) for as long as they stand, which the audit decides (next row) | The reader's table in `HANDOFF.md`, made usable by a script |
+| `fast` | `python3 tests/run_all.py --changed`: each entry of `TESTS` gets the path patterns that trigger it; `skills_format.py` and `repo_checks.py` run on every change (0.8 s together) for as long as they stand, which the audit decides (the `critical paths` row) | The reader's table in `HANDOFF.md`, made usable by a script |
 | `full` | `python3 tests/run_all.py`, in CI on three systems | Today |
 | `critical paths` | For the audit agent to decide. A first guess, from the paths `merge_pr.py` already holds for the maintainer's word: `plugins/guards/**`, `plugins/core/scripts/merge_pr.py`, `push_branch.py`, `push_paths.py`, `landing.py`, `review_verdict.py`, `templates/pre-push`, `tools/installer.py`, `install.sh`, `install.ps1`. Under the new pruning rule that guess would remove `repo_checks.py` and `skills_format.py`, which protect none of those paths; until this version both stayed because they had failed in CI. They are this repository's only checks that no personal data or home path is published (which cannot be taken back), that a plugin's three version numbers agree (or installed copies keep old files) and that a skill stays inside what both clients accept, and `AGENTS.md` rests its budgets on them. So the first guess adds what they protect: `rules/**`, the plugin manifests and `.claude-plugin/marketplace.json`, `plugins/*/skills/**`, and the repository-wide scan for personal data, which is a property of every path and has to be listed as such | `EXCLUDED` in `merge_pr.py`; `AGENTS.md` §Rules of this repository |
 | Windows in every CI run | Kept (ruling 7) | 19 of 21 failed runs |
@@ -625,7 +643,7 @@ until it is tried, and the pruning pass may make it unnecessary.
 | The goal on the issue | `open-issue`, `requirements`, `spec-first`: the three kinds of check | About 300 bytes each; budgets raised | Automatically |
 | The section | `repo-docs` (layout and skeleton), each repository's `HANDOFF.md` | One table | The layout automatically; a repository's own section as a guarded section: the commands and the gate on the maintainer's word, the list of critical systems as an audit change (§B.2) |
 | `verify.py`, the line's format, the report | Core plugin `scripts/`, with tests | Three scripts | Automatically, except a test added to `tests/review_verdict.py`, which `EXCLUDED` matches |
-| The gate, removed checks, the round limit | `merge_pr.py`, `push_branch.py`, `landing.py` | Milliseconds per landing | On the maintainer's word |
+| The gate, removed checks (the `removed checks` row), the round limit | `merge_pr.py`, `push_branch.py`, `landing.py` | Milliseconds per landing | On the maintainer's word |
 | The reviewer's part | `review-change` steps 3 and 4, `ship-change` steps 3, 4 and 8 | About 400 bytes each; budgets raised | Automatically |
 | The two kinds of check, admission, pruning, flaky rule | The `verify` skill for every repository; `AGENTS.md` §Test gate and a `DESIGN_DECISIONS.md` entry here | About 900 bytes | On the maintainer's word |
 
@@ -641,10 +659,10 @@ exception.
 |---|---|---|
 | 0 | This proposal. | The maintainer approves it. |
 | 1, the method | The `verify` skill, the section, `verify.py`, the line, the goal on the issue. No gate yet. | Merged. |
-| 2, audit and prune here | The audit agent lists this repository's critical systems and the reviewer checks the list; the section is written; one pruning pass applies the rule. | The audit change has merged on the reviewer's approval; the maintainer has merged the section's other rows and the pruning pass. |
+| 2, audit and prune here | The audit agent lists this repository's critical systems and the reviewer checks the list; the section is written; one pruning pass applies the rule. | The audit change has merged on the reviewer's approval; the maintainer has merged the section's other rows and the pruning pass, and may then set `removed checks` to `reviewer`. |
 | 3, observe here | `verification gate` set to `observe` in this repository. Nobody is refused. | 20 pull requests have landed. |
 | 4, decide | The report over those 20: lines missing, how many `none`, how many disputed, how many standing checks were added and for what. | The maintainer decides to enforce, change or drop. |
-| 5, enforce here | Removed checks and the round limit refuse automatic merges. | The first `Review by:` date. |
+| 5, enforce here | Removed checks (by the `removed checks` row) and the round limit refuse automatic merges. | The first `Review by:` date. |
 | 6, every other repository | The same order in each: the audit, the section, a pruning pass, observe. The Rust and Bevy repositories first, since clippy gives them a fast check from the first day. | Per repository. |
 
 If stage 4 shows the line is written by rote, the gate stops at observe and the rest goes
@@ -660,10 +678,10 @@ Each issue below is one session and one pull request.
 | 3 | `verify.py`: read the section from the default branch, run `fast` or `full`, time it, write the local record. | Core plugin `scripts/`, a test | Automatic |
 | 4 | The `Verified:` line: the format script, `ship-change` step 4, `review-change` steps 3 and 4 (rules read from the base, the line checked, a task check taken from its issue comment and rerun, a standing check held to the admission test). | Core plugin, `tests/review_verdict.py` | Maintainer (`EXCLUDED` matches that test) |
 | 5 | The gate in observe mode: the row, the condition in `merge_pr.py` and `push_branch.py`, and `Verification` added to the guarded sections, with the audit change (the list of critical systems and nothing else, approved by the reviewer) as the one change to it that merges automatically. | Both scripts, `landing.py`, their tests | Maintainer |
-| 6 | Removed checks and the third findings round refuse the automatic merge; `ship-change` step 8 stops there and hands earlier findings to a re-review. | `merge_pr.py`, its test, `ship-change` | Maintainer |
+| 6 | Removed checks, by the `removed checks` row (`maintainer`, or `reviewer` with the removal of a critical system's check still held), and the third findings round refuse the automatic merge; `ship-change` step 8 stops there and hands earlier findings to a re-review. | `merge_pr.py`, its test, `ship-change` | Maintainer |
 | 7 | The audit of this repository, in two pull requests. First the section with its commands, triggers and `--changed` in `tests/run_all.py`, `AGENTS.md` §Test gate, and the `DESIGN_DECISIONS.md` entry with the three rounds of rulings and a review date. Then the audit change: an audit agent lists the critical systems with a reason each, and the reviewer checks the list. | `tests/run_all.py`, `HANDOFF.md`, `AGENTS.md`, `DESIGN_DECISIONS.md` | The first: maintainer. The audit change: the reviewer's approval |
 | 8 | The report script. | Core plugin `scripts/`, a test | Automatic |
 | 9 | Read the 41 findings comments for patterns seen in two or more pull requests; write this repository's `REVIEW.md`. | `REVIEW.md`, `review-change` | Automatic |
-| 10 | The pruning pass here, now: the rule of §B.4 applied to the 34 test files, each removal with its reason. Right after issue 7. | `tests/` | Maintainer |
+| 10 | The pruning pass here, now: the rule of §B.4 applied to the 34 test files, each removal with its reason. Right after issue 7. It is this repository's first pruning pass, so it goes through the maintainer, on a summary. | `tests/` | Maintainer |
 | 11 | After stage 4 and the maintainer's decision: the gate set to `enforce` here. Optional, if the wait still matters after pruning: measure running the test files in parallel. | `HANDOFF.md`, `tests/run_all.py` | Maintainer |
 | 12 | The first Rust and Bevy repository: the audit, the section, a pruning pass, observe mode. | That repository | Its own landing mode |

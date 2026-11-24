@@ -50,7 +50,8 @@ A row of the repository's `## Issue chats settings` (the method's §1), owned he
    `~/.ssh`, `~/.aws`, `~/.netrc`, `~/.gnupg`, `~/.config/gh`, `.env` files, `*.pem`, `*.key`,
    `*.p12`, and what the user's and the managed Claude Code settings and the project settings of
    the worktree it is given deny reads of, read at each run); approval `never`, the person's
-   Codex configuration and rules ignored, no hooks, no apps or plugins. The time limit is the
+   Codex configuration and rules ignored, no hooks, no apps or plugins, at most 2 of Codex's
+   own subagents at a time, each tool output capped in its context. The time limit is the
    settings row's number after the model, else 60 minutes. The effort is its value from the
    effort list, passed as `--effort` on every turn, each `--resume` too (a resume does not keep
    the effort of the turn before it, measured 2026-11-22); without it a turn runs at the model's
@@ -65,11 +66,16 @@ A row of the repository's `## Issue chats settings` (the method's §1), owned he
    finds it there and resumes it; the person opens it with `codex resume <id>`. The Codex desktop
    app does not list it, since `codex exec` threads carry the source `exec` (measured
    2026-11-20).
-5. **Decide the next step** from the last message: another turn in the same job (`--resume
-   <thread id>` with a new prompt file and the row's `--effort`), a question for the user (the
-   method's §4 *Questions for the user*) or one the chat answers itself, whose answer goes back
-   with `--resume`; or done. `--fresh` starts a new job from the chat's HEAD, dropping what the
-   old one held.
+5. **Decide the next step** from the last message, by rounds: a round is one task in a prompt of
+   its own (a part of the issue, a round of a model), and the chat decides where one ends.
+   Within a round, `--resume <thread id>` with a new prompt file and the row's `--effort`
+   carries on the thread: an answer to a question (the user's, through the method's §4
+   *Questions for the user*, or the chat's own), a review finding, a turn the time limit cut.
+   The next task in the job is a turn without `--resume`: a fresh thread, to which the worker
+   hands the job's commits and the last final message (the worker's header, *A round*), so the
+   old context is not re-sent with every request; the prompt adds only what the chat knows
+   beyond that. Or done. `--fresh` starts a new job from the chat's HEAD, dropping what the old
+   one held.
 6. **Export and import, once, when Codex is done:** `<worker> <worktree> --export` has a git
    bundle of Codex's commits cut inside Codex's sandbox and reports its path as `bundle`; then,
    inside the chat's own sandbox, `python3 <plugin>/scripts/codex_import.py <worktree> <bundle>`

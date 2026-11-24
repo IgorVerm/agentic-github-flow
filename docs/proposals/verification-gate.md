@@ -1,8 +1,8 @@
 # Proposal: verification as part of the method, for every repository
 
-Status: proposal for the maintainer, issue #146, second version. Nothing here is implemented.
+Status: proposal for the maintainer, issue #146, third version. Nothing here is implemented.
 The first version was written around this repository's own test suite; the maintainer sent it
-back (rulings below). This version describes one way of working for every repository that
+back twice (rulings below). This version describes one way of working for every repository that
 installs the method, and treats this repository as its first case, in
 [Part C](#part-c-this-repository-as-the-first-case).
 
@@ -29,23 +29,21 @@ testable goal on every piece of work, set before the work starts.
    Where no cheap check exists, the issue says so and names who judges.
 2. **A `verify` skill** that holds the procedure, and a `## Verification` section in each
    repository's `HANDOFF.md` that holds that repository's facts: its fast command, its full
-   command, how to run the product, its critical parts, its time limits.
+   command, how to run the product, and its critical systems, which an audit agent lists.
 3. **One line per landing,** `Verified:`, naming the kind of evidence, or `none` with a
    reason. Checked by the reviewer and by the two landing scripts, starting in observe mode.
-4. **Limits on what a change costs, not on how many tests exist.** The fast check stays under
-   a fixed time however large the repository grows, because it runs only what the change
-   touches. The full check has a limit on waiting time. A growing codebase may grow its
-   checks.
-5. **Every check earns its place, and loses it.** A new check is shown to fail on a named
-   defect. A check that has never failed and guards no critical part is removed at pruning.
+4. **A check made for an issue stays with that issue.** It proves the goal and is left
+   behind. It joins the checks that run on every change only when it protects a critical
+   system.
+5. **No budget, in tests or in seconds.** What decides whether a check is kept is what it
+   protects, not how many there are or how long they take. Time is measured and reported.
 
-**What changed after your answers.** The frozen budget of 34 test files is gone (your answer
-to question 2). Limits are now per change and per repository, set in each repository's own
-`HANDOFF.md`. The pruning rule is yours (your answer to question 4). Everything specific to
-this repository moved to Part C.
+**What changed after your answers.** After the first round: one method for every
+repository, with this repository moved to Part C. After the second round: the time limits are
+gone as well, an audit agent lists the critical systems, checks written for an issue are not
+carried forward unless they protect one, and this repository is pruned now, not on a date.
 
-**New questions** raised by the revision are in [§B.6](#b6-open-questions): four, each with
-my recommendation.
+**One question is left,** in [§B.6](#b6-open-question).
 
 ## The maintainer's rulings on the first version, 2026-11-24
 
@@ -62,6 +60,22 @@ implements them.
 | 6. `REVIEW.md` merges without the maintainer's word | Agreed. |
 | 7. Windows stays in every CI run of this repository | Agreed. |
 | The proposal as a whole | "dit voorstel is te gericht op deze repo ik wil een algemene werkwijze gebaseerd op anthropics document en de vaststelling van METR dat agents beter scoren als ze duidelijke testbare doelen krijgen" (too focused on this repository; I want a general way of working based on Anthropic's document and METR's finding that agents score better when they get clear, testable goals). |
+
+## The maintainer's rulings on the second version, 2026-11-24
+
+His answers to the four questions of the second version, relayed word for word by the
+overview chat: "1 time limit is geen goed criteria een vast amount of max tests ook niet 2 een
+audit agent 3 nu snoeien en duurzaam systeem die zorgt dat we een een toetsbaar doel op de
+issue vóór het werk begint maar dit hoeft niet mee genomen te worden naar volgende issues die
+mogen achtergelaten worden tenzij ze kritische systemen beschermen 4 ja elke repo werkt op
+deze manier."
+
+| Question | Ruling, as read here |
+|---|---|
+| 1. Is 120 seconds the right limit for the fast check? | A time limit is not a good criterion, and neither is a fixed or maximum number of tests. Both are dropped (§B.4). |
+| 2. Who lists a repository's critical paths? | An audit agent (§B.2). |
+| 3. How long between pruning passes? | Prune now, and build a lasting system: a testable goal on the issue before the work starts; what was made to prove it need not be carried to later issues and may be left behind, unless it protects critical systems (§B.4). |
+| 4. Does a repository without CI get the gate? | Yes: every repository works this way. |
 
 # Part A. What the two sources establish
 
@@ -93,9 +107,9 @@ real one (METR Appendix J; small experiments, no effect sizes in the text).
 | P5 | **Stop at a fixed number of failed rounds.** Gaming is more likely when the agent is at the limit of its ability. | Article §3 (*Failing tests require human attention*); METR Appendix G |
 | P6 | **Checks only grow unless they are pruned, and a slow or flaky check gets run less or rerun, not fixed.** | Article §2, §3 (*Turn misses into rules*) |
 
-What the sources do not give: any number for what a check costs, any limit on how many checks
-to keep, any rule for removing one. Those parts of the method (§B.4) are this proposal's own
-design, argued from the measurements in Part C.
+What the sources do not give: any number for what a check costs, or any rule for which
+checks to keep and which to remove. That part of the method (§B.4) follows the maintainer's
+rulings, argued from the measurements in Part C.
 
 # Part B. The method, for every repository
 
@@ -129,10 +143,11 @@ Every issue an agent picks up has a `Check:` that is one of three kinds:
 1. Read the issue's check and the repository's `## Verification` section, from the default
    branch.
 2. Decide the kind of evidence this change needs (§B.3). Proportion is the rule: a
-   documentation change needs none, a change to a critical part needs the full check.
+   documentation change needs none, a change to a critical system needs the full check.
 3. Run the fast check while working and before every push. Fix what fails; after two failed
    corrections of the same problem, stop (the existing core rule).
-4. Before adding a check, apply the admission test (§B.4).
+4. Decide what happens to a check made for this issue: left behind, or kept as a standing
+   check because it protects a critical system (§B.4).
 5. Write the `Verified:` line.
 
 **The section** in each repository's `HANDOFF.md` holds the facts, in the same table form as
@@ -148,18 +163,26 @@ next remove checks unseen.
 | `full` | The command for everything. | `cargo test --workspace` and the headless run | `python3 tests/run_all.py` |
 | `drive` | How to start the product and look at it, or the project skill or script that does. | The game run headless for N frames from a fixed seed; a screenshot command | none: the tests already run the real hooks, installer and scripts |
 | `check paths` | Where checks live, as patterns. | `**/tests/**`, `**/*_test.rs` | `tests/**` |
-| `critical paths` | The parts whose checks stay even if they never fail. | Save-game format, the simulation core | `plugins/guards/**`, the merge and push gates, `templates/pre-push`, the installer |
-| `fast limit` | Seconds the fast check may take for one change. | `120` | `120` |
-| `full limit` | Minutes a change may wait for the full check. Starts at the wait measured when the section is written. | the measured wait | `21`, today's wait (Part C) |
+| `critical paths` | The critical systems, as path patterns: the parts whose checks are kept. Listed by an audit agent. | Save-game format, the simulation core | `plugins/guards/**`, the merge and push gates, `templates/pre-push`, the installer |
 | `verification gate` | `off`, `observe` or `enforce`; `off` when missing. | `observe` | `observe` |
 
 A project with a heavy harness (a game, a mobile app) keeps it as its own skill or script and
 names it under `drive`; the article's advice to put a `verify` skill next to the code (§3)
-is kept in that form. A repository without the section is simply not gated.
+is kept in that form. Every repository that installs the method gets the section (ruling 4
+of the second round); one without CI runs `full` before the landing, as `ship-change`
+already requires in local-main mode.
+
+**The audit agent** lists the critical systems. It is a session with a fresh context that
+reads the repository, not the history of one change, and answers one question per part of
+the code: if this broke unnoticed, what would be lost that cannot be taken back or would
+stop the work (data, money, security, a release, the method's own gates)? It writes the
+list with one line of reason per entry as a change to the section. It runs when the section
+is first written, and again at each `Review by:` date. An agent that is working on a change
+never edits the list for that change (P2).
 
 **One script, `verify.py`, in the core plugin,** is the instrument that makes this the same
 everywhere: `verify.py fast` and `verify.py full` read the section from the default branch,
-run the command, time it against the limit, and append one line to a record in the git
+run the command, time it, and append one line to a record in the git
 directory (date, branch, command, seconds, passed or what failed). The record is local,
 shared by all worktrees, never committed. It gives every repository the two measurements
 this repository lacked: how long the checks take per change, and which checks ever caught
@@ -175,7 +198,7 @@ Verified: <kind>: <evidence>
 |---|---|---|
 | `goal` | The issue's check was run and met. | `the check of #212: cargo test -p sim save_roundtrip, passes; failed before the fix` |
 | `tests` | Existing checks ran and passed. | `verify.py fast, 71 s` |
-| `new-check` | A check was added; names the defect it fails on. | `save_roundtrip fails when the version field is dropped` |
+| `standing-check` | A check was added to those that run on every change, for a critical system; names the defect it fails on. | `save_roundtrip fails when the version field is dropped` |
 | `run` | The product or tool was run and its behaviour observed. | `headless run, 600 frames, seed 7, no panic` |
 | `seen` | A screenshot or rendered result was looked at; a person may need to judge. | `screenshot of the settings page at 375 px` |
 | `none` | Nothing to run. The reason is required. | `documentation only` |
@@ -196,7 +219,7 @@ what was not verified, is kept: `none` is a valid, searchable value.
 | While working | `verify.py fast`. | The `verify` skill. |
 | Before the push | The line exists and parses. | `push_branch.py`, next to its overlap condition. |
 | CI, where the repository has it | The `full` command. | The repository's own workflow. |
-| Review | The line against the diff: the evidence is real (a cheap command is rerun), it fits the size of the change, the issue's check is the one that was met, a `new-check` passes the admission test. | `review-change`. |
+| Review | The line against the diff: the evidence is real (a cheap command is rerun), it fits the size of the change, the issue's check is the one that was met, a `standing-check` protects a critical system and passes the admission test. | `review-change`. |
 | Merge | The line exists; the round limit; removed checks (below). | `merge_pr.py`. |
 
 **The modes** (article §3, *Start a new gate in observe mode*). Observe reports what would
@@ -229,64 +252,68 @@ suggestion, §3). It would be a second place that decides what runs, per client,
 whose every change waits for the maintainer. The line checked at the push gives the same
 guarantee. Worth another look once `fast` is quick everywhere.
 
-## B.4 Keeping checks worth their cost
+## B.4 Which checks are kept
 
 The request was a system that decides which checks run, how many exist and when they go. The
-first version answered "how many" with a fixed count. That is wrong for a codebase that
-grows (ruling 2): more code legitimately needs more checks. What must not grow is what one
-change costs, and what must not stay is a check that guards nothing.
+first version answered with a fixed count and the second with time limits. The maintainer
+rejected both: neither a number of tests nor a number of seconds says whether a check is
+worth having. The criterion is what a check protects.
 
-**1. Which checks run: only what the change touches.** The `fast` command selects by changed
-paths: the changed crate, the changed package, the test files whose trigger matches. A path
-the selection does not know runs everything, so selection can cost speed and never a check.
-This is the article's checklist with triggers (§3) applied to tests, and it is the core rule
-*Work grows with what changed* applied to the gate itself.
+Issue #146 asked for concrete budgets with an owner each. These rulings replace that
+requirement: the measured numbers stay in Part C as what is reported, and no number is a
+gate.
 
-**2. What a change may cost: two limits per repository, both in time.**
+**1. Two kinds of check, with different lifetimes.**
 
-| Limit | Value | Why it holds as the repository grows |
+| | A task check | A standing check |
 |---|---|---|
-| `fast limit` | 120 seconds by default | Selection keeps the fast check proportional to the change, not to the repository. A repository that cannot stay under it has a selection problem, not too many tests. |
-| `full limit` | The wait measured when the repository adopts the method; lowered when a measurement shows it can be | It limits waiting time, not work. More checks are met with parallel runs, splitting across jobs, and pruning. Raising the limit is the last resort and the repository's maintainers decide it. |
+| Made for | One issue: it shows that issue's goal was met (§B.1). | A critical system: it shows that system still works after any change. |
+| Lives | Until the issue lands. It is left behind: not added to the `full` command, and by default not committed. The `Verified:` line records what was run and what it showed. | In the repository, under `check paths`, run by `fast` when its trigger matches and by `full` always. |
+| May be | Quick and specific: a script, a one-off command, a failing-then-passing test, a screenshot. | Only what passes the admission test below. |
+| Count and time | Not limited. | Not limited. They are measured and reported (§B.5), never a reason by themselves to refuse or to remove a check. |
 
-`verify.py` prints the time against the limit on every run and the report (§B.5) shows the
-trend. Going over a limit is reported, and named in the landing report; it does not fail a
-run by itself, because a time limit that fails on a slow machine would be a flaky check.
-There is no limit on the number of checks.
+This is what keeps the method lasting. The agent always works against a testable goal, which
+is where METR finds agents strongest (P1), and the set of checks that every later change
+must pay for grows only when a critical system gains protection.
 
-**3. What may enter: the admission test.** A check is added only when it fails on a plausible
-defect that nothing else catches.
+**2. Which checks run on a change: only what the change touches.** The `fast` command
+selects by changed paths: the changed crate, the changed package, the test files whose
+trigger matches. A path the selection does not know runs everything, so selection can cost
+speed and never a check. This is the article's checklist with triggers (§3) applied to
+tests, and the core rule *Work grows with what changed* applied to the gate itself.
 
-1. The author names the defect as a change to the code under test: a condition inverted, a
-   branch removed, a value read from the wrong place.
-2. The author makes that change, sees the new check fail, and restores the code. For a bug
-   fix this is free: the check must fail on the commit before the fix.
-3. The line records it: `new-check: <test> fails when <defect>`.
-4. The reviewer repeats step 2 for one new check per pull request, of the reviewer's choice.
+**3. What may become a standing check: the admission test.** Two conditions.
 
-Refused at review: a test that restates the implementation (it asserts a constant equals
-itself, or that a stub returns what it was told to return); a test of someone else's code;
-a second test that fails on the same defect as an existing one (it becomes a case of that
-one); a test that stands in for a judgment (P4). No coverage target: coverage rewards
-exactly the tests this refuses.
+- It protects a path under `critical paths`.
+- It fails on a plausible defect that nothing else catches, and the author shows it: names
+  the defect as a change to the code (a condition inverted, a branch removed, a value read
+  from the wrong place), makes that change, sees the check fail, restores the code. For a
+  bug fix this is free: the check must fail on the commit before the fix. The line records
+  it, `standing-check: <test> fails when <defect>`, and the reviewer repeats it for one new
+  check per pull request, of the reviewer's choice.
 
-**4. What goes: the pruning rule** (ruling 4). At a pruning pass, a check is removed when
-both hold:
+Refused at review: a check outside the critical systems offered as a standing check; a test
+that restates the implementation (it asserts a constant equals itself, or that a stub
+returns what it was told to return); a test of someone else's code; a second test that fails
+on the same defect as an existing one (it becomes a case of that one); a test that stands in
+for a judgment (P4). No coverage target: coverage rewards exactly the tests this refuses.
 
-- it has never failed on record, in CI or in the local record of `verify.py`; and
-- it guards no path under `critical paths`.
+**4. Which standing checks go: the pruning rule.** From the two rulings together. A standing
+check is kept when either holds:
 
-A check added since the previous pass is not judged yet: it has had no time to fail.
+- it protects a path under `critical paths`, and a named defect still makes it fail; or
+- it has failed on record, in CI or in the local record of `verify.py`: it has caught
+  something, so it is not the "useless fluff" of the first ruling.
 
-A check on a critical path stays while the admission test still holds for it: a named defect
-makes it fail. One that cannot be made to fail goes too, critical or not. A removed check is
-recorded with its reason in the commit, and the change waits for the maintainer.
+Every other standing check is removed. A removed check is recorded with its reason in the
+commit, and the change waits for the maintainer (§B.3).
 
-**5. When pruning happens.** Two triggers, so that nobody has to remember: the `full limit`
-is exceeded twice in a row, or a date passes. The date is a `**Review by:**` line on the
-repository's `DESIGN_DECISIONS.md` entry for its verification settings; this repository
-already fails its own gate when such a date has passed (`tests/repo_checks.py`), and the
-report prints the date for the others.
+**5. When pruning happens.** Now, as the first step in every repository that adopts the
+method: the audit agent lists the critical systems, and one pruning pass applies the rule
+to the checks that exist. After that the system holds by construction, because new checks
+enter only through the admission test. The audit is repeated at a `**Review by:**` date on
+the repository's `DESIGN_DECISIONS.md` entry for its verification settings, because what is
+critical changes as a product grows; a pruning pass follows only if the list changed.
 
 **6. Flaky checks** (article §3). Not skipped, not given a sleep, not retried until green.
 The cause is fixed, or the check is deleted with the reason written down.
@@ -295,7 +322,8 @@ The cause is fixed, or the check is deleted with the reason written down.
 
 | The miss is | It becomes |
 |---|---|
-| Mechanical, and a test can fail on it | A case in an existing test, through the admission test |
+| Mechanical, in a critical system, and a test can fail on it | A case in an existing standing check, through the admission test |
+| Mechanical, elsewhere | An item in `REVIEW.md`; no standing check |
 | Something that must hold every time | A hook or a permission rule, not a sentence |
 | A matter of attention at review | An item in `REVIEW.md` |
 | Seen once | Nothing yet |
@@ -340,7 +368,7 @@ the local record, and prints for any repository:
 | Changes stopped before merging | Findings verdicts per pull request |
 | A control set | Reviewed pull requests with no findings and no later fix |
 | What each stage caught | The local record, CI failures by check, findings |
-| Cost per change | Fast and full seconds against their limits, CI runs per pull request, review rounds |
+| Cost per change | Fast and full seconds, CI runs per pull request, review rounds: reported, not limited |
 | Misses, per stage | A line `Missed by: <stage>` in the body of a change that fixes a defect which landed earlier |
 | The `Verified:` kinds | How many `goal`, `tests`, `none`; how many the reviewer disputed |
 
@@ -348,21 +376,15 @@ What would show the method is wrong: a `none` on a change that later needed a fi
 rounds rising after the gate; issues whose check was rewritten by the agent that did the
 work; the same evidence text on every landing.
 
-## B.6 Open questions
+## B.6 Open question
 
-1. **Is 120 seconds the right default for `fast limit`?** Recommendation: yes as a start. In
-   this repository the median test file takes 10 seconds and the slowest 61, so a change in
-   one area fits. It is a default; a repository sets its own.
-2. **Who lists the `critical paths` of a repository?** Recommendation: the maintainer, in the
-   change that adds the section, because the list decides what pruning may remove.
-3. **How long between pruning passes?** Recommendation: three months, per repository. The
-   rule spares a check added since the previous pass; that is my addition to your ruling,
-   because a check a week old has never failed either. Say so if you want it out.
-   The 120 seconds of question 1 rests on per-file times, not yet on a measured change;
-   issue 7 measures it.
-4. **Does a repository without CI get the gate?** Recommendation: yes. In local-main mode no
-   server runs anything after the agent, so the `full` command runs before the landing and
-   the line says so; `ship-change` already requires this.
+**Does the audit agent's list take effect without the maintainer's word?** The section is
+guarded (§B.2), so today a change to it waits for the maintainer at the merge. That keeps a
+working agent from narrowing the list for its own change, and it means the maintainer sees
+the audit's result once per repository and at each review date, without compiling it.
+Recommendation: keep the guard. The alternative is to let a change that the audit agent
+made, and nothing else touched, merge automatically; that needs a way for `merge_pr.py` to
+know a change came from an audit, which it does not have.
 
 # Part C. This repository as the first case
 
@@ -433,10 +455,10 @@ proposal's pull request, 184,566 tokens in 7 minutes.
 - CI earns its cost as the portability check: 19 of 21 failed runs failed on Windows only.
 - The suite grew fivefold in time in 30 days and nothing was ever removed. That is P6,
   measured.
-- 21 files never failed in CI and take two thirds of the time. Whether they are the
-  maintainer's "useless fluff" cannot be told yet: failures before a push leave no record.
-  The local record of `verify.py` is what will tell, and the `critical paths` list decides
-  which of them stay regardless.
+- 21 files never failed in CI and take two thirds of the time. By the pruning rule a file
+  among them stays only if it protects a critical system; the 13 that failed in CI stay as
+  checks that have caught something. Failures before a push leave no record yet, so "never
+  failed" here means never in CI; the audit and the pruning pass (Part D) settle each file.
 
 ## C.2 Inventory against the article
 
@@ -455,7 +477,7 @@ proposal's pull request, 184,566 tokens in 7 minutes.
 | A stamp and a gate with three modes | Body lines `Overlap check:` and `Efficient design:`; `merge_pr.py` refuses without the first. | The `Verified:` line and the gate row. |
 | Review the reviewers | Nothing; C.1 was collected by hand. | The report script. |
 | Flaky tests: fix or delete | Core rule against weakening a test; nothing on sleeps, retries, deleting. | §B.4. |
-| Pruning on a routine | Budgets for rules and skills; none for tests. | §B.4. |
+| Pruning on a routine | Budgets for rules and skills; nothing for tests. | §B.4: pruned now, then kept small by the admission test. |
 | Property and differential tests (§2) | One differential test, `tests/delete_guard_differential.py`, over 38,364 generated commands. Standard library only. | Enough; no library added. |
 
 ## C.3 This repository's values
@@ -464,16 +486,15 @@ proposal's pull request, 184,566 tokens in 7 minutes.
 |---|---|---|
 | `fast` | `python3 tests/run_all.py --changed`: each entry of `TESTS` gets the path patterns that trigger it; `skills_format.py` and `repo_checks.py` always run (0.8 s together) | The reader's table in `HANDOFF.md`, made usable by a script |
 | `full` | `python3 tests/run_all.py`, in CI on three systems | Today |
-| `critical paths` | `plugins/guards/**`, `plugins/core/scripts/merge_pr.py`, `push_branch.py`, `push_paths.py`, `landing.py`, `review_verdict.py`, `templates/pre-push`, `tools/installer.py`, `install.sh`, `install.ps1` | Paths `merge_pr.py` already holds for the maintainer's word |
-| `fast limit` | 120 s | The default; the slowest file takes 61 s |
-| `full limit` | 21 minutes, today's wait; lowered after the parallel run is measured | C.1 |
+| `critical paths` | For the audit agent to decide. A first guess, from the paths `merge_pr.py` already holds for the maintainer's word: `plugins/guards/**`, `plugins/core/scripts/merge_pr.py`, `push_branch.py`, `push_paths.py`, `landing.py`, `review_verdict.py`, `templates/pre-push`, `tools/installer.py`, `install.sh`, `install.ps1` | `EXCLUDED` in `merge_pr.py` |
 | Windows in every CI run | Kept (ruling 7) | 19 of 21 failed runs |
 | First `REVIEW.md` item | A script or test that handles paths, symlinks or child processes: does it hold on Windows? | 19 Windows-only failures on 14 branches |
-| First pruning candidates | The eight files above 20 seconds, then the 21 that never failed in CI, judged by the rule of §B.4 once the local record exists | C.1 |
+| The pruning pass, now | By the rule of §B.4, after the audit. On the first guess above, the test files outside the critical paths that never failed in CI are the ones to go or to shrink; the eight files above 20 seconds are looked at first | C.1 |
 
-Running the test files in parallel is worth a measurement: the local run uses 386 CPU seconds
-in 469 seconds of wall clock, one file at a time, and the files are independent processes.
-How much the wait drops is not known until it is tried.
+Time is no longer a criterion, and it is still worth knowing: the local run uses 386 CPU
+seconds in 469 seconds of wall clock, one file at a time, and the files are independent
+processes. Running them in parallel may shorten the 21-minute wait; how much is not known
+until it is tried, and the pruning pass may make it unnecessary.
 
 ## C.4 Constraints of this repository
 
@@ -486,7 +507,7 @@ How much the wait drops is not known until it is tried.
 | `verify.py`, the line's format, the report | Core plugin `scripts/`, with tests | Three scripts | Automatically, except a test added to `tests/review_verdict.py`, which `EXCLUDED` matches |
 | The gate, removed checks, the round limit | `merge_pr.py`, `push_branch.py`, `landing.py` | Milliseconds per landing | On the maintainer's word |
 | The reviewer's part | `review-change` steps 3 and 4, `ship-change` steps 3, 4 and 8 | About 400 bytes each; budgets raised | Automatically |
-| Admission, pruning, flaky rule | The `verify` skill for every repository; `AGENTS.md` §Test gate and a `DESIGN_DECISIONS.md` entry here | About 900 bytes | On the maintainer's word |
+| The two kinds of check, admission, pruning, flaky rule | The `verify` skill for every repository; `AGENTS.md` §Test gate and a `DESIGN_DECISIONS.md` entry here | About 900 bytes | On the maintainer's word |
 
 Held throughout: skills written once for both clients; a plugin version raised with
 `tools/bump_version.py` in every change that touches a plugin; one owner per fact (the
@@ -499,14 +520,16 @@ exception.
 | Stage | What changes | Ends when |
 |---|---|---|
 | 0 | This proposal. | The maintainer approves it. |
-| 1, the method | The `verify` skill, the section, `verify.py`, the line, the goal on the issue. No gate yet. | Merged, and this repository has its section. |
-| 2, observe here | `verification gate` set to `observe` in this repository. Nobody is refused. | 20 pull requests have landed. |
-| 3, decide | The report over those 20: lines missing, how many `none`, how many disputed, fast and full times, what the local record shows. | The maintainer decides to enforce, change or drop. |
-| 4, enforce here, and the first pruning pass | Removed checks and the round limit refuse automatic merges. | The first `Review by:` date. |
-| 5, the other repositories | The section in each, one at a time, each starting in observe. The Rust and Bevy repositories first, since clippy gives them a fast check from the first day. | Per repository. |
+| 1, the method | The `verify` skill, the section, `verify.py`, the line, the goal on the issue. No gate yet. | Merged. |
+| 2, audit and prune here | The audit agent lists this repository's critical systems; the section is written; one pruning pass applies the rule. | The maintainer has merged both. |
+| 3, observe here | `verification gate` set to `observe` in this repository. Nobody is refused. | 20 pull requests have landed. |
+| 4, decide | The report over those 20: lines missing, how many `none`, how many disputed, how many standing checks were added and for what. | The maintainer decides to enforce, change or drop. |
+| 5, enforce here | Removed checks and the round limit refuse automatic merges. | The first `Review by:` date. |
+| 6, every other repository | The same order in each: the audit, the section, a pruning pass, observe. The Rust and Bevy repositories first, since clippy gives them a fast check from the first day. | Per repository. |
 
-If stage 3 shows the line is written by rote, the gate stops at observe and the rest goes
-on: the testable goal (§B.1) and the cost and pruning rules (§B.4) do not depend on it.
+If stage 4 shows the line is written by rote, the gate stops at observe and the rest goes
+on: the testable goal (§B.1) and the rule for which checks are kept (§B.4) do not depend on
+it.
 
 Each issue below is one session and one pull request.
 
@@ -514,13 +537,13 @@ Each issue below is one session and one pull request.
 |---|---|---|---|
 | 1 | The `verify` skill with its project table, and the `## Verification` section in the `repo-docs` layout and skeleton. | Core plugin, `tests/skills_format.py` | Automatic |
 | 2 | The goal on the issue: the three kinds of check in `open-issue`, `requirements` and `spec-first`. | Three skills | Automatic |
-| 3 | `verify.py`: read the section from the default branch, run `fast` or `full`, time against the limit, write the local record. | Core plugin `scripts/`, a test | Automatic |
-| 4 | The `Verified:` line: the format script, `ship-change` step 4, `review-change` steps 3 and 4 (rules read from the base, the line checked, the admission test). | Core plugin, `tests/review_verdict.py` | Maintainer (`EXCLUDED` matches that test) |
+| 3 | `verify.py`: read the section from the default branch, run `fast` or `full`, time it, write the local record. | Core plugin `scripts/`, a test | Automatic |
+| 4 | The `Verified:` line: the format script, `ship-change` step 4, `review-change` steps 3 and 4 (rules read from the base, the line checked, a standing check held to the admission test). | Core plugin, `tests/review_verdict.py` | Maintainer (`EXCLUDED` matches that test) |
 | 5 | The gate in observe mode: the row, the condition in `merge_pr.py` and `push_branch.py`, and `Verification` added to the guarded sections. | Both scripts, `landing.py`, their tests | Maintainer |
 | 6 | Removed checks and the third findings round refuse the automatic merge; `ship-change` step 8 stops there and hands earlier findings to a re-review. | `merge_pr.py`, its test, `ship-change` | Maintainer |
-| 7 | This repository's section: triggers and `--changed` in `tests/run_all.py`, the critical paths, `AGENTS.md` §Test gate, the `DESIGN_DECISIONS.md` entry with the rulings above and a review date. Measures `--changed` for a change to `merge_pr.py` against the 120 seconds. | `tests/run_all.py`, `HANDOFF.md`, `AGENTS.md`, `DESIGN_DECISIONS.md` | Maintainer |
+| 7 | The audit of this repository: an audit agent lists the critical systems with a reason each; the section is written with them, with triggers and `--changed` in `tests/run_all.py`, `AGENTS.md` §Test gate, and the `DESIGN_DECISIONS.md` entry with both rounds of rulings and a review date. | `tests/run_all.py`, `HANDOFF.md`, `AGENTS.md`, `DESIGN_DECISIONS.md` | Maintainer |
 | 8 | The report script. | Core plugin `scripts/`, a test | Automatic |
 | 9 | Read the 41 findings comments for patterns seen in two or more pull requests; write this repository's `REVIEW.md`. | `REVIEW.md`, `review-change` | Automatic |
-| 10 | Measure running the test files in parallel, locally and on the three CI systems; lower `full limit` from the result. | `tests/run_all.py`, `HANDOFF.md` | Maintainer (guarded section) |
-| 11 | After stage 3 and the maintainer's decision: the gate set to `enforce` here, and the first pruning pass by the rule of §B.4. | `HANDOFF.md`, `tests/` | Maintainer |
-| 12 | The section in the first Rust and Bevy repository, in observe mode. | That repository | Its own landing mode |
+| 10 | The pruning pass here, now: the rule of §B.4 applied to the 34 test files, each removal with its reason. Right after issue 7. | `tests/` | Maintainer |
+| 11 | After stage 4 and the maintainer's decision: the gate set to `enforce` here. Optional, if the wait still matters after pruning: measure running the test files in parallel. | `HANDOFF.md`, `tests/run_all.py` | Maintainer |
+| 12 | The first Rust and Bevy repository: the audit, the section, a pruning pass, observe mode. | That repository | Its own landing mode |

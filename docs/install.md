@@ -177,7 +177,7 @@ so make it only with the person's agreement, and show the line first.
 
 ### The personal-data guard
 
-The guard reads three optional files in `${XDG_CONFIG_HOME:-~/.config}/agentic-github-flow/`,
+The guard reads four optional files in `${XDG_CONFIG_HOME:-~/.config}/agentic-github-flow/`,
 outside every repository so they are never committed. One entry per line; blank lines and `#`
 comments are ignored.
 
@@ -186,11 +186,23 @@ comments are ignored.
 | `personal-data` | an identifier beyond the git and gh identity, optionally `email:`, `phone:` or `name:` | calls that send it are asked |
 | `exempt-dirs` | an absolute folder (`~` allowed) | sessions working inside it are not checked, for work that other rules govern |
 | `local-mcp` | an MCP server name | its `mcp__<name>__*` tools count as local and are not checked |
+| `allow-addresses` | one whole e-mail address approved for publication, with its reason and date after `#` | that address passes everywhere |
 
 The work identity of step 2 goes into `personal-data`. Listing a folder or a server turns the
-check off there: `/` or `~` in `exempt-dirs` turns it off everywhere. A settings folder that a repository moves into itself
-(through `XDG_CONFIG_HOME` or `HOME` in its own settings) is not trusted for the two exemption
-files. The exact matching rules: the header of
+check off there: `/` or `~` in `exempt-dirs` turns it off everywhere.
+
+`allow-addresses` is for an address meant to be public, such as a company's security or support
+contact in a `SECURITY.md`. An address on it may go everywhere: into every repository's pushes
+(lines, file names, commit and tag messages, author and committer) and into every outbound call,
+to every recipient, also when it is the person's own address. There is no list per repository.
+The match is exact and ignores case: a domain, a pattern or a longer address that contains the
+listed one allows nothing, and everything else in the same call or push is checked as before.
+Each line is the person's decision to publish that address, so only the person adds one, never
+an agent: for example
+`security@company.example  # security contact in SECURITY.md; 2026-11-23`.
+
+A settings folder that a repository moves into itself (through `XDG_CONFIG_HOME` or `HOME` in
+its own settings) is not trusted for `exempt-dirs`, `local-mcp` or `allow-addresses`. The exact matching rules: the header of
 [`plugins/guards/scripts/pre_tool_personal_data.py`](../plugins/guards/scripts/pre_tool_personal_data.py).
 
 ### The sandbox-network guard (`--guards sandbox`)

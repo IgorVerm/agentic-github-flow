@@ -27,6 +27,7 @@ SCRIPT_DIRS = ('plugins/security/scripts', 'plugins/guards/scripts', 'plugins/co
 NAME = 'Fixture Persona'
 EMAIL = 'fixture.persona' + '@' + 'fixture-persona.eu'
 OTHER = 'jan.peeters' + '@' + 'acme-bouw.be'
+LISTED = 'security' + '@' + 'acme-bouw.be'  # approved for publication in a test's allow-addresses
 TOKEN = 'ghp_' + 'Q7m' * 12  # github-token: ghp_ and 36 letters or digits
 NOREPLY = 'Co-Authored-By: Claude <' + 'noreply' + '@' + 'anthropic.com>'
 # model bytes of a .glb that read as an address (#55: `lacus_early.glb` in pax_deorum)
@@ -120,7 +121,7 @@ class Push(unittest.TestCase):
         self.assertIn('pre-push: refusing', r.stderr)
         for name in names:
             self.assertIn(name, r.stderr)
-        for value in (TOKEN, EMAIL, OTHER, NAME, 'fixture' + '@' + 'work-place.be'):
+        for value in (TOKEN, EMAIL, OTHER, NAME, LISTED, 'fixture' + '@' + 'work-place.be'):
             self.assertNotIn(value, r.stderr + r.stdout)
 
     def on_remote(self, ref):
@@ -387,6 +388,61 @@ class Push(unittest.TestCase):
         self.assertEqual(self.push(b).returncode, 0)
         self.commit('b.txt', TOKEN + '\n', 'b')
         self.refused(self.push(b), 'github-token')
+
+    # --- allow-addresses (#138): addresses the user approved for publication -------------------
+
+    def allow(self, text):
+        path = os.path.join(self.home, 'cfg', 'agentic-github-flow', 'allow-addresses')
+        if text is None:
+            os.makedirs(path)  # unreadable: a folder by that name
+            return
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(text)
+
+    def test_a_listed_address_passes_everywhere_in_a_push(self):
+        self.allow('# approved for publication\n  %s  # SECURITY.md; 2026-11-23\n' % LISTED.upper())
+        b = self.branch()
+        self.commit('SECURITY.md', '# Security\n\nReport to <%s>.\n' % LISTED, 'security policy\n\n'
+                    'Contact: %s (mailto:%s)\n%s' % (LISTED, LISTED.replace('@', '%40'), NOREPLY))
+        self.commit('contacts/' + LISTED + '.md', 'hello\n', 'contact')
+        with open(os.path.join(self.repo, 'a.txt'), 'w') as f:
+            f.write('a\n')
+        self.git(self.repo, 'add', '--', 'a.txt')
+        self.git(self.repo, 'commit', '-q', '-m', 'a', '--author', 'Security <' + LISTED + '>')
+        self.git(self.repo, 'tag', '-a', 'v1', '-m', 'report to ' + LISTED)
+        r = self.push(b, 'v1')
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_only_the_listed_address_passes(self):
+        # an unlisted address, one that holds the listed one, a commented line, a domain, a
+        # pattern and an address that is only part of a line allow nothing
+        self.allow('%s\n# %s\n@%s\n%s\n*@%s\nsee %s\n' % (
+            LISTED, OTHER, OTHER.split('@')[1], OTHER.split('@')[1], OTHER.split('@')[1],
+            'ops' + '@' + 'acme-bouw.be'))
+        for text in (OTHER, 'x' + LISTED, LISTED + '.evil.org', LISTED + 'e', LISTED + '@' + 'x.be',
+                     'ops' + '@' + 'acme-bouw.be', LISTED + ' and ' + OTHER):
+            self.git(self.repo, 'switch', '-q', '-C', 'agent/x', 'main')
+            self.commit('b.txt', text + '\n', 'b')
+            self.refused(self.push('agent/x'), 'personal data', 'b.txt:1', 'e-mail address')
+
+    def test_the_users_own_address_passes_when_listed_and_nothing_else_does(self):
+        self.allow(EMAIL + '\n')
+        b = self.branch()
+        self.commit('SECURITY.md', 'Report to ' + EMAIL + '\n', 'security')
+        self.assertEqual(self.push(b).returncode, 0)
+        self.commit('NOTICE', 'Copyright 2026 ' + NAME + '\n', 'notice')
+        self.refused(self.push(b), "the user's name", 'NOTICE:1')
+
+    def test_a_missing_or_unreadable_list_allows_nothing(self):
+        path = os.path.join(self.home, 'cfg', 'agentic-github-flow', 'allow-addresses')
+        for text in ('missing', '# only a comment\n', None):
+            if text != 'missing':
+                if os.path.isfile(path):
+                    os.remove(path)
+                self.allow(text)
+            self.git(self.repo, 'switch', '-q', '-C', 'agent/x', 'main')
+            self.commit('b.txt', LISTED + '\n', 'b')
+            self.refused(self.push('agent/x'), 'personal data', 'b.txt:1', 'e-mail address')
 
     # --- protected paths, only for a push without the user's yes ------------------------------
 

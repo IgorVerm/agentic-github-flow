@@ -21,7 +21,7 @@ TESTS = ['skills_format.py', 'repo_checks.py', 'claude_permissions.py', 'git_gua
          'landing.py', 'promote_main.py', 'merge_pr.py', 'review_verdict.py', 'pre_push_checks.py',
          'push_branch.py', 'question_label.py', 'context_limit.py', 'codex_worker.py',
          'codex_tools.py', 'maint_tools.py', 'remove_reaching_rules.py',
-         'plugin_validate.py']
+         'plugin_validate.py', 'verify.py']
 
 
 def main():

@@ -279,6 +279,14 @@ class VerifiedLine(unittest.TestCase):
     def test_a_fenced_example_does_not_count(self):
         example = '~~~\nVerified: none: an example\n```\nVerified: none: still inside\n~~~\n'
         self.assertEqual(vl.parse(example + self.body('Verified: tests: ran')), [('tests', 'ran')])
+        # an info string opens a fence but never closes one
+        nested = '```\n```python\nVerified: none: still inside\n```\n'
+        self.assertEqual(vl.parse(nested + self.body('Verified: tests: ran')), [('tests', 'ran')])
+
+    def test_a_task_check_lives_on_the_issue(self):
+        pull = 'https://github.com/acme/tool/pull/7#issuecomment-99'
+        items = vl.parse(self.body('Verified: goal: ' + pull + ' and ' + TASK_URL))
+        self.assertEqual(vl.task_checks(items), [TASK_URL])
 
     def test_a_dispute_is_found_in_a_findings_comment(self):
         text = '1. merge_pr.py:42 rescans.\n2. Verified line disputed: the goal names #211.'

@@ -9,11 +9,13 @@ reviewer checks it (the review-change skill's step 4). One line per landing, nev
 
   Verified: <kind>: <evidence>[; <kind>: <evidence>]...
 
-The line starts at the beginning of a line of the body, outside a fenced code block, and the
-body holds exactly one. The kinds, in lower case:
+The line starts at the beginning of a line of the body, outside a fenced code block (a fence
+closes only on a bare fence of its own character, at least as long), and the body holds
+exactly one. The kinds, in lower case:
 
   goal            the issue's check was run and met. A script or patch made for it is named by
-                  the URL of its comment on the issue (task_checks() lists those URLs).
+                  the URL of its comment on the issue (task_checks() lists those URLs; a
+                  comment on a pull request is no task check).
   tests           existing checks ran and passed.
   standing-check  a check added to those that run on every change, for a critical system; its
                   evidence reads `<test> fails when <defect>`.
@@ -41,12 +43,12 @@ import sys
 
 KINDS = ("goal", "tests", "standing-check", "run", "seen", "none")
 PREFIX = "Verified:"
-FENCE = re.compile(r"\A\s{0,3}(`{3,}|~{3,})")
+FENCE = re.compile(r"\A\s{0,3}(`{3,}|~{3,})(.*)\Z")
 _KIND_ALT = "|".join(re.escape(k) for k in KINDS)
 ITEM = re.compile(rf"\A({_KIND_ALT})\s*:\s*(.*)\Z", re.S)
 SPLIT = re.compile(rf"\s*;\s*(?=(?:{_KIND_ALT})\s*:)")
 COMMENT_URL = re.compile(
-    r"https://github\.com/[\w.-]+/[\w.-]+/(?:issues|pull)/\d+#issuecomment-\d+")
+    r"https://github\.com/[\w.-]+/[\w.-]+/issues/\d+#issuecomment-\d+")
 DISPUTED = re.compile(r"^\s*(?:\d+[.)]\s*)?(?:\*\*)?Verified line disputed:", re.M)
 
 
@@ -59,7 +61,7 @@ def lines(body: str | None) -> list:
             mark = m.group(1)
             if fence is None:
                 fence = mark
-            elif mark[0] == fence[0] and len(mark) >= len(fence):
+            elif mark[0] == fence[0] and len(mark) >= len(fence) and not m.group(2).strip():
                 fence = None
             continue
         if fence is None and line.startswith(PREFIX):

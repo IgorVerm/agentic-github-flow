@@ -1,6 +1,7 @@
 # Proposal: verification as part of the method, for every repository
 
-Status: proposal for the maintainer, issue #146, fourth version. Nothing here is implemented.
+Status: approved by the maintainer, issue #146, fourth version; built in the follow-ups of
+[Part D](#part-d-rollout-and-follow-up-issues) (#152 to #163).
 The first version was written around this repository's own test suite; the maintainer sent it
 back twice, answered the four questions the third version left and then the one the
 fourth left (rulings below). This

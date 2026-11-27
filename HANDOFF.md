@@ -61,6 +61,11 @@ Checked on 2026-11-22.
     Codex's own subagents at a time (Igor, "2 is goed"), with the note asking for subagents
     without the parent's context. Not measured live: which of the two keys Codex's multi-agent
     v2 honours, and whether the root thread counts toward the 2.
+- Verification (#146, proposal `docs/proposals/verification-gate.md`, stage 1 of Part D): the
+  core skill `verify` (#152) holds the procedure (the issue's check, evidence in proportion, the
+  fast check, a task check kept on its issue, the `Verified:` line) and the rules for which checks
+  are kept; `repo-docs` lays out the `## Verification` section of a repository's `HANDOFF.md`.
+  Not here yet: this repository's own section, `verify.py`, the line's format script, the gate.
 - Efficient design (#37): the core skill `efficient-design` is a checklist at design and review
   (work per frame, request or job run grows with what changed, not with all data), and the core
   rule *Work grows with what changed* has the author write an `Efficient design:` line in the

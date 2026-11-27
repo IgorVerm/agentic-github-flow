@@ -37,6 +37,20 @@ Checked on YYYY-MM-DD.
 ## Build, test, run
 <the commands; the checks a pull request must pass>
 
+## Verification
+
+| Setting | Value |
+|---|---|
+| `fast` | <the command for the cheap check; it takes the changed paths or selects by itself> |
+| `full` | <the command for everything> |
+| `drive` | <how to start the product and look at it, or the project skill or script that does; `none` with the reason> |
+| `check paths` | <where checks live, as patterns> |
+| `critical paths` | <the critical systems, as path patterns> |
+| `verification gate` | `off` |
+| `removed checks` | `maintainer` |
+
+- `<critical path pattern>`: <what would be lost that cannot be taken back, or would stop the work, if it broke unnoticed>
+
 ## What to read for which work
 | Work on | Read |
 |---|---|
@@ -45,6 +59,17 @@ Checked on YYYY-MM-DD.
 ## Standing permissions
 None.
 ```
+
+The `## Verification` section, read by the `verify` skill from the default branch:
+- `critical paths` is written by an audit agent, one reason line per entry under the table, as
+  an audit change (the `verify` skill's `writing-the-section.md`); the other rows change on the
+  maintainer's word.
+- `verification gate` is `off`, `observe` (report what would be refused) or `enforce` (refuse
+  the unasked push and the automatic merge); `off` when the row is missing.
+- `removed checks` names who approves a change that removes checks: `maintainer`, or
+  `reviewer`, which the maintainer sets once the repository's first pruning pass has merged;
+  even then the removal of a check that protects a critical path waits for the maintainer.
+  `maintainer` when the row is missing.
 
 `ROADMAP.md`:
 

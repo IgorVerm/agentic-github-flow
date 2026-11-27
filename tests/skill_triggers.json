@@ -110,5 +110,13 @@
     "should_not": [
       "Install Codex on this machine and log it in."
     ]
+  },
+  "verify": {
+    "should": [
+      "Does my change to the login timeout actually meet the check that issue #31 asks for? Show me the evidence."
+    ],
+    "should_not": [
+      "Rename the variable usr to user in the auth module."
+    ]
   }
 }

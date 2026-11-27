@@ -8,7 +8,13 @@ it was given. The cases: the approval it writes parses back to the full SHA it n
 never parse as an approval; it refuses a short or foreign SHA, a head that moved, a closed pull
 request, an agent name that would break the signature, empty or non-UTF-8 findings; and it
 exits 3 when it posted but cannot vouch for the head afterwards. That merge_pr.py
-accepts what it writes is checked in tests/merge_pr.py. Offline: no network, no real gh.
+accepts what it writes is checked in tests/merge_pr.py.
+
+It also checks verified_line.py beside it, the owner of the landing's `Verified:` line (#155):
+each kind parses, `;` joins kinds, and a missing line, a second line, an unknown kind, empty
+evidence, `none` without a reason or beside another kind, and a standing check without the
+defect it fails on are refused; the task-check URLs and a reviewer's dispute are found.
+Offline: no network, no real gh.
 """
 import importlib.util
 import json
@@ -25,6 +31,10 @@ sys.path.insert(0, SCRIPTS)  # for landing.py, which the script imports
 _spec = importlib.util.spec_from_file_location('review_verdict_script', TOOL)
 rv = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(rv)  # by path: this test file has the same name
+LINE_TOOL = os.path.join(SCRIPTS, 'verified_line.py')
+_spec = importlib.util.spec_from_file_location('verified_line_script', LINE_TOOL)
+vl = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(vl)
 
 ROBOT = '\N{ROBOT FACE}'
 HEAD = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678'
@@ -212,6 +222,89 @@ class Cli(unittest.TestCase):
                           views=[self.view(), {'state': 'OPEN'}])
         self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
         self.assertIn('posted, but the head could not be read', r.stderr)
+
+
+TASK_URL = 'https://github.com/acme/tool/issues/212#issuecomment-123456'
+
+
+class VerifiedLine(unittest.TestCase):
+    def body(self, line):
+        return ROBOT + ' Claude Opus 5.5 (implementer):\n\nWhat changed.\n\n' + line + \
+            '\nOverlap check: none.\n'
+
+    def test_each_kind_parses(self):
+        for kind, evidence in (
+                ('goal', 'the check of #212 (' + TASK_URL + '): passes; failed before the fix'),
+                ('tests', 'verify.py fast, 71 s'),
+                ('standing-check', 'save_roundtrip fails when the version field is dropped'),
+                ('run', 'headless run, 600 frames, seed 7, no panic'),
+                ('seen', 'screenshot of the settings page at 375 px'),
+                ('none', 'documentation only')):
+            with self.subTest(kind=kind):
+                self.assertEqual(vl.parse(self.body(f'Verified: {kind}: {evidence}')),
+                                 [(kind, evidence)])
+
+    def test_semicolons_join_kinds(self):
+        items = vl.parse(self.body('Verified: goal: the check of #212 (' + TASK_URL + ') passes; '
+                                   'tests: python3 tests/run_all.py, 58 passed;run: the installer '
+                                   'in a temporary home'))
+        self.assertEqual([k for k, _ in items], ['goal', 'tests', 'run'])
+        self.assertEqual(items[2][1], 'the installer in a temporary home')
+        self.assertEqual(vl.task_checks(items), [TASK_URL])
+        # a `;` not followed by a kind stays in the evidence
+        self.assertEqual(vl.parse(self.body('Verified: tests: fmt; clippy; cargo test, green')),
+                         [('tests', 'fmt; clippy; cargo test, green')])
+
+    def test_refused(self):
+        for body, reason in (
+                ('No line here.\nverified: tests: lower case prefix\n', 'no `Verified:` line'),
+                (' Verified: tests: indented\n', 'no `Verified:` line'),
+                ('```\nVerified: tests: inside a fence\n```\n', 'no `Verified:` line'),
+                (self.body('Verified: tests: a') + 'Verified: tests: b\n', '2 `Verified:` lines'),
+                (self.body('Verified: none'), 'not a kind'),
+                (self.body('Verified: none:'), 'needs a reason'),
+                (self.body('Verified: none:   '), 'needs a reason'),
+                (self.body('Verified:'), 'empty'),
+                (self.body('Verified: tests:'), 'needs evidence'),
+                (self.body('Verified: tests: ok; goal:'), 'needs evidence'),
+                (self.body('Verified: checked: it works'), 'not a kind'),
+                (self.body('Verified: Tests: ran'), 'not a kind'),
+                (self.body('Verified: none: docs only; tests: ran'), 'stands alone'),
+                (self.body('Verified: standing-check: save_roundtrip added'), 'fails when')):
+            with self.subTest(body=body):
+                with self.assertRaises(ValueError) as e:
+                    vl.parse(body)
+                self.assertIn(reason, str(e.exception))
+
+    def test_a_fenced_example_does_not_count(self):
+        example = '~~~\nVerified: none: an example\n```\nVerified: none: still inside\n~~~\n'
+        self.assertEqual(vl.parse(example + self.body('Verified: tests: ran')), [('tests', 'ran')])
+
+    def test_a_dispute_is_found_in_a_findings_comment(self):
+        text = '1. merge_pr.py:42 rescans.\n2. Verified line disputed: the goal names #211.'
+        self.assertTrue(vl.disputed(rv.findings('Claude Opus 5.5', HEAD, text)))
+        self.assertFalse(vl.disputed(rv.findings('Claude Opus 5.5', HEAD, '1. a finding')))
+        self.assertFalse(vl.disputed(rv.approval('Claude Opus 5.5', HEAD, 'Verified: line ok')))
+
+    def test_check_command(self):
+        def run(*args, stdin=None):
+            return subprocess.run([sys.executable, LINE_TOOL, *args], capture_output=True,
+                                  text=True, input=stdin, encoding='utf-8')
+        r = run('check', '--body-file', '-', stdin=self.body('Verified: goal: ' + TASK_URL))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.splitlines(), ['goal: ' + TASK_URL, 'task check: ' + TASK_URL])
+        r = run('check', '--body-file', '-', stdin='no line\n')
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('no `Verified:` line', r.stderr)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'body.md')
+            with open(path, 'wb') as f:
+                f.write('Verified: tests: ran'.encode('utf-16'))
+            self.assertEqual(run('check', '--body-file', path).returncode, 2)
+        for args in ([], ['check'], ['check', '--body-file'], ['lint', '--body-file', '-']):
+            with self.subTest(args=args):
+                self.assertEqual(run(*args).returncode, 2)
+        self.assertEqual(run('--help').returncode, 0)
 
 
 if __name__ == '__main__':

@@ -66,8 +66,8 @@ The review route, in both modes:
   happens before the pull request is marked ready, and the repository's own required reviewers
   still review it on GitHub. In local-main mode the reviewer also lands it.
 
-On either route, whoever checks the change checks the `Efficient design:` line of step 4
-against the diff (the core rule *Work grows with what changed*).
+On either route, whoever checks the change checks the `Efficient design:` and `Verified:` lines
+of step 4 against the diff (the core rule *Work grows with what changed*).
 
 One sentence on the issue is enough: the mode with its reason, the route and why. The claim,
 made when you start work on an issue that has no assignee: assign it to the account you post
@@ -116,7 +116,10 @@ and tracked files a fast-forward already rewrote) when it equals the merge's ver
 Write the title and body to a file outside the repository. The body starts with
 `🤖 <model> (<role>):` and holds what changed and why, how it was checked, what is not covered,
 a line `Overlap check: <result>` (step 5), a line `Efficient design: <result>` (the
-`efficient-design` skill; `no part runs repeatedly or over growing data` when that is so), and
+`efficient-design` skill; `no part runs repeatedly or over growing data` when that is so), one
+line `Verified: <kind>: <evidence>` (the `verify` skill's step 5 chooses the evidence;
+[verified_line.py](../../scripts/verified_line.py) owns the format, and
+`python3 <plugin>/scripts/verified_line.py check --body-file <file>` exits 0 when it parses), and
 `Closes #<n>` for the issue it finishes (a closing keyword is right here: the merge is the
 verified publication). Draft or ready: draft while an independent review is still open.
 

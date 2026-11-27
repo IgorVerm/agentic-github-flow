@@ -5,9 +5,9 @@ Usage: python3 verify.py [-C <checkout>] fast|full
 
 The `verify` skill runs it while working and before every push. It reads the row `fast` or
 `full` of the `## Verification` section of HANDOFF.md as the default branch holds it, as last
-fetched (`refs/remotes/origin/HEAD`, else origin/main or origin/master, else local main or
-master: the order of settings_text() in landing.py), never from the working tree or the branch,
-so a change cannot rewrite the command it is judged by. It does not fetch.
+fetched (settings_text() in landing.py, beside this file, owns which ref that is), never from
+the working tree or the branch, so a change cannot rewrite the command it is judged by. It does
+not fetch.
 
 The value cell holds the command in backticks; several code spans (`a`, `b`) are run one after
 another, from the checkout's top folder, through the shell, stopping at the first that fails; a
@@ -17,10 +17,11 @@ recorded: the `verify` skill's `writing-the-section.md` says how to write the se
 
 `fast` gets what changed, for its command to select by (the selection belongs to the command;
 a path it does not know runs everything): VERIFY_BASE is the merge base of HEAD and the
-default branch, and VERIFY_CHANGED names a file listing the changed paths one per line,
+landing branch as last fetched (landing_ref() in landing.py), and VERIFY_CHANGED names a file listing the changed paths one per line,
 relative to the top folder, sorted: committed since VERIFY_BASE, staged, unstaged and untracked
 but not ignored, deleted ones included. The file is removed after the run. A command that
-ignores both selects by itself. `full` gets neither.
+ignores both selects by itself. `full` gets neither. When git cannot list them, nothing is
+run (exit 2): an empty list would select nothing and pass.
 
 Every run appends one line to the record, `verify-record.tsv` in the git common directory
 (shared by all worktrees of the repository, never committed; record_path() gives it), under a
@@ -28,9 +29,11 @@ header line starting with `#`. Tab-separated: the date (UTC, `YYYY-MM-DDTHH:MM:S
 branch (`detached <sha>` without one), `fast` or `full`, the seconds, `passed` or `failed:
 exit <n>: <the last line of output>` (`failed: interrupted` on Ctrl-C), and the command
 (several joined by ` && `). Tabs and line breaks in a field become spaces. The record measures
-how long the checks take and what they caught before a push; it decides nothing.
+how long the checks take and what they caught before a push; it decides nothing. A record that
+cannot be written is reported and does not change the exit status.
 
-Output of the command passes through. Exit 0 when it passed, 1 when it failed, 130 when
+Output of the command passes through as bytes, whatever the encoding of this process's own
+output. Exit 0 when it passed, 1 when it failed, 130 when
 interrupted, 2 for a usage error, a checkout outside git, or no command to run.
 """
 from __future__ import annotations
@@ -42,6 +45,9 @@ import subprocess
 import sys
 import tempfile
 import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from landing import SettingError, landing_ref, settings_text  # noqa: E402
 
 SECTION = re.compile(r"^## Verification[ \t]*$(.*?)(?=^## |\Z)", re.M | re.S)
 RECORD = "verify-record.tsv"
@@ -62,16 +68,6 @@ def git(path: str, *args: str) -> subprocess.CompletedProcess:
 def out(path: str, *args: str) -> str | None:
     r = git(path, *args)
     return r.stdout.strip() if r.returncode == 0 else None
-
-
-def default_ref(path: str) -> str | None:
-    """The default branch as last fetched; the order of landing.settings_text()."""
-    head = out(path, "symbolic-ref", "-q", "refs/remotes/origin/HEAD") or ""
-    for ref in (head, "refs/remotes/origin/main", "refs/remotes/origin/master",
-                "refs/heads/main", "refs/heads/master"):
-        if ref and git(path, "rev-parse", "-q", "--verify", ref + "^{commit}").returncode == 0:
-            return ref
-    return None
 
 
 def cells(line: str) -> list:
@@ -114,6 +110,9 @@ def branch_name(path: str) -> str:
 def changed_paths(top: str, base: str) -> list:
     tracked = git(top, "diff", "--name-only", "-z", "--no-renames", base)
     untracked = git(top, "ls-files", "-z", "--others", "--exclude-standard")
+    for r in (tracked, untracked):
+        if r.returncode != 0:
+            raise Refused("git could not list the changed paths: " + flat(r.stderr))
     return sorted({p for r in (tracked, untracked) for p in r.stdout.split("\0") if p})
 
 
@@ -130,18 +129,18 @@ def append_record(path: str, fields: list) -> None:
 
 
 def run(command: str, top: str, env: dict) -> tuple:
-    """Run one command, its output passing through; (exit code, last line of output)."""
-    last = ""
+    """Run one command, its output passing through as bytes; (exit code, last line of output)."""
+    last = b""
+    sys.stdout.flush()
     proc = subprocess.Popen(command, shell=True, cwd=top, env=env, stdin=subprocess.DEVNULL,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                            encoding="utf-8", errors="replace")
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     try:
         for line in proc.stdout:
-            sys.stdout.write(line)
-            sys.stdout.flush()
+            sys.stdout.buffer.write(line)
+            sys.stdout.buffer.flush()
             if line.strip():
                 last = line.strip()
-        return proc.wait(), last
+        return proc.wait(), last.decode("utf-8", "replace")
     except KeyboardInterrupt:
         proc.kill()
         proc.wait()
@@ -149,6 +148,9 @@ def run(command: str, top: str, env: dict) -> tuple:
 
 
 def main(argv: list) -> int:
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")  # its own lines; the command's pass as bytes
     path = "."
     if len(argv) >= 2 and argv[0] == "-C":
         path, argv = argv[1], argv[2:]
@@ -160,24 +162,24 @@ def main(argv: list) -> int:
         top = out(path, "rev-parse", "--show-toplevel")
         if top is None:
             raise Refused(f"{path} is not in a git repository")
-        ref = default_ref(top)
-        if ref is None:
-            raise Refused("no default branch found (origin/HEAD, origin/main, origin/master, "
-                          "main or master)")
-        found = commands(out(top, "show", f"{ref}:HANDOFF.md"), kind)
-    except Refused as e:
+        found = commands(settings_text(top), kind)
+        command = " && ".join(found)
+        env = dict(os.environ)
+        env.pop("VERIFY_CHANGED", None)
+        env.pop("VERIFY_BASE", None)
+        if kind == "fast":
+            ref = landing_ref(top)
+            base = (out(top, "merge-base", "HEAD", ref) if ref else None) or out(
+                top, "rev-parse", "HEAD")
+            if not base:
+                raise Refused("no commit to compare the changes with")
+            paths = changed_paths(top, base)
+    except (Refused, SettingError) as e:
         print(f"verify.py: {e}", file=sys.stderr)
         return 2
-    command = " && ".join(found)
-    env = dict(os.environ)
-    env.pop("VERIFY_CHANGED", None)
-    env.pop("VERIFY_BASE", None)
     listing = None
-    short = ref.replace("refs/remotes/", "").replace("refs/heads/", "")
-    print(f"verify: {kind} from {short}:HANDOFF.md: {command}", flush=True)
+    print(f"verify: {kind} from the default branch's HANDOFF.md: {command}", flush=True)
     if kind == "fast":
-        base = out(top, "merge-base", "HEAD", ref) or out(top, "rev-parse", ref)
-        paths = changed_paths(top, base)
         fd, listing = tempfile.mkstemp(prefix="verify-changed-", suffix=".txt")
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             f.write("".join(p + "\n" for p in paths))
@@ -200,8 +202,12 @@ def main(argv: list) -> int:
     seconds = time.monotonic() - started
     date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     record = record_path(top)
-    append_record(record, [date, branch_name(top), kind, f"{seconds:.1f}", result, command])
-    print(f"verify: {kind} {result} in {seconds:.1f}s (recorded in {record})", flush=True)
+    try:
+        append_record(record, [date, branch_name(top), kind, f"{seconds:.1f}", result, command])
+        where = f"recorded in {record}"
+    except OSError as e:
+        where = f"not recorded: {e}"
+    print(f"verify: {kind} {result} in {seconds:.1f}s ({where})", flush=True)
     return code
 
 

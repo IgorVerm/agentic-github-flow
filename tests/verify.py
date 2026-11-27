@@ -106,20 +106,26 @@ class Verify(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(self.ran(self.repo), ['main-fast'])
 
-    def test_default_branch_is_origin_head_before_local_main(self):
+    def test_default_branch_is_origin_head_before_origin_main_and_local_main(self):
+        # origin's default branch is `trunk`, with a command of its own; origin/main and a local
+        # main that moved on hold others, so each wrong choice runs a different marker
+        self.git(self.repo, 'checkout', '-q', '-b', 'trunk', 'main')
+        self.write(self.repo, 'HANDOFF.md', handoff(fast=marker('origin-head-fast')))
+        self.commit(self.repo, 'the default branch')
         origin = os.path.join(self.tmp, 'origin.git')
         self.git(self.tmp, 'clone', '-q', '--bare', self.repo, origin)
+        self.git(origin, 'symbolic-ref', 'HEAD', 'refs/heads/trunk')
         clone = os.path.join(self.tmp, 'clone')
-        self.git(self.tmp, 'clone', '-q', '-b', 'main', origin, clone)
-        self.git(clone, 'checkout', '-q', '-b', 'work')
-        # local main moves on; origin/main, as last fetched, still holds the old command
-        self.git(clone, 'checkout', '-q', 'main')
+        self.git(self.tmp, 'clone', '-q', origin, clone)
+        self.assertEqual(self.git(clone, 'symbolic-ref', 'refs/remotes/origin/HEAD'),
+                         'refs/remotes/origin/trunk')
+        self.git(clone, 'checkout', '-q', '-b', 'main', 'origin/main')
         self.write(clone, 'HANDOFF.md', handoff(fast=marker('local-main-fast')))
         self.commit(clone, 'unpushed change on local main')
-        self.git(clone, 'checkout', '-q', 'work')
+        self.git(clone, 'checkout', '-q', '-b', 'work', 'origin/main')
         r = self.verify(clone, 'fast')
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertEqual(self.ran(clone), ['main-fast'])
+        self.assertEqual(self.ran(clone), ['origin-head-fast'])
 
     def test_record_line_per_run_and_shared_by_worktrees(self):
         self.assertEqual(self.verify(self.repo, 'fast').returncode, 0)
@@ -155,6 +161,23 @@ class Verify(unittest.TestCase):
         self.assertEqual(line[2], 'fast')
         self.assertTrue(line[4].startswith('failed: exit 3'), line)
         self.assertIn('marker two', line[4])
+
+    def test_output_outside_the_console_encoding(self):
+        # a check mark, which cp1252 (a Windows pipe's encoding) cannot hold
+        printer = (PY + ' -c "import sys; sys.stdout.buffer.write(b\'\\xe2\\x9c\\x93 ok\\n\'); '
+                   'sys.exit(1)"')
+        self.git(self.repo, 'checkout', '-q', 'main')
+        self.write(self.repo, 'HANDOFF.md', handoff(full='`%s`' % printer))
+        self.commit(self.repo, 'a check that prints a check mark')
+        self.env['PYTHONIOENCODING'] = 'cp1252'
+        self.env.pop('PYTHONUTF8', None)
+        r = subprocess.run([sys.executable, TOOL, 'full'], cwd=self.repo, capture_output=True,
+                           env=self.env)
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertNotIn(b'Traceback', r.stderr)
+        self.assertIn(b'\xe2\x9c\x93 ok', r.stdout)
+        [line] = self.record(self.repo)
+        self.assertEqual(line[4], 'failed: exit 1: \u2713 ok')
 
     def test_fast_gets_the_changed_paths(self):
         copy = r'''import os, shutil

@@ -6,7 +6,7 @@ A stand-in `gh` (AGENTIC_GITHUB_FLOW_GH) answers `repo view`, `issue list` and t
 from a state file and logs every call. Each case is a way an overview successor could read the
 wrong state or flood its context: an older or unsigned state comment taken for the newest, a
 comment of the thread printed beside the state, an unbounded query or print, a missed rollover,
-two standing issues read as one, a setting (label, the repository of a shared overview) ignored,
+two standing issues read as one, the label setting ignored,
 or a GitHub failure read as "no overview". Offline; no network, no real gh.
 """
 import json
@@ -173,14 +173,13 @@ class OverviewState(unittest.TestCase):
         self.assertEqual(p.returncode, 1)
         self.assertNotIn('given', p.stdout)
 
-    def test_settings_label_and_shared_overview_repository(self):
-        self.handoff('| overview label | `standing: overview` |\n'
-                     '| overview repository | `them/home` |\n')
-        p = self.run_tool([issue(3, [state('SHARED')], repo='them/home',
-                                 labels=('standing: overview',))])
+    def test_settings_label_and_other_repository(self):
+        self.handoff('| overview label | `standing: overview` |\n')
+        p = self.run_tool([issue(3, [state('OTHER')], repo='them/home',
+                                 labels=('standing: overview',))], '-R', 'them/home')
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertIn('them/home#3', p.stdout)
-        self.assertIn('SHARED', p.stdout)
+        self.assertIn('OTHER', p.stdout)
         self.assertFalse([c for c in self.log if c[:2] == ['repo', 'view']])
 
     def test_unknown_issue_and_malformed_answer(self):
@@ -192,16 +191,7 @@ class OverviewState(unittest.TestCase):
         self.assertEqual(p.returncode, 3, p.stderr)
         self.assertNotIn('Traceback', p.stderr)
 
-    def test_default_text_of_the_repository_row(self):
-        self.handoff("| overview repository | this repository's own |\n")
-        p = self.run_tool([issue(7, [state('HERE')])])
-        self.assertEqual(p.returncode, 0, p.stderr)
-        self.assertIn('HERE', p.stdout)
-
-    def test_bad_repository_setting(self):
-        self.handoff('| overview repository | `not a repo` |\n')
-        p = self.run_tool([])
-        self.assertEqual(p.returncode, 2)
+    def test_bad_repository_flag(self):
         p = self.run_tool([], '-R', 'bad')
         self.assertEqual(p.returncode, 2)
 

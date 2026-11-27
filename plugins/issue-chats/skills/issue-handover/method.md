@@ -66,7 +66,6 @@ The skills read their values from it; a row left out takes its default:
 | ready extras | what the repository adds to the definition of ready of the `requirements` skill | none |
 | start extras, hand-over extras | repository steps at a chat's start and before it ends | none |
 | overview label | the label of the standing issue of the overview chat (§8) | `overview` |
-| overview repository | `owner/repo` whose standing issue's overview also covers this repository (§8) | this repository |
 
 An installed plugin may add a row of its own; that plugin's skill owns the row's meaning and
 default.
@@ -517,10 +516,8 @@ It is the issue chat of a **standing issue**, so the hand-over of §4 serves it 
 every repository that uses issue chats (`DESIGN_DECISIONS.md`, 2026-11-27, #168):
 
 - **The standing issue:** the one open issue with the overview label (§1), never the ready
-  label, assigned by its claim, so no pick takes it. Its body says which repositories it covers
-  and points here. One overview may cover several repositories: its standing issue lives in
-  one, and each other one names that repository in its row `overview repository` (§1); left
-  out, each repository has its own.
+  label, assigned by its claim, so no pick takes it. Its body points here. Each repository
+  has its own overview and standing issue (`DESIGN_DECISIONS.md`, 2026-11-27).
 - **Its state** is the newest signed comment whose text after the signature opens with
   `overview state:`, at most 1,500 characters: the chats at work and their issues, what waits
   on the user, the next steps, and the path of the notes file. Detail and history go in the
@@ -573,7 +570,8 @@ and in the default branch; the successor removes that worktree with `remove_merg
 from the primary checkout before its checks.
 
 **The first overview** starts on the user's word, from any chat: the overview label (§7 step 2,
-the user's yes), the standing issue, `new_worktree.py <n>-overview`, the first state comment,
+the user's yes; `gh label create overview -R <owner/repo> --description "The standing issue of
+the overview chat"`), the standing issue, `new_worktree.py <n>-overview`, the first state comment,
 then `start_issue_chat.py` with `#<n> · overview 1` (no `--handover`: the issue is unassigned),
 the claim and the brief, as `issue-handover` step 5. An overview chat that ran without this
 route archives itself after "delivered" when its working directory holds no work of its own (the

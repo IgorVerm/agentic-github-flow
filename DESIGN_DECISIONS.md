@@ -9,21 +9,23 @@ the linked issue.
 (this must exist too, reusing as much of the same as possible); on a standing issue: "wordt die
 mega issue dan niet vervuilende context die extreem veel pakt ?" (won't that mega issue become
 polluting context that takes an extreme amount?); "dit moet zo voor alle repos werken" (this must
-work like this for all repositories). **What:** this replaces "No standing coordinator chat" of
-the method's §3 item 8. The overview chat is the issue chat of a standing issue (the overview
-label), in a worktree `<n>-overview` made by the worktree tool (a new one at each rollover), and
-hands over by the in-place route of a hand-over before the branch is ready: state comment, `start_issue_chat.py --handover`,
-new claim, archive of itself after "delivered". A successor never reads the thread:
-`overview_state.py` prints only the newest claim and the newest `overview state:` comment (at
-most 1,500 characters; detail in a notes file outside the checkout), from the newest 100
-comments; at 100 comments the hand-over rolls the overview over to a new standing issue.
-Measured before: Pax #223 held 731 comments, 487,930 characters; `overview_state.py` printed 460
-characters of it. The live probe (#169) gave a successor without a parent and one worktree, but
-the predecessor's `archive_session "self"` was refused by the auto-mode classifier: without the
-user's allow rule for `archive_session` (method §7) the self-archive is not reliable. **Open:** whether one overview
-may cover several repositories or each gets its own standing issue; the row `overview
-repository` lets either answer stand, and each repository has its own unless it names another.
-**Binds:** `plugins/issue-chats/skills/issue-handover/method.md` §1, §2, §3 item 8, §4 and §8,
+work like this for all repositories); asked whether one overview may cover several
+repositories: "1 per repo" (one per repository); on the `overview` label: "ja in alle repos"
+(yes, in all repositories); on an allow rule for `archive_session`: "ja voeg toe" (yes, add it),
+which the maintainer adds to his own settings. **What:** this replaces "No standing coordinator
+chat" of the method's §3 item 8. The overview chat is the issue chat of a standing issue (the
+overview label, one per repository), in a worktree `<n>-overview` made by the worktree tool (a
+new one at each rollover), and hands over by the in-place route of a hand-over before the branch
+is ready: state comment, `start_issue_chat.py --handover`, new claim, archive of itself after
+"delivered". Before, the method had no step that made the predecessor archive itself, which is
+why an old overview stayed (#168). A successor never reads the thread: `overview_state.py`
+prints only the newest claim and the newest `overview state:` comment (at most 1,500
+characters; detail in a notes file outside the checkout), from the newest 100 comments; at 100
+comments the hand-over rolls the overview over to a new standing issue. Measured before: Pax
+#223 held 731 comments, 487,930 characters; `overview_state.py` printed 460 characters of it.
+The live probe (#169) gave a successor without a parent and one worktree; the predecessor's
+`archive_session "self"` was refused once by the auto-mode classifier, a second risk that the
+allow rule (method §7) removes. **Binds:** `plugins/issue-chats/skills/issue-handover/method.md` §1, §2, §3 item 8, §4 and §8,
 `SKILL.md`, `scripts/overview_state.py`, `tests/overview_state.py`. **Detail:** issue #168.
 
 ## Codex only where Codex is chosen: its own plugin, 2026-11-22

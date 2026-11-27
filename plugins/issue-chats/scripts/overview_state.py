@@ -5,9 +5,8 @@ chat*; skill issue-handover).
 Usage: python3 overview_state.py [-C <checkout>] [-R <owner/repo>] [--issue <n>]
 
 An overview chat keeps its state on a standing issue: the open issue with the overview label
-(the settings row `overview label`, default `overview`) in the repository the row `overview
-repository` names (default: the one <checkout> belongs to; another repository's when one
-overview covers several). Read whole, such an issue floods a chat's context (Pax #223: 731
+(the settings row `overview label`, default `overview`) in the repository <checkout> belongs to,
+or the one -R names: each repository has its own overview. Read whole, such an issue floods a chat's context (Pax #223: 731
 comments, 487,930 characters, measured 2026-11-27), so a chat never reads its thread: this tool
 asks GitHub for the issue's newest 100 comments in one GraphQL call and prints only
 
@@ -37,8 +36,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))  # -I leaves it off
-from next_issue import (SettingError, Unread, gh, label_value, row_in,  # noqa: E402
-                        settings_text)
+from next_issue import SettingError, Unread, gh, label_value, settings_text  # noqa: E402
 
 ROLLOVER_AT = 100   # comments; the method's §8 owns the number
 STATE_LIMIT = 1500  # characters a state comment may have (§8); longer is named, not refused
@@ -52,16 +50,10 @@ QUERY = ("query($owner:String!,$name:String!,$number:Int!){repository(owner:$own
          "nodes{body createdAt}}}}}" % ROLLOVER_AT)
 
 
-def repository(text: str | None, top: str, override: str | None) -> str:
-    """owner/repo of the standing issue: -R, else the row `overview repository`, else origin's."""
-    cell = override or row_in(text, "overview repository")
-    if cell:
-        value = cell.strip().strip("`").strip()
-        if value.lower() not in ("", "here", "none") and \
-                not value.lower().startswith("this repository"):
-            if not REPO.fullmatch(value):
-                raise SettingError(f"overview repository {cell!r} is not owner/repo")
-            return value
+def repository(top: str, override: str | None) -> str:
+    """owner/repo of the standing issue: -R, else the repository of <checkout> as gh sees it."""
+    if override:
+        return override
     seen = gh(["repo", "view", "--json", "nameWithOwner"], top)
     name = seen.get("nameWithOwner") if isinstance(seen, dict) else None
     if not isinstance(name, str) or not REPO.fullmatch(name):
@@ -125,7 +117,7 @@ def main(argv: list[str]) -> int:
         print(f"overview_state: {e}", file=sys.stderr)
         return 2
     try:
-        repo = repository(text, top, a.repo)
+        repo = repository(top, a.repo)
         number = a.issue
         if number is None:
             number, why = standing_issue(repo, label, top)

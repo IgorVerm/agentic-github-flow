@@ -16,8 +16,9 @@ occasion confirms what its author already believed.
    (`git show origin/<base>:HANDOFF.md`), so the change cannot rewrite what judges it.
 2. **Choose the evidence in proportion:** the issue's own check first; then none for
    documentation, `fast` for most changes, `full` for a change under `critical paths`.
-3. **Run `fast` while working and before every push.** Fix what fails; after two failed
-   corrections of the same problem, stop and report.
+3. **Run `fast` while working and before every push** with
+   `python3 <plugin>/scripts/verify.py fast` ([verify.py](../../scripts/verify.py)). Fix what
+   fails; after two failed corrections of the same problem, stop and report.
 4. **A check made for this issue goes on the issue** when it first fails, before the fix: a
    signed comment with the check in a code block and the command that runs it, and there it
    stays. It is a script that drives the product from outside, or, where it must be built with

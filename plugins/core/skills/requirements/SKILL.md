@@ -49,7 +49,7 @@ repository's landing mode), with the user's yes before any push.
    seen. What is immaterial becomes a stated assumption.
 3. **Draft the specification and the split,** nothing on GitHub yet:
    - **the parent:** the goal in the user's words, quoted; context; scope and out of scope; the
-     end-to-end check that proves the whole; the decisions with the user's words; the packages
+     end-to-end `Check:` that proves the whole; the decisions with the user's words; the packages
      in order. It stands on its own: someone who reads only it and the sections it names can
      build;
    - **the packages:** one per session-sized piece, each meeting the definition of ready, with
@@ -90,7 +90,7 @@ requirements label and no ready label. A defect or follow-up written by `open-is
 2 and 3) is ready as written.
 
 - **Goal, Context, Constraints, Done when** as sections of the body.
-- **An acceptance check:** a command, or a concrete observation someone can make.
+- **A `Check:`** of one of the three kinds `open-issue` owns, written in this chat.
 - **Sections to read:** named sections of documents and the code paths it will touch, not whole
   documents (the overlap check reads the paths).
 - **Out of scope,** stated.

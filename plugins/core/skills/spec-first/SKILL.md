@@ -17,8 +17,8 @@ When the work should become several issues that agents pick up one at a time, th
 3. Write the specification on the issue so it stands on its own:
    - what changes: the files and interfaces involved;
    - what is out of scope;
-   - the end-to-end check that proves the whole thing works, as a command or a concrete
-     observation.
+   - the end-to-end check that proves the whole thing works: a `Check:` of one of the three
+     kinds the `open-issue` skill owns, written here, not by whoever builds.
 4. The user, or the maintainer the repository names, confirms the specification. That
    confirmation is the approved scope.
 5. Build in a fresh session that starts from the specification, so the context holds the plan

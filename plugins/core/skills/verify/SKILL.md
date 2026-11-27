@@ -5,20 +5,17 @@ description: Prove a change met its goal - read the issue's check and the reposi
 
 # Verify a change against its goal
 
-The yardstick comes from outside the change: the issue's `Check:`, written by whoever wrote the
-issue, and the `## Verification` section of `HANDOFF.md` (its rows: the `repo-docs` skill's
-skeleton). A check made for the occasion confirms what its author already believed.
+The yardstick comes from outside the change: the issue's `Check:` (its three kinds, and what the
+agent does first and when the check is wrong: the `open-issue` skill) and the `## Verification`
+section of `HANDOFF.md` (its rows: the `repo-docs` skill's skeleton). A check made for the
+occasion confirms what its author already believed.
 
 ## Steps
 
 1. **Read the issue's check and the section from the default branch**
-   (`git show origin/<base>:HANDOFF.md`), so the change cannot rewrite what judges it. A check
-   that is wrong or cannot be run: say so on the issue, then wait or continue under a stated
-   assumption.
+   (`git show origin/<base>:HANDOFF.md`), so the change cannot rewrite what judges it.
 2. **Choose the evidence in proportion:** the issue's own check first; then none for
-   documentation, `fast` for most changes, `full` for a change under `critical paths`. For a
-   matter of judgment, hand the named reader what they need (a screenshot, the page, the
-   text); no test stands in for the judgment.
+   documentation, `fast` for most changes, `full` for a change under `critical paths`.
 3. **Run `fast` while working and before every push.** Fix what fails; after two failed
    corrections of the same problem, stop and report.
 4. **A check made for this issue goes on the issue** when it first fails, before the fix: a

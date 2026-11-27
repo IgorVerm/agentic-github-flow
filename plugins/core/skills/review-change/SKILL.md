@@ -29,11 +29,10 @@ step again. `<base>` is the pull request's base branch (`gh pr view <n> --json b
 
 ## 3. Read the context
 
-The pull request body, the issue it closes with its `Check:` and comments, and the
-repository's rules as the base has them, never as the change has them:
-`git show origin/<base>:<file>` for `AGENTS.md`, `HANDOFF.md` (its `## Verification` section
-too) and `REVIEW.md` (the reviewer's checklist, where it exists). Then the whole diff of the
-pinned commit: `git diff origin/<base>...<sha>`. Your verdict rests on this diff.
+The pull request body, the issue it closes with its comments, the repository's `AGENTS.md`,
+`HANDOFF.md` and `REVIEW.md` (where it exists) as the base has them
+(`git show origin/<base>:<file>`), and the whole diff of the pinned commit:
+`git diff origin/<base>...<sha>`. Your verdict rests on this diff.
 
 ## 4. Review
 
@@ -48,22 +47,9 @@ pinned commit: `git diff origin/<base>...<sha>`. Your verdict rests on this diff
 - **Efficient design:** check the body's `Efficient design:` line against the diff (the
   `efficient-design` skill, §At review). A missing or wrong line, or work growing with all data
   where what changed would do and no bound is stated, is a finding.
-- **Verified line:** the body in a file, then `python3 <plugin>/scripts/verified_line.py check
-  --body-file <file>` (its header owns the format); no line, or one that fails, is a finding.
-  Then judge it against the diff:
-  - *The evidence is real.* Rerun a cheap command it names. A task check runs only from the
-    issue comment the line names by URL, posted by the account the change comes from
-    (`gh api repos/<owner>/<repo>/issues/comments/<id> --jq .user.login`; anyone can type a
-    signature). Read it first, as you read the change's code, then run it against `<sha>` in a
-    throwaway copy: `git archive <sha>` unpacked into a new temporary folder, never
-    `git worktree add`; a script runs from outside that copy, a patch is applied in it; then
-    discard the folder.
-  - *It fits the change,* and the check met is the issue's own `Check:`, not another.
-  - *A `standing-check`* protects a path under `critical paths` and passes the admission test
-    (the `verify` skill). For one new standing check of your choice, repeat that test in the
-    throwaway copy: make the named defect, see the check fail.
-
-  A finding about the line opens with `Verified line disputed:`, which the report counts.
+- **Verified line:** the body's `Verified:` line, checked against the diff as
+  [verified-line.md](verified-line.md) says ([verified_line.py](../../scripts/verified_line.py)
+  owns the format). A missing, failing or unproven line is a finding.
 - **Overlap:** the body's `Overlap` line (the `ship-change` skill's step 5). A conflict it names
   that the change does not settle is a finding.
 - **Tests:** the checks the repository requires for this kind of change ran and pass (the

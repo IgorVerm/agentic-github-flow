@@ -213,6 +213,40 @@ open('base-copy', 'w').write(os.environ['VERIFY_BASE'] + '\n' + os.environ['VERI
         self.assertNotEqual(r.returncode, 0)
         self.assertIn('VERIFY_CHANGED', r.stdout)
 
+    def test_fast_without_a_base_refuses(self):
+        # the landing branch named in the settings is not here: no base, so no list
+        self.git(self.repo, 'checkout', '-q', 'main')
+        self.write(self.repo, 'HANDOFF.md', handoff(fast=marker('main-fast')).replace(
+            '| landing | `pull request` |\n',
+            '| landing | `pull request` |\n| landing branch | `develop` |\n'))
+        self.commit(self.repo, 'lands on develop')
+        self.git(self.repo, 'checkout', '-q', 'feature')
+        self.git(self.repo, 'merge', '-q', 'main')
+        self.write(self.repo, 'committed.txt', 'x')
+        self.commit(self.repo, 'work')
+        r = self.verify(self.repo, 'fast')
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn('landing branch', r.stderr)
+        self.assertEqual(self.ran(self.repo), [])
+        self.assertEqual(self.record(self.repo), [])
+
+    def test_fast_in_a_shallow_clone_refuses(self):
+        # one commit of each branch: feature's tip has no merge base with origin/main here
+        self.write(self.repo, 'committed.txt', 'x')
+        self.commit(self.repo, 'work')
+        origin = os.path.join(self.tmp, 'origin.git')
+        self.git(self.tmp, 'clone', '-q', '--bare', self.repo, origin)
+        self.git(origin, 'symbolic-ref', 'HEAD', 'refs/heads/main')
+        shallow = os.path.join(self.tmp, 'shallow')
+        self.git(self.tmp, 'clone', '-q', '--depth', '1', '--no-single-branch',
+                 'file://' + origin.replace(os.sep, '/'), shallow)
+        self.git(shallow, 'checkout', '-q', 'feature')
+        r = self.verify(shallow, 'fast')
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn('merge base', r.stderr)
+        self.assertEqual(self.ran(shallow), [])
+        self.assertEqual(self.record(shallow), [])
+
     def test_escaped_pipe_in_a_cell(self):
         self.git(self.repo, 'checkout', '-q', 'main')
         self.write(self.repo, 'HANDOFF.md',

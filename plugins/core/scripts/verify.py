@@ -20,8 +20,9 @@ a path it does not know runs everything): VERIFY_BASE is the merge base of HEAD 
 landing branch as last fetched (landing_ref() in landing.py), and VERIFY_CHANGED names a file listing the changed paths one per line,
 relative to the top folder, sorted: committed since VERIFY_BASE, staged, unstaged and untracked
 but not ignored, deleted ones included. The file is removed after the run. A command that
-ignores both selects by itself. `full` gets neither. When git cannot list them, nothing is
-run (exit 2): an empty list would select nothing and pass.
+ignores both selects by itself. `full` gets neither. When they cannot be listed (the landing
+branch not fetched, no merge base in a shallow clone, a git error), nothing is run (exit 2):
+a list that missed the committed work would select too little and pass.
 
 Every run appends one line to the record, `verify-record.tsv` in the git common directory
 (shared by all worktrees of the repository, never committed; record_path() gives it), under a
@@ -130,14 +131,19 @@ def append_record(path: str, fields: list) -> None:
 
 def run(command: str, top: str, env: dict) -> tuple:
     """Run one command, its output passing through as bytes; (exit code, last line of output)."""
-    last = b""
+    last, shown = b"", True
     sys.stdout.flush()
     proc = subprocess.Popen(command, shell=True, cwd=top, env=env, stdin=subprocess.DEVNULL,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     try:
         for line in proc.stdout:
-            sys.stdout.buffer.write(line)
-            sys.stdout.buffer.flush()
+            if shown:
+                try:
+                    sys.stdout.buffer.write(line)
+                    sys.stdout.buffer.flush()
+                except BrokenPipeError:  # the reader left (`| head`): run on, show no more
+                    shown = False
+                    os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
             if line.strip():
                 last = line.strip()
         return proc.wait(), last.decode("utf-8", "replace")
@@ -169,10 +175,13 @@ def main(argv: list) -> int:
         env.pop("VERIFY_BASE", None)
         if kind == "fast":
             ref = landing_ref(top)
-            base = (out(top, "merge-base", "HEAD", ref) if ref else None) or out(
-                top, "rev-parse", "HEAD")
+            if not ref:
+                raise Refused("the landing branch is not here (fetch it): the changed paths "
+                              "need it as their base")
+            base = out(top, "merge-base", "HEAD", ref)
             if not base:
-                raise Refused("no commit to compare the changes with")
+                raise Refused(f"HEAD and {ref} have no merge base here (a shallow clone, or "
+                              "unrelated histories): the changed paths cannot be listed")
             paths = changed_paths(top, base)
     except (Refused, SettingError) as e:
         print(f"verify.py: {e}", file=sys.stderr)
@@ -197,12 +206,14 @@ def main(argv: list) -> int:
     except KeyboardInterrupt:
         result, code = "failed: interrupted", 130
     finally:
-        if listing:
+        if listing and os.path.exists(listing):
             os.unlink(listing)
     seconds = time.monotonic() - started
     date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     record = record_path(top)
     try:
+        if record is None:
+            raise OSError("git gave no common directory")
         append_record(record, [date, branch_name(top), kind, f"{seconds:.1f}", result, command])
         where = f"recorded in {record}"
     except OSError as e:

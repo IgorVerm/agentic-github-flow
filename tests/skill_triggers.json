@@ -113,7 +113,7 @@
   },
   "verify": {
     "should": [
-      "Before I push this fix for the login timeout, check that it actually meets what issue #31 asks for."
+      "Does my change to the login timeout actually meet the check that issue #31 asks for? Show me the evidence."
     ],
     "should_not": [
       "Rename the variable usr to user in the auth module."

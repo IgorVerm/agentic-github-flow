@@ -3,54 +3,6 @@
 Rulings of the maintainers named in `HANDOFF.md`, newest first, with their words. Detail lives on
 the linked issue.
 
-## Verification: a testable goal, a `verify` skill, and checks kept only for critical systems, 2026-11-24
-
-**Decision (the maintainer),** in four rounds on the proposal of #146, relayed word for word by
-the overview chat. On the first version: the line per "landing", not per commit; a new `verify`
-skill, agreed; removed checks wait for him, agreed: "testen die nooit falen en geen kritiek
-onderdeel beschermen zijn nutteloze fluf" (tests that never fail and protect no critical part are
-useless fluff); a person after three findings rounds, agreed; `REVIEW.md` merges without his
-word, agreed; Windows stays in every CI run here, agreed. A file budget frozen at 34: "dit is
-niet logisch bij een groeiende codebase het systeem moet voor elk van onze repos werken niet puur
-gericht op deze repo deze repo legt onze algemene werkwijze vast" (not logical for a growing
-codebase; the system must work for each of our repositories; this repository records our general
-way of working). The proposal as a whole: "dit voorstel is te gericht op deze repo ik wil een
-algemene werkwijze gebaseerd op anthropics document en de vaststelling van METR dat agents beter
-scoren als ze duidelijke testbare doelen krijgen" (a general way of working, based on Anthropic's
-document and METR's finding that agents score better with clear, testable goals). On the second:
-"1 time limit is geen goed criteria een vast amount of max tests ook niet 2 een audit agent 3 nu
-snoeien en duurzaam systeem die zorgt dat we een een toetsbaar doel op de issue vóór het werk
-begint maar dit hoeft niet mee genomen te worden naar volgende issues die mogen achtergelaten
-worden tenzij ze kritische systemen beschermen 4 ja elke repo werkt op deze manier" (no time
-limit and no number of tests as a criterion; an audit agent lists the critical systems; prune now
-and keep a testable goal on the issue before the work, whose checks may be left behind unless they
-protect critical systems; every repository works this way). On the third: "audit agent kiest er
-zijn veel teveel tests om als mens door te gaan" (the audit agent chooses; far too many tests for
-a person); "wat raadt fable aan ik ben open voor allebei" and "laat fable de beste optie kiezen"
-(the two choices left to the author: the strict reading, and a task check on its issue); "nee
-want dan kan je een test die een mini bug opvangt zogezegd eeuwig moeten houden dat is onwerkbaar
-en beschermt niets in de toekomst" (having caught a small bug keeps no check). On the fourth,
-whether removed checks still wait for him: "Reviewer, en merge".
-**What:** every issue carries a testable `Check:` written before the work; the core skill
-`verify` holds the procedure and the rules for which checks are kept (a task check lives on its
-issue; a standing check only for a path under `critical paths`, through the admission test;
-pruning by the same test; flaky checks fixed or deleted); each repository's `HANDOFF.md` has a
-`## Verification` section (`repo-docs` skeleton); `critical paths` is listed by an audit agent
-and checked by an independent reviewer; one `Verified:` line per landing; the gate starts in
-observe mode. Once a repository's first pruning pass has gone through the maintainer and he sets
-`removed checks` to `reviewer`, a removal outside the critical systems merges on the reviewer's
-approval; a critical system's check still waits for him. The full argument, the measurements and
-the rollout: `docs/proposals/verification-gate.md`. A repository's own verification settings
-and their `Review by:` date get an entry of their own when its section is written (#158 here).
-**Why:** METR finds agents strongest where the goal is clearly defined, cheap to check and
-visible while working; this repository went from 12 to 34 test files in a month with none
-removed.
-**Rejected:** a fixed or maximum number of tests; time limits; keeping a check because it once
-caught something; carrying a check made for one issue into later ones.
-**Binds:** `plugins/core/skills/verify/`, `plugins/core/skills/repo-docs/` (the section), and the
-follow-ups of the proposal's Part D (#153 to #163).
-**Detail:** issues #146, #147 and #152.
-
 ## Codex only where Codex is chosen: its own plugin, 2026-11-22
 
 **Decision (the maintainer):** first, on #98: "het codex deel moet ook optioneel zijn op het werk

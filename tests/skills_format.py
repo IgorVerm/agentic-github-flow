@@ -30,7 +30,7 @@ BODY_BUDGET = {
     'codex-issue-chats': 7232, 'codex-worker': 9437, 'efficient-design': 3676,
     'issue-handover': 19051, 'open-issue': 2852, 'repo-docs': 3563, 'requirements': 7191,
     'review-change': 5701, 'review-security': 5732, 'ship-change': 13265, 'spec-first': 1250,
-    'verify': 3653,
+    'verify': 3792,
 }
 DESCRIPTIONS_BUDGET = 5972
 errors = []

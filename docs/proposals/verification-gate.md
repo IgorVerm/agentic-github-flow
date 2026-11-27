@@ -56,8 +56,8 @@ still wait for you, you answered with "Reviewer, en merge" (rulings below; §B.3
 
 ## The maintainer's rulings on the first version, 2026-11-24
 
-Recorded here with his words, as are the three rounds below. Since #152, the first change that
-implements them, `DESIGN_DECISIONS.md` holds them as the ruling of record.
+Recorded here with his words; they move into `DESIGN_DECISIONS.md` with the first change that
+implements them.
 
 | Question | Ruling |
 |---|---|

@@ -39,9 +39,9 @@ again at each `Review by:` date of the repository's `DESIGN_DECISIONS.md` entry 
 verification settings.
 
 The reviewer of an audit change checks that it belongs to an audit issue and its session has no
-other change open or in hand that the list bears on; that every entry names the loss; that every
-removed entry says what changed in the code since it was listed; that no part with an
-irreversible loss is missing (naming any it finds); and that the change holds nothing else.
-Otherwise it is refused.
+other change open or in hand that the list bears on (otherwise it is refused, whatever it says);
+that every entry names the loss; that every removed entry says what changed in the code since it
+was listed (a removal without that is refused); that no part with an irreversible loss is
+missing (the reviewer names any it finds); and that the change holds nothing else.
 
 Then the first pruning pass applies the pruning rule (`SKILL.md`) to the checks that exist.

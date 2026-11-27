@@ -15,15 +15,17 @@ skeleton). A check made for the occasion confirms what its author already believ
    (`git show origin/<base>:HANDOFF.md`), so the change cannot rewrite what judges it. A check
    that is wrong or cannot be run: say so on the issue, then wait or continue under a stated
    assumption.
-2. **Choose the evidence in proportion:** none for documentation, `fast` for most changes,
-   `full` for a change under `critical paths`. For a matter of judgment, hand the named reader
-   what they need (a screenshot, the page, the text); no test stands in for the judgment.
+2. **Choose the evidence in proportion:** the issue's own check first; then none for
+   documentation, `fast` for most changes, `full` for a change under `critical paths`. For a
+   matter of judgment, hand the named reader what they need (a screenshot, the page, the
+   text); no test stands in for the judgment.
 3. **Run `fast` while working and before every push.** Fix what fails; after two failed
    corrections of the same problem, stop and report.
 4. **A check made for this issue goes on the issue** when it first fails, before the fix: a
    signed comment with the check in a code block and the command that runs it, and there it
    stays. It is a script that drives the product from outside, or, where it must be built with
-   the code, a patch that adds it, never committed.
+   the code, a patch that adds it, never committed. It becomes a standing check only when it
+   protects a critical system and passes the admission test.
 5. **Write the `Verified:` line** in the pull request body, or the landing comment in
    local-main mode: `Verified: <kind>: <evidence>`, the kind `goal`, `tests`,
    `standing-check`, `run`, `seen`, or `none` with its reason; several joined by `;`. A check

@@ -63,6 +63,7 @@ Ask in your own words; these are examples. The skill names are for reference.
 | A finished change landed | "This is done, open a pull request." | `ship-change` |
 | An independent review | "Review pull request #42." | `review-change` |
 | Tidying up after a merge | "#42 is merged, clean up." | `cleanup-merged` |
+| Proof that a change met its goal | "Check this against what the issue asks before you push." | `verify` |
 | A check that something scales | "Does this sync job still hold up when the table grows?" | `efficient-design` |
 | The repository's documents in order | "Set up the agent documents for this repository." or "Where does this belong?" | `repo-docs` |
 | A security review (opt-in) | "Do a security review of this change." | `review-security` |

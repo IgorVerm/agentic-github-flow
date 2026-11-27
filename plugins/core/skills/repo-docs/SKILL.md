@@ -11,7 +11,7 @@ has one home; everything else links to it.
 | File | Answers | Holds | Keep it |
 |---|---|---|---|
 | `AGENTS.md` | What must every agent here always respect? | Only this repository's own rules: its invariants, its deliberate deviations from the general rules (named as such), where outside content enters. `CLAUDE.md` is the one line `@AGENTS.md`. | Short: under 100 lines. Both clients load it in every session. |
-| `HANDOFF.md` | What is true now, and how do I build, test and run? | Current state with the date it was checked, the commands, a routing table ("for this kind of work, read that document"), standing permissions. | Under 200 lines. Rewritten, never appended to. |
+| `HANDOFF.md` | What is true now, and how do I build, test and run? | Current state with the date it was checked, the commands, the `## Verification` section (the `verify` skill's facts, in [skeleton.md](skeleton.md)), a routing table ("for this kind of work, read that document"), standing permissions. | Under 200 lines. Rewritten, never appended to. |
 | GitHub issues | What is not done? | Every piece of concrete work, with its status. | The only queue. |
 | `ROADMAP.md` | Where is this going? | Direction, phases, dependencies, links to milestones. | No task list, no finished items. |
 | `DESIGN_DECISIONS.md` | What did the decision-makers decide, and why? | One entry per ruling: the decision in their words, why, what was rejected, what it binds. Newest first. | Re-opening one needs the person who decided. |

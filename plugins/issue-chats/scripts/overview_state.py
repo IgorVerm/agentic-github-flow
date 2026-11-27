@@ -12,7 +12,8 @@ comments, 487,930 characters, measured 2026-11-27), so a chat never reads its th
 asks GitHub for the issue's newest 100 comments in one GraphQL call and prints only
 
   standing issue: <owner/repo>#<n> · <title>
-  comments: <total>, rollover at 100[: due]
+  comments: <total>, rollover at 100
+  rollover due                       (only from 100 comments on)
   claim (<time>): <the newest signed comment opening `claimed for chat`>
   state (<time>, <length> characters[, over the 1,500 the method allows]):
   <the newest signed comment opening `overview state:`>
@@ -56,7 +57,8 @@ def repository(text: str | None, top: str, override: str | None) -> str:
     cell = override or row_in(text, "overview repository")
     if cell:
         value = cell.strip().strip("`").strip()
-        if value.lower() not in ("", "here", "this repository"):
+        if value.lower() not in ("", "here", "none") and \
+                not value.lower().startswith("this repository"):
             if not REPO.fullmatch(value):
                 raise SettingError(f"overview repository {cell!r} is not owner/repo")
             return value
@@ -80,7 +82,10 @@ def standing_issue(repo: str, label: str, top: str) -> tuple[int | None, str]:
         numbers = ", ".join(f"#{i.get('number')}" for i in found)
         return None, (f"{len(found)} open issues labelled {label!r} in {repo} ({numbers}): a "
                       "rollover closes the old one; close all but the newest, or pass --issue")
-    return int(found[0]["number"]), ""
+    try:
+        return int(found[0]["number"]), ""
+    except (KeyError, TypeError, ValueError):
+        raise Unread("gh issue list gave no issue number")
 
 
 def newest(nodes: list[dict], mark: re.Pattern) -> dict | None:
@@ -128,12 +133,21 @@ def main(argv: list[str]) -> int:
                 print(f"overview_state: {why}", file=sys.stderr)
                 return 1
         owner, name = repo.split("/")
-        data = gh(["api", "graphql", "-f", f"query={QUERY}", "-F", f"owner={owner}",
-                   "-F", f"name={name}", "-F", f"number={number}"], top)
+        try:
+            data = gh(["api", "graphql", "-f", f"query={QUERY}", "-f", f"owner={owner}",
+                       "-f", f"name={name}", "-F", f"number={number}"], top)
+        except Unread as e:
+            if "Could not resolve to an Issue" not in str(e):
+                raise
+            data = None
         issue = (((data or {}).get("data") or {}).get("repository") or {}).get("issue") \
             if isinstance(data, dict) else None
+        if data is None or (isinstance(data, dict) and isinstance(data.get("data"), dict)
+                            and not issue):
+            print(f"overview_state: no issue #{number} in {repo}", file=sys.stderr)
+            return 1
         if not isinstance(issue, dict):
-            raise Unread(f"no issue #{number} in {repo}")
+            raise Unread("gh api graphql gave no issue")
     except SettingError as e:
         print(f"overview_state: {e}", file=sys.stderr)
         return 2
@@ -148,10 +162,11 @@ def main(argv: list[str]) -> int:
         print(f"overview_state: #{number} is {str(issue.get('state')).lower()}: the rollover "
               "names its successor in its last comments", file=sys.stderr)
         return 1
-    due = total >= ROLLOVER_AT
-    print(f"comments: {total}, rollover at {ROLLOVER_AT}" + (": due" if due else ""))
+    print(f"comments: {total}, rollover at {ROLLOVER_AT}")
+    if total >= ROLLOVER_AT:
+        print("rollover due")
     claim = newest(nodes, CLAIM)
-    print(f"claim ({claim['createdAt']}): {cut(claim['body'])}" if claim
+    print(f"claim ({claim.get('createdAt')}): {cut(str(claim['body']))}" if claim
           else f"claim: none among the newest {ROLLOVER_AT} comments")
     state = newest(nodes, STATE)
     if not state:
@@ -160,7 +175,7 @@ def main(argv: list[str]) -> int:
         return 1
     body = str(state["body"])
     over = f", over the {STATE_LIMIT:,} the method allows" if len(body) > STATE_LIMIT else ""
-    print(f"state ({state['createdAt']}, {len(body):,} characters{over}):")
+    print(f"state ({state.get('createdAt')}, {len(body):,} characters{over}):")
     print(cut(body))
     return 0
 

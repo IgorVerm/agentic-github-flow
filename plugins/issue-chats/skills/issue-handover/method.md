@@ -66,7 +66,7 @@ The skills read their values from it; a row left out takes its default:
 | ready extras | what the repository adds to the definition of ready of the `requirements` skill | none |
 | start extras, hand-over extras | repository steps at a chat's start and before it ends | none |
 | overview label | the label of the standing issue of the overview chat (§8) | `overview` |
-| overview repository | `owner/repo` whose standing issue's overview also covers this repository (§8) | this repository's own |
+| overview repository | `owner/repo` whose standing issue's overview also covers this repository (§8) | this repository |
 
 An installed plugin may add a row of its own; that plugin's skill owns the row's meaning and
 default.
@@ -532,36 +532,49 @@ every repository that uses issue chats (`DESIGN_DECISIONS.md`, 2026-11-27, #168)
   `python3 <plugin>/scripts/overview_state.py -C <its worktree>` instead: it reads the newest
   100 comments inside the script and prints the issue, the comment count, the newest claim and
   the newest state, nothing else. Its claim line serves the claim check of §4 step 1.2.
-- **Its worktree:** one for all its generations, `overview`, made with the worktree tool from the
-  primary checkout (`new_worktree.py overview`), so the app reports no `worktreePath` and the
-  hand-over stays in place. The chat commits nothing there; a cleanup sweep keeps a worktree
-  without commits of its own, and a removal keeps one a chat works in. It reads the default
-  branch as fetched (`git show origin/<default branch>:<path>`) or brings it in with
-  `merge_landing.py` (`ship-change` step 2).
+- **Its worktree:** `<n>-overview`, `<n>` its standing issue, made with the worktree tool from
+  the primary checkout (`new_worktree.py <n>-overview`, branch `agent/<n>-overview`), so the
+  app reports no `worktreePath`, every generation on that issue hands over in place, and the
+  plugin's hooks (`context_limit.py`, `question_label.py`) find the issue in the branch name.
+  The chat commits nothing there: a cleanup sweep keeps a worktree without commits of its own,
+  a removal keeps one a chat works in, and the worktree check calls it `ok`. It reads the
+  default branch as fetched (`git show origin/<default branch>:<path>`) or brings it in with
+  `merge_landing.py` (`ship-change` step 2). From the primary checkout it runs only what must
+  run there: the worktree tool and `remove_merged_worktree.py` (`cleanup-merged`).
+- **Only state and claims on the standing issue:** a question, an answer or a finding goes on
+  its owning issue (§5), so every hand-over's state comment stays among the newest 100 that
+  `overview_state.py` reads.
 
 **The hand-over**, at the context limit (§1, `context_limit.py`) or when the user asks, is
 *A hand-over before the branch is ready*, in place: (1) end its own live work (`issue-handover`);
 (2) bring the notes file up to date and post the `overview state:` comment; (3)
 `start_issue_chat.py --handover "<overview worktree>" "<title prefix>#<n> · overview <k+1>"` on the
 settings' model and effort; (4) the claim comment naming the new chat and the worktree; (5) the
-brief by `send_message`: the start of `issue-handover` step 5 (title, sidebar section, only the
-overview worktree), then this section, the repository's overview document, `overview_state.py`
-as the one way to read the issue, and what the user is waiting on; (6) after "delivered",
-`get_session "self"` and `archive_session "self"`, reason `handed #<n> over in place to
-local_<id>`. The successor checks at its start, and says on the issue if one fails: its own
-`get_session "self"` shows no `parentSessionId` or `detached` true; the predecessor's
-`get_session` shows it archived; `git worktree list` shows one `overview` worktree.
+brief by `send_message`: the start of `issue-handover` step 5 (title, sidebar section, its
+worktree, the primary checkout only for the tools named above), then this section, the
+repository's overview document, `overview_state.py` as the one way to read the issue, and what
+the user is waiting on; (6) after "delivered", `get_session "self"` and
+`archive_session "self"`, reason `handed #<n> over in place to local_<id>`. That archive needs
+the user's allow rule for `archive_session` (§7): without it the auto-mode classifier decides,
+and it refused one (probe #169, 2026-11-27); then the predecessor reports to its successor and
+stops, and the user archives it. The successor checks, and says on the issue which check fails:
+its own `get_session "self"` shows no `parentSessionId`, or `detached` true; the predecessor's
+`get_session` shows it archived, checked again for up to five minutes, since the predecessor
+archives only after its "delivered"; `git worktree list` shows one `-overview` worktree.
 
-**The rollover.** When `overview_state.py` says `rollover due` (100 comments or more), the
-hand-over first moves the overview to a new standing issue: open it with the overview label and
-a body naming the old one, assign it, post on it a claim comment naming this chat
-(`local_<id>` and the worktree) so that `--handover` accepts it, post the state there, close the
-old issue with a signed comment `rolled over to #<m>`, then hand over on `#<m>`. Its worktree
-stays the same. So an issue never holds much more than 100 comments.
+**The rollover.** When `overview_state.py` prints `rollover due` (100 comments or more), the
+hand-over moves to a new standing issue `#<m>` and a new worktree: open the issue with the
+overview label and a body naming the old one, assign it, post on it a claim comment naming this
+chat (`local_<id>`), make `new_worktree.py <m>-overview` from the primary checkout, and post
+the state of step (2) on `#<m>`; close the old issue with a signed comment `rolled over to
+#<m>`; then steps (3) to (6) on `#<m>` with the new worktree (`--handover` accepts the claim by
+the session id). The guard passes the predecessor's archive because its old worktree is clean
+and in the default branch; the successor removes that worktree with `remove_merged_worktree.py`
+from the primary checkout before its checks.
 
 **The first overview** starts on the user's word, from any chat: the overview label (§7 step 2,
-the user's yes), the standing issue, `new_worktree.py overview`, the first state comment, then
-`start_issue_chat.py` with `#<n> · overview 1` (no `--handover`: the issue is unassigned), the
-claim and the brief, as `issue-handover` step 5. An overview chat that ran without this route
-archives itself after "delivered" when its working directory holds no work of its own (the
+the user's yes), the standing issue, `new_worktree.py <n>-overview`, the first state comment,
+then `start_issue_chat.py` with `#<n> · overview 1` (no `--handover`: the issue is unassigned),
+the claim and the brief, as `issue-handover` step 5. An overview chat that ran without this
+route archives itself after "delivered" when its working directory holds no work of its own (the
 guard checks); otherwise it reports and the user archives it.

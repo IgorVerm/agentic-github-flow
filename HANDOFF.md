@@ -38,9 +38,11 @@ Checked on 2026-11-22.
     refuses a question the work waits on while the issue lacks the label and removes the label
     at the answer and at the close. Measured live in the desktop app (#75).
     The overview chat (#168, method.md §8) is the issue chat of a standing issue, labelled
-    `overview`, in one worktree `overview`, and hands over by the in-place route; a successor
+    `overview`, in a worktree `<n>-overview`, and hands over by the in-place route; a successor
     reads only the newest state through `overview_state.py`, and past 100 comments the overview
-    rolls over to a new standing issue. Offline tests only; the live hand-over not yet run.
+    rolls over to a new standing issue. Probe #169 (2026-11-27): the successor had no parent and
+    one worktree remained, but the classifier refused the predecessor's self-archive (no allow
+    rule for `archive_session` on that machine).
     A second hook (`context_limit.py`, #77) enforces `context limit` (default 300,000; per label,
     #82, e.g. 600k for `work: model` and `work: animation`): past it a note to hand over, past
     twice it (at most 900k) only asking the user and the hand-over run until the user answers. Measured

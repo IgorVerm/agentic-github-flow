@@ -117,16 +117,20 @@ class OverviewState(unittest.TestCase):
         for absent in ('OLD STATE', 'THREAD TEXT', 'UNSIGNED', 'OTHER COMMENT', 'local_2'):
             self.assertNotIn(absent, p.stdout)
         self.assertIn('comments: 7, rollover at 100\n', p.stdout)
+        self.assertNotIn('rollover due', p.stdout)
 
     def test_query_is_bounded_and_rollover_named(self):
         thread = [state('S%d' % k) for k in range(150)]
         p = self.run_tool([issue(7, thread)])
         self.assertEqual(p.returncode, 0, p.stderr)
-        self.assertIn('comments: 150, rollover at 100: due', p.stdout)
+        self.assertIn('comments: 150, rollover at 100\nrollover due\n', p.stdout)
         self.assertIn('S149', p.stdout)
         query = [x for call in self.log if call[:2] == ['api', 'graphql'] for x in call
                  if x.startswith('query=')]
         self.assertTrue(query and 'comments(last:100)' in query[0], self.log)
+        call = [c for c in self.log if c[:2] == ['api', 'graphql']][0]
+        self.assertIn('owner=me', call[call.index('owner=me') - 1:])
+        self.assertEqual(call[call.index('owner=me') - 1], '-f', 'a string variable gh may convert')
         self.assertFalse([c for c in self.log if c[:2] == ['issue', 'view']],
                          'the whole thread was fetched')
 
@@ -178,6 +182,21 @@ class OverviewState(unittest.TestCase):
         self.assertIn('them/home#3', p.stdout)
         self.assertIn('SHARED', p.stdout)
         self.assertFalse([c for c in self.log if c[:2] == ['repo', 'view']])
+
+    def test_unknown_issue_and_malformed_answer(self):
+        p = self.run_tool([issue(7, [state('a')])], '--issue', '8')
+        self.assertEqual(p.returncode, 1)
+        self.assertIn('no issue #8', p.stderr)
+        p = self.run_tool([{'number': 'x', 'repo': 'me/repo', 'labels': ['overview'],
+                            'state': 'OPEN', 'title': 'T', 'comments': []}])
+        self.assertEqual(p.returncode, 3, p.stderr)
+        self.assertNotIn('Traceback', p.stderr)
+
+    def test_default_text_of_the_repository_row(self):
+        self.handoff("| overview repository | this repository's own |\n")
+        p = self.run_tool([issue(7, [state('HERE')])])
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn('HERE', p.stdout)
 
     def test_bad_repository_setting(self):
         self.handoff('| overview repository | `not a repo` |\n')

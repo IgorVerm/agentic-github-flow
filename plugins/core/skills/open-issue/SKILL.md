@@ -28,11 +28,12 @@ assignee here: an assignee is the claim of whoever works on it, and the overlap 
    overlap check reads; and `after #n` for each issue it waits on. Size test: it fits one
    session's context and one coherent diff, one pull request. If not, or if the first step
    needs an answer nobody has yet, its requirements are open (step 3).
-3. **Labels:** the ready label, only with a usable `Check:`; at most one area label when the repository uses area labels
-   and one fits what must change (not where the symptom was seen); other labels as the
-   repository's documents say; `priority: critical` for a Critical security finding (the
-   severity table of the `review-security` skill, when installed), `priority: high` for a
-   defect the user hit or one that blocks a milestone, `priority: low` for work that may wait.
+3. **Labels:** the ready label, only with a usable `Check:`; at most one area label when the
+   repository uses area labels and one fits what must change (not where the symptom was seen);
+   other labels as the repository's documents say; `priority: critical` for a Critical
+   security finding (the severity table of the `review-security` skill, when installed),
+   `priority: high` for a defect the user hit or one that blocks a milestone, `priority: low`
+   for work that may wait.
    Critical goes before high; low goes after unlabelled issues. New work
    whose requirements are open gets the requirements label and no ready label, its body names
    what is open, and the `requirements` skill specifies it. A defect stays ready even when its

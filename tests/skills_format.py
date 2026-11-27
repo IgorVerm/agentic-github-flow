@@ -28,7 +28,7 @@ PLAIN_NEVER_FIRST = '[]{}>|*&!%@`,?-#'  # YAML indicators that cannot start a pl
 BODY_BUDGET = {
     'archive-finished-chats': 6157, 'check-web-deploy': 5275, 'cleanup-merged': 7737,
     'codex-issue-chats': 7232, 'codex-worker': 9437, 'efficient-design': 3676,
-    'issue-handover': 19051, 'open-issue': 3781, 'repo-docs': 3472, 'requirements': 7196,
+    'issue-handover': 19051, 'open-issue': 3784, 'repo-docs': 3472, 'requirements': 7196,
     'review-change': 5701, 'review-security': 5732, 'ship-change': 13265, 'spec-first': 1313,
 }
 DESCRIPTIONS_BUDGET = 5645

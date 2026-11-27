@@ -37,6 +37,10 @@ Checked on 2026-11-22.
     A hook (`question_label.py`, #75) keeps an issue's question label true in Claude Code: it
     refuses a question the work waits on while the issue lacks the label and removes the label
     at the answer and at the close. Measured live in the desktop app (#75).
+    The overview chat (#168, method.md §8) is the issue chat of a standing issue, labelled
+    `overview`, in one worktree `overview`, and hands over by the in-place route; a successor
+    reads only the newest state through `overview_state.py`, and past 100 comments the overview
+    rolls over to a new standing issue. Offline tests only; the live hand-over not yet run.
     A second hook (`context_limit.py`, #77) enforces `context limit` (default 300,000; per label,
     #82, e.g. 600k for `work: model` and `work: animation`): past it a note to hand over, past
     twice it (at most 900k) only asking the user and the hand-over run until the user answers. Measured
@@ -147,7 +151,7 @@ Checked on 2026-11-22.
 | merging the landing branch in the sandbox | `plugins/core/scripts/merge_landing.py` header, `frozen_unexplained` in `plugins/core/scripts/work_proof.py`, `plugins/core/skills/ship-change/SKILL.md` step 2, `DESIGN_DECISIONS.md`, `tests/merge_landing.py`, `plugins/guards/scripts/pre_tool_merge_guard.py` header, `tests/merge_guard.py` |
 | the security scanners | `plugins/security/scripts/*.py` headers, `plugins/security/skills/review-security/sources.md`, `tests/scan_secrets.py`, `tests/audit_dependencies.py` |
 | the pre-push hook | `templates/pre-push` header, `plugins/core/scripts/push_paths.py`, the push check in `plugins/guards/scripts/pre_tool_personal_data.py`, `tests/pre_push_checks.py`, its older refusals in `tests/worktree_tools.py` (`PrePushTests`) |
-| issue chats | `plugins/issue-chats/skills/issue-handover/method.md`, `plugins/issue-chats/scripts/*.py` headers, `tests/next_issue.py`, `tests/start_issue_chat.py`, `tests/chat_archivable.py`, `tests/archive_guard.py`, `tests/question_label.py`, `tests/context_limit.py` |
+| issue chats | `plugins/issue-chats/skills/issue-handover/method.md`, `plugins/issue-chats/scripts/*.py` headers, `tests/next_issue.py`, `tests/overview_state.py`, `tests/start_issue_chat.py`, `tests/chat_archivable.py`, `tests/archive_guard.py`, `tests/question_label.py`, `tests/context_limit.py` |
 | the Codex plugin | `plugins/codex/skills/codex-worker/SKILL.md`, `plugins/codex/skills/codex-issue-chats/SKILL.md`, `plugins/codex/scripts/*.py` headers, `rules/codex.md`, `tests/codex_worker.py`, `tests/codex_tools.py` (live part outside Claude Code's sandbox only), the Codex cases of `tests/installer.py` |
 
 ## Landing settings

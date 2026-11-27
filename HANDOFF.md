@@ -69,7 +69,10 @@ Checked on 2026-11-22.
   core skill `verify` (#152) holds the procedure (the issue's check, evidence in proportion, the
   fast check, a task check kept on its issue, the `Verified:` line) and the rules for which checks
   are kept; `repo-docs` lays out the `## Verification` section of a repository's `HANDOFF.md`.
-  Not here yet: this repository's own section, `verify.py`, the line's format script, the gate.
+  `plugins/core/scripts/verify.py` (#154) runs the `fast` or `full` row as the default branch
+  holds it, hands `fast` the changed paths, and appends a line per run to `verify-record.tsv`
+  in the git common directory (its header owns the format). Not here yet: this repository's
+  own section (so `verify.py` refuses here until #158), the line's format script, the gate.
 - Efficient design (#37): the core skill `efficient-design` is a checklist at design and review
   (work per frame, request or job run grows with what changed, not with all data), and the core
   rule *Work grows with what changed* has the author write an `Efficient design:` line in the
@@ -146,6 +149,7 @@ Checked on 2026-11-22.
 | the documents for users | `README.md` (the entry), `docs/guide.md` (for colleagues: what it does, what to ask for), `docs/install.md` (for the installing agent) |
 | the guards | `plugins/guards/scripts/*.py` headers, `plugins/guards/policy/*.rules`, `tests/git_guard.py`, `tests/claude_git_rules.py` (the Claude permission rules and the git guard's `--claude` mode together, against the rules before #33), `tests/delete_guard.py` (cases in `tests/delete_guard_cases.py`; `tests/delete_guard_differential.py` checks it never asks less than before issue 4), `tests/personal_data_guard.py`, `tests/sandbox_network_guard.py` (with `--guards sandbox` in `tools/installer.py`), `tests/merge_guard.py`, `tests/claude_permissions.py`, `tests/codex_policy.py` (part 3: the opt-in `gcloud.rules`) |
 | automatic merging and the unasked push | `plugins/core/scripts/merge_pr.py`, `push_branch.py` and `review_verdict.py` headers, `plugins/core/skills/ship-change/SKILL.md` steps 6 to 8, `plugins/core/skills/review-change/SKILL.md`, `DESIGN_DECISIONS.md`, `tests/merge_pr.py`, `tests/push_branch.py`, `tests/review_verdict.py` |
+| verification | `plugins/core/skills/verify/` (`SKILL.md`, `writing-the-section.md`), `plugins/core/scripts/verify.py` header, `tests/verify.py`, `docs/proposals/verification-gate.md` |
 | landing modes | `plugins/core/scripts/landing.py` and `promote_main.py` headers, `plugins/core/skills/ship-change/` (`SKILL.md`, `local-main.md`), `tests/landing.py`, `tests/promote_main.py` |
 | worktrees and cleanup | `plugins/core/scripts/*.py` headers, `plugins/core/skills/cleanup-merged/SKILL.md`, `tests/worktree_tools.py`, `tests/new_worktree.py`, `tests/overlap_check.py` |
 | merging the landing branch in the sandbox | `plugins/core/scripts/merge_landing.py` header, `frozen_unexplained` in `plugins/core/scripts/work_proof.py`, `plugins/core/skills/ship-change/SKILL.md` step 2, `DESIGN_DECISIONS.md`, `tests/merge_landing.py`, `plugins/guards/scripts/pre_tool_merge_guard.py` header, `tests/merge_guard.py` |

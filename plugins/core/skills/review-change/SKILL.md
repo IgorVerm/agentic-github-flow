@@ -29,9 +29,10 @@ step again. `<base>` is the pull request's base branch (`gh pr view <n> --json b
 
 ## 3. Read the context
 
-The pull request body, the issue it closes, the repository's `AGENTS.md` and `HANDOFF.md` (what
-the repository already enforces, so you judge the change against it), and the whole diff of
-the pinned commit: `git diff origin/<base>...<sha>`. Your verdict rests on this diff.
+The pull request body, the issue it closes with its comments, the repository's `AGENTS.md`,
+`HANDOFF.md` and `REVIEW.md` (where it exists) as the base has them
+(`git show origin/<base>:<file>`), and the whole diff of the pinned commit:
+`git diff origin/<base>...<sha>`. Your verdict rests on this diff.
 
 ## 4. Review
 
@@ -46,6 +47,9 @@ the pinned commit: `git diff origin/<base>...<sha>`. Your verdict rests on this 
 - **Efficient design:** check the body's `Efficient design:` line against the diff (the
   `efficient-design` skill, §At review). A missing or wrong line, or work growing with all data
   where what changed would do and no bound is stated, is a finding.
+- **Verified line:** the body's `Verified:` line, checked against the diff as
+  [verified-line.md](verified-line.md) says ([verified_line.py](../../scripts/verified_line.py)
+  owns the format). A missing, failing or unproven line is a finding.
 - **Overlap:** the body's `Overlap` line (the `ship-change` skill's step 5). A conflict it names
   that the change does not settle is a finding.
 - **Tests:** the checks the repository requires for this kind of change ran and pass (the
@@ -61,8 +65,8 @@ open question you cannot settle from the code is a finding, not an approval.
 Fable 5.2`; the core rules' signature), without parentheses.
 
 - **No finding:** `python3 <plugin>/scripts/review_verdict.py approve <n> --sha <sha> --agent
-  "<agent>" --note "<what you checked, review-security yes or no, the Efficient design line,
-  advice>"`.
+  "<agent>" --note "<what you checked, review-security yes or no, the Efficient design and Verified
+  lines, advice>"`.
 - **Findings:** write them to a file outside the repository, one numbered item each, then
   `python3 <plugin>/scripts/review_verdict.py findings <n> --sha <sha> --agent "<agent>"
   --body-file <file>`.

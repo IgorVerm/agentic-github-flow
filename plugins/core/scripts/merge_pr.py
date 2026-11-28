@@ -55,7 +55,20 @@ only when all hold:
             patterns (comma-separated, `*` matches across `/`) of the row `merge on the user's
             word`; and the sections `## Standing permissions` and `## Landing settings` of
             HANDOFF.md (any case of its name), which hold the switch and these settings, are
-            unchanged, as is every line that names either.
+            unchanged, as is every line that names either. Its `## Verification` section is
+            guarded in two halves (verification_halves()): the commands and the gate (the rows
+            `fast`, `full`, `drive`, `check paths`, `verification gate`, `removed checks`,
+            every other row and line, and a heading naming the section) merge only on the
+            user's word; the list of critical systems (the row `critical paths` and the reason
+            lines under the table) merges here only as an audit change, a change of those lines
+            and nothing else, no other path and no other line of HANDOFF.md. That such a change
+            comes from an audit is the reviewer's to establish: every agent posts under one
+            account;
+  verified  under the row `verification gate` of `## Verification` (landing.py's
+            verification_gate(), as the default branch holds it; off when missing): the body
+            holds one `Verified:` line that parses (verified_line.py beside this file owns the
+            format). With `observe` a body without one is reported as `OBSERVED, not refused`
+            and merges; with `enforce` it is refused. Off, it is not read.
 
 Then `gh pr merge <n> --match-head-commit <sha> --delete-branch --merge` (or --squash), so a
 commit pushed after the checks makes GitHub refuse. Afterwards the cleanup-merged skill. A bare
@@ -76,8 +89,10 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from landing import (AUTO_MERGE, PR, GITHUB_URL, UNKNOWN, SettingError, Unknown,  # noqa: E402
-                     automatic_merge, decide, gh_command, gh_json, row, settings_text)
+                     automatic_merge, decide, gh_command, gh_json, row, settings_text,
+                     verification_gate)
 from review_verdict import verdict  # noqa: E402
+from verified_line import parse as parse_verified  # noqa: E402
 
 # Paths that merge only on the user's word: the always-loaded rules and a repository's own
 # rules, this gate itself, guards, permission settings, hooks and plugin manifests (which can
@@ -86,6 +101,7 @@ EXCLUDED = (
     "rules/core.md", "AGENTS.md", "*/AGENTS.md", "AGENTS.override.md", "*/AGENTS.override.md",
     "CLAUDE.md", "*/CLAUDE.md",
     "*/merge_pr.py", "*/landing.py", "*/review_verdict.py", "*/push_branch.py", "*/push_paths.py",
+    "*/verified_line.py",
     "plugins/guards/*", "*/settings.json", "*/settings.local.json", ".claude/*", ".codex/*",
     "*.claude-plugin/*", "*.codex-plugin/*", ".agents/*",  # but see MANIFESTS
     "hooks/*", "plugins/*/hooks/*", "hooks.json", "*/hooks.json", "templates/pre-push",
@@ -100,6 +116,9 @@ EXCLUDED = (
 # raises it) passes; any other change, such as a hook a manifest declares, is held.
 MANIFESTS = ("*.claude-plugin/*.json", "*.codex-plugin/*.json", ".agents/plugins/*.json")
 GUARDED_SECTIONS = ("Standing permissions", "Landing settings")
+VERIFICATION = "Verification"  # guarded in two halves: verification_halves()
+CRITICAL = "critical paths"
+VERIFICATION_HEADING = re.compile(r"^[+-]\s*#+\s*verification\b", re.I)
 READY_WAIT_S, READY_POLL_S = 60, 5
 GUARDED_LINE = re.compile(r"standing permission|landing setting", re.I)
 PASSED_RUNS = {"SUCCESS", "NEUTRAL", "SKIPPED"}
@@ -145,6 +164,76 @@ def version_only(path: str, before: str, after: str, name: str) -> bool:
 def section(text: str | None, title: str) -> str:
     m = re.search(r"^## %s[ \t]*$(.*?)(?=^## |\Z)" % re.escape(title), text or "", re.M | re.S)
     return m.group(1).strip() if m else ""
+
+
+def verification_halves(text: str | None) -> tuple:
+    """(the commands and the gate, the list of critical systems) of HANDOFF.md's
+    `## Verification`, each as its lines. The list is the row `critical paths` and the reason
+    lines under the table: list items after it, with their indented continuation lines. Every
+    other line of the section, blank lines aside, is in the first half."""
+    rest, listed, seen_table, in_item = [], [], False, False
+    for line in section(text, VERIFICATION).splitlines():
+        bare = line.strip()
+        if bare.startswith("|"):
+            seen_table, in_item = True, False
+            name = bare.strip("|").split("|")[0].replace("`", "").strip().lower()
+            (listed if name == CRITICAL else rest).append(line)
+        elif seen_table and (re.match(r"[-*+][ \t]", bare) or
+                             (in_item and bare and line[:1] in " \t")):
+            listed.append(line)
+            in_item = True
+        elif bare:
+            rest.append(line)
+            in_item = False
+    return rest, listed
+
+
+def without_list(text: str | None) -> str:
+    """<text> with the list of critical systems taken out of its `## Verification` section."""
+    m = re.search(r"^## %s[ \t]*$(.*?)(?=^## |\Z)" % VERIFICATION, text or "", re.M | re.S)
+    if not m:
+        return text or ""
+    rest, _ = verification_halves(text)
+    return text[:m.start(1)] + "\n".join(rest) + "\n" + text[m.end(1):]
+
+
+def handoff_reasons(path: str, merge_base: str, head: str, name: str, changed: list) -> list:
+    """The reasons a change of HANDOFF.md (<name>) merges only on the user's word."""
+    before = git(path, "show", f"{merge_base}:{name}").stdout
+    after = git(path, "show", f"{head}:{name}").stdout
+    diff = git(path, "diff", "-U0", merge_base, head, "--", name).stdout.splitlines()
+    lines = [l for l in diff if l[:1] in "+-" and not l.startswith(("+++", "---"))]
+    reasons = []
+    if any(GUARDED_LINE.search(l) for l in lines) or \
+            any(section(before, t) != section(after, t) for t in GUARDED_SECTIONS):
+        reasons.append(f"{name}: §Standing permissions, §Landing settings or a line naming "
+                       "them changes: that merges only on the user's word")
+    (rest_before, list_before), (rest_after, list_after) = \
+        verification_halves(before), verification_halves(after)
+    if rest_before != rest_after or any(VERIFICATION_HEADING.match(l) for l in lines):
+        reasons.append(f"{name}: §Verification's commands, gate or rows other than "
+                       f"`{CRITICAL}` change: that merges only on the user's word")
+    elif list_before != list_after:
+        others = sorted(p for p in changed if p != name)
+        if others or without_list(before) != without_list(after):
+            reasons.append(f"{name}: the list of critical systems (`{CRITICAL}` and its reason "
+                           "lines) changes together with other work"
+                           + (f" ({', '.join(others[:4])})" if others else "")
+                           + ": an audit change holds those lines and nothing else")
+    return reasons
+
+
+def gate_reason(path: str, body: str | None) -> tuple:
+    """(mode, reason or None) of the verification gate for a landing whose body is <body>:
+    the reason the `Verified:` line is missing or does not parse, under a gate that is on."""
+    mode, _ = verification_gate(path)
+    if mode == "off":
+        return mode, None
+    try:
+        parse_verified(body)
+    except ValueError as e:
+        return mode, f"the verification gate ({mode}): {e}"
+    return mode, None
 
 
 def required_checks(command: list, repo: str, branch: str, named: list) -> set:
@@ -457,18 +546,16 @@ def main(argv: list) -> int:
         if held:
             reasons.append("paths that merge only on the user's word: " + ", ".join(held[:8]))
         for name in sorted({p for p in changed if p.casefold() == "handoff.md"}):
-            before = git(path, "show", f"{merge_base}:{name}").stdout
-            after = git(path, "show", f"{head}:{name}").stdout
-            diff = git(path, "diff", "-U0", merge_base, head, "--", name).stdout.splitlines()
-            touched = [l for l in diff if l[:1] in "+-" and not l.startswith(("+++", "---"))
-                       and GUARDED_LINE.search(l)]
-            if touched or any(section(before, t) != section(after, t) for t in GUARDED_SECTIONS):
-                reasons.append(f"{name}: §Standing permissions, §Landing settings or a line "
-                               "naming them changes: that merges only on the user's word")
+            reasons += handoff_reasons(path, merge_base, head, name, changed)
+    gate, observed = gate_reason(path, pr.get("body"))
+    if observed and gate == "enforce":
+        reasons.append(observed)
 
     print(f"merge_pr: #{number} in {repo}, head {head[:10]}, switch: HANDOFF.md §Landing "
           f"settings, {AUTO_MERGE}" + (f"; grant named: {grant.strip()}" if grant.strip() else ""))
-    print(f"merge_pr: mode {mode}; {found or 'no approved review'}")
+    print(f"merge_pr: mode {mode}; verification gate {gate}; {found or 'no approved review'}")
+    if observed and gate == "observe":
+        print(f"merge_pr: OBSERVED, not refused: {observed}")
     if reasons:
         for reason in reasons:
             print(f"merge_pr: REFUSED: {reason}")

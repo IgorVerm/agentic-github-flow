@@ -2,6 +2,7 @@
 """Read the `Verified:` line of a landing: the one owner of its format.
 
 Usage: python3 verified_line.py check --body-file <file|->
+       python3 verified_line.py check --pr <n> [-C <checkout>] [-R <owner>/<repo>]
 
 The author writes the line in the pull request body, or in the landing comment in local-main
 mode (the ship-change skill's step 4; the verify skill says which evidence to choose); the
@@ -18,7 +19,7 @@ exactly one. The kinds, in lower case:
                   comment on a pull request is no task check).
   tests           existing checks ran and passed.
   standing-check  a check added to those that run on every change, for a critical system; its
-                  evidence reads `<test> fails when <defect>`.
+                  evidence reads `<test> fails when <defect>`, both named.
   run             the product or tool was run and its behaviour observed.
   seen            a screenshot or rendered result was looked at.
   none            nothing to run; the evidence is the reason, and it stands alone.
@@ -32,13 +33,23 @@ check than the issue's says so in a findings item that opens with `Verified line
 
   check   prints each kind and its evidence, and the task-check URLs, and exits 0; exits 1
           with the reason when the body has no line, more than one, or one that does not
-          parse; exits 2 on a usage error or a body that is not UTF-8.
+          parse; exits 2 on a usage error, a body that is not UTF-8, or a pull request whose
+          body cannot be read.
 
-Body files and stdin are read as UTF-8. Offline: it reads only the body it is given.
+The body is --body-file (`-` reads stdin), read as UTF-8, or with --pr the body of pull request
+<n> as `gh pr view` gives it, so no shell redirection is needed (inside the Claude Code sandbox
+gh runs only as a call of its own). -R must name the same repository as origin; without it,
+origin on github.com. AGENTIC_GITHUB_FLOW_GH, a JSON list, replaces the `gh` command. With
+--body-file it is offline. merge_pr.py and push_branch.py (beside this file) check the line by
+parse() where the row `verification gate` of HANDOFF.md's `## Verification` says so (landing.py's
+verification_gate()).
 """
 from __future__ import annotations
 
+import json
+import os
 import re
+import subprocess
 import sys
 
 KINDS = ("goal", "tests", "standing-check", "run", "seen", "none")
@@ -46,9 +57,11 @@ PREFIX = "Verified:"
 FENCE = re.compile(r"\A\s{0,3}(`{3,}|~{3,})(.*)\Z")
 _KIND_ALT = "|".join(re.escape(k) for k in KINDS)
 ITEM = re.compile(rf"\A({_KIND_ALT})\s*:\s*(.*)\Z", re.S)
+KIND_HEAD = re.compile(rf"\A({_KIND_ALT})(?![\w-])")
 SPLIT = re.compile(rf"\s*;\s*(?=(?:{_KIND_ALT})\s*:)")
 COMMENT_URL = re.compile(
     r"https://github\.com/[\w.-]+/[\w.-]+/issues/\d+#issuecomment-\d+")
+STANDING = re.compile(r"\A(.*?\S)\s+fails when\s+(\S.*)\Z", re.S)
 DISPUTED = re.compile(r"^\s*(?:\d+[.)]\s*)?(?:\*\*)?Verified line disputed:", re.M)
 
 
@@ -77,6 +90,12 @@ def parse_line(text: str) -> list:
     items = []
     for part in SPLIT.split(text):
         m = ITEM.match(part.strip())
+        bare = KIND_HEAD.match(part.strip())
+        if not m and bare:
+            kind = bare.group(1)
+            what = "a reason" if kind == "none" else "evidence"
+            raise ValueError(f"`{kind}` needs a colon after it, then {what}: "
+                             f"`Verified: {kind}: <{what.split()[-1]}>`")
         if not m:
             head = part.strip().split(":", 1)[0][:40]
             raise ValueError(f"{head!r} is not a kind: one of {', '.join(KINDS)}, then a colon")
@@ -84,8 +103,8 @@ def parse_line(text: str) -> list:
         if not evidence:
             what = "a reason" if kind == "none" else "evidence"
             raise ValueError(f"`{kind}:` needs {what} after the colon")
-        if kind == "standing-check" and " fails when " not in f" {evidence} ":
-            raise ValueError("`standing-check:` reads `<test> fails when <defect>`")
+        if kind == "standing-check" and not STANDING.match(evidence):
+            raise ValueError("`standing-check:` reads `<test> fails when <defect>`, both named")
         items.append((kind, evidence))
     if len(items) > 1 and any(k == "none" for k, _ in items):
         raise ValueError("`none` stands alone: nothing was run, so no other kind can be given")
@@ -124,6 +143,40 @@ def read_body(path: str) -> str | None:
         return None
 
 
+def pr_body(number: str, path: str, repo: str | None) -> str | None:
+    """The body of pull request <number>, read with gh; None (the reason printed) when it
+    cannot be read."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from landing import GITHUB_URL, gh_command
+    command = gh_command()
+    url = subprocess.run(["git", "-C", path, "remote", "get-url", "origin"],
+                         stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                         encoding="utf-8", errors="replace").stdout.strip()
+    m = GITHUB_URL.match(url)
+    origin_repo = f"{m.group(1)}/{m.group(2)}" if m else None
+    if repo and origin_repo and repo.lower() != origin_repo.lower():
+        print(f"verified_line: -R {repo} is not origin's repository {origin_repo}",
+              file=sys.stderr)
+        return None
+    repo = repo or origin_repo
+    if command is None or not repo:
+        print("verified_line: --pr needs gh, and an origin on github.com or -R <owner>/<repo>",
+              file=sys.stderr)
+        return None
+    try:
+        r = subprocess.run(command + ["pr", "view", number, "-R", repo, "--json", "body"],
+                           stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=120)
+        pr = json.loads(r.stdout) if r.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        pr, r = None, None
+    if not isinstance(pr, dict) or not isinstance(pr.get("body"), str):
+        why = (r.stderr.strip()[:200] if r is not None else "gh did not finish") or "no body"
+        print(f"verified_line: cannot read pull request {number}: {why}", file=sys.stderr)
+        return None
+    return pr["body"]
+
+
 def main(argv: list) -> int:
     try:
         sys.stdout.reconfigure(errors="replace", newline="\n")
@@ -133,10 +186,21 @@ def main(argv: list) -> int:
     if argv[:1] in (["-h"], ["--help"]):
         print(__doc__)
         return 0
-    if len(argv) != 3 or argv[0] != "check" or argv[1] != "--body-file":
+    opts, rest = {}, argv[1:]
+    while len(rest) >= 2 and rest[0] in ("--body-file", "--pr", "-C", "-R") \
+            and rest[0] not in opts:
+        opts[rest[0]] = rest[1]
+        rest = rest[2:]
+    source = [k for k in ("--body-file", "--pr") if k in opts]
+    if argv[:1] != ["check"] or rest or len(source) != 1 or \
+            ("--pr" in opts and not opts["--pr"].isdigit()) or \
+            ("--body-file" in opts and ({"-C", "-R"} & set(opts))):
         print(__doc__.split("\n\n")[1], file=sys.stderr)
         return 2
-    body = read_body(argv[2])
+    if "--pr" in opts:
+        body = pr_body(opts["--pr"], opts.get("-C", "."), opts.get("-R"))
+    else:
+        body = read_body(opts["--body-file"])
     if body is None:
         return 2
     try:

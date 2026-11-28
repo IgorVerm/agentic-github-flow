@@ -15,7 +15,9 @@ this repository or in the installed clone, a HANDOFF.md that only mentions it or
 the task branch alone, the default branch (as GitHub reports it now, whatever origin/HEAD
 says; unreadable refuses), a detached HEAD, local-main mode, pull-request mode only as the
 safe default, no hook or another hook, a protected path, no
-overlap result, a branch behind origin's; the hook's own refusal (a secret) is the script's
+overlap result, a branch behind origin's, and under the row `verification gate` set to
+`enforce` (or a value it does not know) a body without a `Verified:` line that parses, which
+`observe` only reports; the hook's own refusal (a secret) is the script's
 refusal; a pull request that cannot be opened after the push exits 3. Planted values are built
 by concatenation. Offline.
 """
@@ -350,6 +352,48 @@ class PushBranch(unittest.TestCase):
         self.assertRefused('no overlap check result')
         self.assertRefused('pass --title and --body-file', pr=False)
         self.assertEqual(self.on_origin(), '')
+
+    def gate(self, value):
+        """Set the row `verification gate` on main, then return to a new task branch."""
+        self.git(self.repo, 'switch', '-q', 'main')
+        self.commit('HANDOFF.md', SETTINGS + '\n## Verification\n\n| Setting | Value |\n'
+                    '|---|---|\n| `verification gate` | `%s` |\n' % value)
+        self.git(self.repo, 'push', '-q', 'origin', 'main')
+        branch = 'agent/7-%s' % value
+        self.git(self.repo, 'switch', '-q', '-c', branch)
+        self.commit('plugins/core/skills/x/SKILL.md', value + '\n')
+        return branch
+
+    def test_the_verification_gate(self):
+        # off (no row): the line is not read
+        r = self.run_tool('--dry-run')
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn('verification gate off', r.stdout)
+        self.assertNotIn('OBSERVED', r.stdout)
+        # observe: reported, and the push goes on
+        branch = self.gate('observe')
+        r = self.run_tool()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn('OBSERVED, not refused: the verification gate (observe): no `Verified:` '
+                      'line', r.stdout)
+        self.assertEqual(self.on_origin(branch), self.git(self.repo, 'rev-parse', 'HEAD'))
+        # enforce: refused, nothing pushed; a line that parses passes
+        branch = self.gate('enforce')
+        self.assertRefused('REFUSED: the verification gate (enforce): no `Verified:` line')
+        self.write_body(BODY + 'Verified: tests\n')
+        self.assertRefused('`tests` needs a colon after it')
+        self.assertEqual(self.on_origin(branch), '')
+        self.write_body(BODY + 'Verified: tests: python3 tests/push_branch.py, 30 OK\n')
+        r = self.run_tool('--dry-run')
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        # the open pull request's body is the one read, not --body-file
+        open_pr = [{'number': 8, 'url': 'https://github.com/acme/tool/pull/8', 'body': BODY,
+                    'baseRefName': 'main', 'isCrossRepository': False}]
+        self.assertRefused('no `Verified:` line', prs=open_pr)
+        # an unknown value fails closed
+        self.gate('strict')
+        self.write_body(BODY)
+        self.assertRefused('the verification gate (enforce)')
 
     def test_a_branch_behind_origins_copy(self):
         other = os.path.join(self.dir, 'other')

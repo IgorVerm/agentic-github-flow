@@ -44,7 +44,12 @@ hold:
             AGENTIC_GITHUB_FLOW_UNASKED_PUSH=1;
   overlap   the pull request body holds the overlap check's result, a line starting with
             `Overlap` (the ship-change skill's step 5): the open pull request's body, or, when
-            none is open for the branch, --body-file, which then needs --title as well.
+            none is open for the branch, --body-file, which then needs --title as well;
+  verified  under the row `verification gate` of HANDOFF.md's `## Verification` (landing.py's
+            verification_gate(), as the default branch holds it; off when missing), that same
+            body holds one `Verified:` line that parses (verified_line.py owns the format).
+            With `observe` a body without one is reported as `OBSERVED, not refused` and the
+            push goes on; with `enforce` it is refused, and the push waits for the user.
 
 Then `git push --no-follow-tags --recurse-submodules=no origin refs/heads/<branch>:refs/heads/
 <branch>`: the branch alone, whatever push.followTags or push.recurseSubmodules say (no -u,
@@ -70,7 +75,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from landing import (PR, GITHUB_URL, SAFE_DEFAULT, UNKNOWN, SettingError, decide,  # noqa: E402
                      gh_command, settings_text)
 from merge_pr import section  # noqa: E402
-from merge_pr import OVERLAP  # noqa: E402
+from merge_pr import OVERLAP, gate_reason  # noqa: E402
 from push_paths import held  # noqa: E402
 
 HOOK_MARKS = ("agentic-github-flow pre-push hook", "AGENTIC_GITHUB_FLOW_UNASKED_PUSH")
@@ -293,8 +298,14 @@ def main(argv: list) -> int:
     elif not OVERLAP.search(body):
         reasons.append(f"{body_file} has no overlap check result (a line starting with `Overlap`)")
 
+    gate, observed = gate_reason(path, str(pr.get("body") or "") if pr else
+                                 body if body_file else None)
+    if observed and gate == "enforce":
+        reasons.append(observed)
     print(f"push_branch: {branch or '(no branch)'} at {head[:10]} to {repo}, mode {mode}, "
-          f"grant: {grant.strip()}")
+          f"grant: {grant.strip()}, verification gate {gate}")
+    if observed and gate == "observe":
+        print(f"push_branch: OBSERVED, not refused: {observed}")
     if reasons:
         for reason in reasons:
             print(f"push_branch: REFUSED: {reason}")

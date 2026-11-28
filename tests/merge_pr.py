@@ -14,7 +14,12 @@ word (built in, or named in HANDOFF.md), and a base other than the landing branc
 that may merge: a review of the head, and of a commit followed only by a clean merge of the
 base; with --ready a draft is marked ready first and merged only once GitHub calls it CLEAN. The
 review comment that review_verdict.py writes is accepted, and hand-written variants that deviate
-from it are refused. Offline: no network, no real gh.
+from it are refused. HANDOFF.md's `## Verification` is guarded in two halves: a change of the
+list of critical systems alone (the `critical paths` row, its reason lines) merges, the list
+together with another file or line is held, and any other row, line or heading of the section
+is held; under the row `verification gate`, `observe` reports a body without a `Verified:`
+line and merges, `enforce` (and a value it does not know) refuses it. Offline: no network, no
+real gh.
 """
 import json
 import os
@@ -36,6 +41,18 @@ def handoff(*rows, text='', switch=SWITCH):
     """HANDOFF.md with <text>, then Landing settings: the rows given and automatic merging on."""
     return ('# Handoff\n\n' + text + '## Landing settings\n\n| Setting | Value |\n|---|---|\n'
             + ''.join(rows) + switch)
+
+def verification(gate='off', critical='`plugins/guards/**`',
+                 reasons='- `plugins/guards/**`: the guards; a broken one lets a push through\n'):
+    """A `## Verification` section with the rows the proposal names (B.2)."""
+    return ('## Verification\n\n| Setting | Value |\n|---|---|\n'
+            '| `fast` | `python3 tests/run_all.py --changed` |\n'
+            '| `full` | `python3 tests/run_all.py` |\n'
+            '| `check paths` | `tests/**` |\n'
+            '| `critical paths` | %s |\n'
+            '| `verification gate` | `%s` |\n'
+            '| `removed checks` | `maintainer` |\n\n%s\n' % (critical, gate, reasons))
+
 
 STUB = r'''import json, os, sys
 s = json.load(open(os.environ['STUB_GH']))
@@ -397,6 +414,91 @@ class MergePr(unittest.TestCase):
                 self.head = self.change('HANDOFF.md', text)
                 self.assertRefused(self.pr(comments=[self.comment('Approved %s' % self.head)]),
                                    'merges only on the user')
+
+    def on_main(self, text):
+        """HANDOFF.md on main is <text>; the task branch brings it in."""
+        self.git('switch', '-q', 'main')
+        self.write('HANDOFF.md', text)
+        self.git('commit', '-q', '-am', 'settings')
+        self.git('push', '-q', 'origin', 'main')
+        self.git('fetch', '-q', 'origin')
+        self.git('switch', '-q', 'agent/7-x')
+        self.git('merge', '-q', '--no-edit', 'origin/main')
+
+    def approved(self, **over):
+        return self.pr(comments=[self.comment('Approved %s' % self.head)], **over)
+
+    def test_the_verification_section_is_guarded_in_two_halves(self):
+        base = handoff(text=verification())
+        self.on_main(base)
+        self.git('rm', '-q', '--', 'skills.md')  # the branch holds HANDOFF.md alone
+        self.git('commit', '-q', '-m', 'only HANDOFF.md')
+        wider = '`plugins/guards/**`, `templates/pre-push`'
+        reason = '- `templates/pre-push`: the hook; a broken one lets a secret out\n'
+        # an audit change: the list alone, the row and a reason line, merges
+        self.head = self.change('HANDOFF.md', handoff(text=verification(
+            critical=wider, reasons=verification().split('\n\n')[-1].strip() + '\n' + reason)))
+        self.assertMerged(self.approved(), '--dry-run')
+        # a reason line alone is the list too, a continuation line included
+        self.head = self.change('HANDOFF.md', handoff(text=verification(
+            reasons='- `plugins/guards/**`: the guards,\n  every hook among them\n')))
+        self.assertMerged(self.approved(), '--dry-run')
+        # the list together with another file: held
+        self.head = self.change('HANDOFF.md', handoff(text=verification(critical=wider)))
+        self.head = self.change('skills.md', 'v2\n')
+        r = self.assertRefused(self.approved(), 'changes together with other work (skills.md)')
+        self.assertEqual(r.stdout.count('REFUSED'), 1, r.stdout)
+        self.git('rm', '-q', '--', 'skills.md')
+        self.git('commit', '-q', '-m', 'undo')
+        # the list together with another line of HANDOFF.md: held
+        self.head = self.change('HANDOFF.md', 'More state.\n\n' +
+                                handoff(text=verification(critical=wider)))
+        self.assertRefused(self.approved(), 'changes together with other work: an audit')
+        # each row of the other half, a line of prose, a heading: held
+        for text in (verification().replace('--changed', '--all'),
+                     verification(gate='observe'),
+                     verification().replace('| `removed checks` | `maintainer` |',
+                                            '| `removed checks` | `reviewer` |'),
+                     verification().replace('`tests/**`', '`tests/*.py`'),
+                     verification() + 'The gate stays off.\n',
+                     verification().replace('## Verification', '## Verification (old)'),
+                     '### Verification\n\nNone.\n\n' + verification()):
+            with self.subTest(text=text):
+                self.head = self.change('HANDOFF.md', handoff(text=text))
+                self.assertRefused(self.approved(), "rows other than `critical paths` change")
+        self.head = self.change('HANDOFF.md', '# Handoff\n')
+        self.assertRefused(self.approved(), "rows other than `critical paths` change")
+
+    def test_the_first_section_merges_on_the_users_word(self):
+        self.head = self.change('HANDOFF.md', handoff(text=verification()))
+        self.assertRefused(self.approved(), "rows other than `critical paths` change")
+
+    def test_the_verification_gate(self):
+        line = 'Verified: tests: python3 tests/merge_pr.py, 26 OK\n'
+        # off (no section): the line is not read
+        r = self.assertMerged(self.approved(), '--dry-run')
+        self.assertIn('verification gate off', r.stdout)
+        self.assertNotIn('OBSERVED', r.stdout)
+        # observe: reported, and it merges
+        self.on_main(handoff(text=verification(gate='observe')))
+        self.head = self.change('skills.md', 'v2\n')
+        r = self.assertMerged(self.approved(), '--dry-run')
+        self.assertIn('OBSERVED, not refused: the verification gate (observe): no `Verified:` '
+                      'line', r.stdout)
+        r = self.assertMerged(self.approved(body=self.pr()['body'] + line), '--dry-run')
+        self.assertNotIn('OBSERVED', r.stdout)
+        # enforce: refused without a line that parses, merged with one
+        self.on_main(handoff(text=verification(gate='enforce')))
+        self.head = self.change('skills.md', 'v3\n')
+        self.assertRefused(self.approved(), 'the verification gate (enforce): no `Verified:`')
+        self.assertRefused(self.approved(body=self.pr()['body'] + 'Verified: none\n'),
+                           '`none` needs a colon after it, then a reason')
+        self.assertMerged(self.approved(body=self.pr()['body'] + line))
+        self.assertEqual(len(self.merged()), 1)
+        # an unknown value is read as enforce
+        self.on_main(handoff(text=verification(gate='strict')))
+        self.head = self.change('skills.md', 'v4\n')
+        self.assertRefused(self.approved(), 'the verification gate (enforce)')
 
     def test_a_teammates_changes_requested(self):
         review = {'submittedAt': '2026-11-09T12:00:00Z', 'state': 'CHANGES_REQUESTED',

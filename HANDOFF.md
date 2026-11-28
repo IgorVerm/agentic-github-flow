@@ -76,8 +76,12 @@ Checked on 2026-11-22.
   in the git common directory (its header owns the format). The `Verified:` line's format is
   owned by `plugins/core/scripts/verified_line.py` (#155): `ship-change` step 4 writes it,
   `review-change` step 4 checks it against the diff and reruns a task check from its issue
-  comment. Not here yet: this repository's own section (so `verify.py` refuses here until
-  #158), the gate.
+  comment. The gate (#156): the row `verification gate` (`off` when missing) makes
+  `push_branch.py` and `merge_pr.py` check that the body's line parses; `observe` prints
+  `OBSERVED, not refused`, `enforce` refuses the unasked push and the automatic merge.
+  `merge_pr.py` guards `## Verification` in two halves: the list of critical systems merges
+  alone as an audit change, every other line on the maintainer's word. Not here yet: this
+  repository's own section (so `verify.py` refuses here and the gate is off until #158).
 - Efficient design (#37): the core skill `efficient-design` is a checklist at design and review
   (work per frame, request or job run grows with what changed, not with all data), and the core
   rule *Work grows with what changed* has the author write an `Efficient design:` line in the

@@ -121,10 +121,15 @@ class LineTests(unittest.TestCase):
             with self.subTest(host=host):
                 self.assertEqual(scan_secrets.findings_in_line(line), [])
         for host in ('example.com.evil.io', 'notexample.com', 'example.co', 'db.prod.io',
-                     'example.com-db.io'):
+                     'example.com-db.io', 'prod-db.io,standby.example.com', 'prod.io#x.example.com',
+                     'localhost,prod.io', 'db.example.com;prod.io'):
             line = 'mysql' + '://app_user:' + pw + '@' + host + '/app'
             with self.subTest(host=host):
                 self.assertEqual(scan_secrets.findings_in_line(line), ['connection-url-password'])
+        for line in ('url = "postgresql' + '://u:' + pw + '@db.example.com"',
+                     'postgresql' + '://u:' + pw + '@a.example.com,b.example.org/db'):
+            with self.subTest(line=line[-24:]):
+                self.assertEqual(scan_secrets.findings_in_line(line), [])
 
     def test_file_names_come_from_the_ignore_template(self):
         self.assertTrue(scan_secrets.FILE_PATTERNS)

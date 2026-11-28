@@ -35,9 +35,9 @@ What it looks for:
   is `service_role` (a JWT with role `anon` is the public key and is skipped), Stripe, Resend,
   OpenAI, Anthropic, GitHub, GitLab, npm, Hugging Face, SendGrid, Google, AWS and Slack tokens,
   private-key blocks, and a password in a database or queue URL (local development defaults
-  such as `postgres:postgres@localhost` are skipped, and so are hosts that cannot be a real
-  server: `example.com`, `.net`, `.org` with every subdomain, and the reserved `.example`,
-  `.test`, `.invalid`, `.localhost` and `.local` names);
+  such as `postgres:postgres@localhost` are skipped, and so are URLs whose every host is
+  reserved: `example.com`, `example.net` and `example.org` with their subdomains, the reserved
+  `.example`, `.test`, `.invalid` and `.localhost` names, and mDNS `.local`);
 - an assignment of a variable named like a secret (ending in KEY, SECRET, TOKEN, PASSWORD,
   PASSWD or CREDENTIALS) to a literal value that is not a placeholder. Names with a public
   prefix (`NEXT_PUBLIC_`, `VITE_`, `PUBLIC_`) are left to the token patterns above;
@@ -88,17 +88,29 @@ DB_URL = re.compile(r'\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis
                     r'://([^\s:/@]+):([^\s@/]+)@([^\s/:?]+)')
 LOCAL_HOSTS = {'localhost', '127.0.0.1', '0.0.0.0', 'db', 'postgres', 'mysql', 'redis', 'host',
                'database'}
-# names that can never be a real server: RFC 2606's documentation domains with every subdomain
-# (db.example.com), its reserved top-level names, and RFC 6761's .localhost; .local is mDNS
+# names that can never be a public server: RFC 2606's documentation domains with every subdomain
+# (db.example.com), its reserved top-level names and RFC 6761's .localhost; .local (mDNS, a LAN
+# machine) was skipped before #172 and still is
 RESERVED_DOMAINS = ('example.com', 'example.net', 'example.org')
 RESERVED_TLDS = ('.example', '.test', '.invalid', '.localhost', '.local')
+HOST_NAME = re.compile(r'[A-Za-z0-9.-]+')
 
 
-def reserved_host(host):
-    """True for a host in a reserved documentation or local name space, never for a lookalike
-    such as example.com.evil.io or notexample.com."""
-    h = host.lower().rstrip('.')
+def reserved_host(name):
+    """True for one host name in a reserved documentation or local name space, never for a
+    lookalike such as example.com.evil.io or notexample.com."""
+    h = name.lower().rstrip('.')
     return h.endswith(RESERVED_TLDS) or any(h == d or h.endswith('.' + d) for d in RESERVED_DOMAINS)
+
+
+def harmless_hosts(captured):
+    """True when every host name in the captured host part is local or reserved. The capture may
+    hold several hosts (`a.io,b.example.com`), a fragment or a closing quote; a single real host
+    among them keeps the finding."""
+    names = HOST_NAME.findall(captured)
+    return bool(names) and all(n.lower() in LOCAL_HOSTS or reserved_host(n) for n in names)
+
+
 DEFAULT_PASSWORDS = {'postgres', 'password', 'pass', 'secret', 'root', 'example', 'test',
                      'admin', 'mysql', 'redis', 'guest'}
 JWT = re.compile(r'\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}')
@@ -192,7 +204,7 @@ def findings_in_line(line):
     for m in DB_URL.finditer(line):
         user, password, host = m.groups()
         if not (is_placeholder(password) or password.lower() in DEFAULT_PASSWORDS or
-                password == user or host.lower() in LOCAL_HOSTS or reserved_host(host)):
+                password == user or harmless_hosts(host)):
             found.append('connection-url-password')
     for m in JWT.finditer(line):
         role = jwt_role(m.group(0))

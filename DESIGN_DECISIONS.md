@@ -26,7 +26,8 @@ comments the hand-over rolls the overview over to a new standing issue. Measured
 The live probe (#169) gave a successor without a parent and one worktree; the predecessor's
 `archive_session "self"` was refused once by the auto-mode classifier, a second risk that the
 allow rule (method §7) removes. **Binds:** `plugins/issue-chats/skills/issue-handover/method.md` §1, §2, §3 item 8, §4 and §8,
-`SKILL.md`, `scripts/overview_state.py`, `tests/overview_state.py`. **Detail:** issue #168.
+`SKILL.md`, `scripts/overview_state.py` (and `question_label.py`, which exempts the standing
+issue), `tests/overview_state.py`, `tests/question_label.py`. **Detail:** issue #168.
 
 ## Codex only where Codex is chosen: its own plugin, 2026-11-22
 

@@ -11,6 +11,7 @@ comments, 487,930 characters, measured 2026-11-27), so a chat never reads its th
 asks GitHub for the issue's newest 100 comments in one GraphQL call and prints only
 
   standing issue: <owner/repo>#<n> · <title>
+  assigned: <logins, or none>
   comments: <total>, rollover at 100
   rollover due                       (only from 100 comments on)
   claim (<time>): <the newest signed comment opening `claimed for chat`>
@@ -46,7 +47,8 @@ SIGNED = r"\A\s*\N{ROBOT FACE}[^\n]*?\):\s*(?:\*\*)?"
 STATE = re.compile(SIGNED + r"overview state:", re.I)
 CLAIM = re.compile(SIGNED + r"claimed for chat\b", re.I)
 QUERY = ("query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name)"
-         "{issue(number:$number){number title state comments(last:%d){totalCount "
+         "{issue(number:$number){number title state assignees(first:10){nodes{login}} "
+         "comments(last:%d){totalCount "
          "nodes{body createdAt}}}}}" % ROLLOVER_AT)
 
 
@@ -129,14 +131,15 @@ def main(argv: list[str]) -> int:
             data = gh(["api", "graphql", "-f", f"query={QUERY}", "-f", f"owner={owner}",
                        "-f", f"name={name}", "-F", f"number={number}"], top)
         except Unread as e:
-            if "Could not resolve to an Issue" not in str(e):
+            if "Could not resolve to a" not in str(e):  # an Issue, a Repository
                 raise
             data = None
         issue = (((data or {}).get("data") or {}).get("repository") or {}).get("issue") \
             if isinstance(data, dict) else None
         if data is None or (isinstance(data, dict) and isinstance(data.get("data"), dict)
                             and not issue):
-            print(f"overview_state: no issue #{number} in {repo}", file=sys.stderr)
+            print(f"overview_state: no issue #{number} in {repo}, or no such repository",
+                  file=sys.stderr)
             return 1
         if not isinstance(issue, dict):
             raise Unread("gh api graphql gave no issue")
@@ -149,11 +152,14 @@ def main(argv: list[str]) -> int:
     comments = issue.get("comments") or {}
     total = int(comments.get("totalCount") or 0)
     nodes = [n for n in comments.get("nodes") or [] if isinstance(n, dict)]
-    print(f"standing issue: {repo}#{issue.get('number')} · {issue.get('title')}")
     if str(issue.get("state")).upper() != "OPEN":
         print(f"overview_state: #{number} is {str(issue.get('state')).lower()}: the rollover "
               "names its successor in its last comments", file=sys.stderr)
         return 1
+    print(f"standing issue: {repo}#{issue.get('number')} · {issue.get('title')}")
+    logins = [str(a.get("login")) for a in (issue.get("assignees") or {}).get("nodes") or []
+              if isinstance(a, dict) and a.get("login")]
+    print(f"assigned: {', '.join(logins) or 'none'}")
     print(f"comments: {total}, rollover at {ROLLOVER_AT}")
     if total >= ROLLOVER_AT:
         print("rollover due")

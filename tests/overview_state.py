@@ -47,6 +47,7 @@ if a[:2] == ['api', 'graphql']:
              for k, b in enumerate(i['comments'])]
     print(json.dumps({'data': {'repository': {'issue': {
         'number': i['number'], 'title': i['title'], 'state': i['state'],
+        'assignees': {'nodes': [{'login': x} for x in i.get('assignees', ['me'])]},
         'comments': {'totalCount': len(nodes), 'nodes': nodes[-last:]}}}}})); sys.exit(0)
 sys.exit(2)
 '''
@@ -112,6 +113,7 @@ class OverviewState(unittest.TestCase):
         p = self.run_tool([issue(7, thread)])
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertIn('standing issue: me/repo#7 · Overview', p.stdout)
+        self.assertIn('assigned: me\n', p.stdout)
         self.assertIn('NEW STATE', p.stdout)
         self.assertIn('local_3', p.stdout)
         for absent in ('OLD STATE', 'THREAD TEXT', 'UNSIGNED', 'OTHER COMMENT', 'local_2'):
@@ -171,7 +173,8 @@ class OverviewState(unittest.TestCase):
         self.assertFalse([c for c in self.log if c[:2] == ['issue', 'list']])
         p = self.run_tool([issue(5, [state('given')], state_='CLOSED')], '--issue', '5')
         self.assertEqual(p.returncode, 1)
-        self.assertNotIn('given', p.stdout)
+        self.assertEqual(p.stdout, '')
+        self.assertIn('is closed', p.stderr)
 
     def test_settings_label_and_other_repository(self):
         self.handoff('| overview label | `standing: overview` |\n')

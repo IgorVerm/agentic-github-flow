@@ -527,8 +527,9 @@ every repository that uses issue chats (`DESIGN_DECISIONS.md`, 2026-11-27, #168)
   487,930 characters, measured 2026-11-27, about 120k tokens), and `gh issue view --comments`
   pulls all of them into the context. The chat runs
   `python3 <plugin>/scripts/overview_state.py -C <its worktree>` instead: it reads the newest
-  100 comments inside the script and prints the issue, the comment count, the newest claim and
-  the newest state, nothing else. Its claim line serves the claim check of §4 step 1.2.
+  100 comments inside the script and prints the issue, its assignees, the comment count, the
+  newest claim and the newest state, nothing else. Its assignee and claim lines serve the claim
+  check of §4 step 1.2.
 - **Its worktree:** `<n>-overview`, `<n>` its standing issue, made with the worktree tool from
   the primary checkout (`new_worktree.py <n>-overview`, branch `agent/<n>-overview`), so the
   app reports no `worktreePath`, every generation on that issue hands over in place, and the
@@ -540,7 +541,10 @@ every repository that uses issue chats (`DESIGN_DECISIONS.md`, 2026-11-27, #168)
   run there: the worktree tool and `remove_merged_worktree.py` (`cleanup-merged`).
 - **Only state and claims on the standing issue:** a question, an answer or a finding goes on
   its owning issue (§5), so every hand-over's state comment stays among the newest 100 that
-  `overview_state.py` reads.
+  `overview_state.py` reads. The question hook (`question_label.py`) exempts the issue with the
+  overview label: a question of the overview's own (a push, a choice) needs no label there.
+- **The notes file stays current during the work,** so a hand-over needs no long write: past
+  twice the context limit the context hook lets only asking the user and the hand-over run.
 
 **The hand-over**, at the context limit (§1, `context_limit.py`) or when the user asks, is
 *A hand-over before the branch is ready*, in place: (1) end its own live work (`issue-handover`);
@@ -566,8 +570,11 @@ chat (`local_<id>`), make `new_worktree.py <m>-overview` from the primary checko
 the state of step (2) on `#<m>`; close the old issue with a signed comment `rolled over to
 #<m>`; then steps (3) to (6) on `#<m>` with the new worktree (`--handover` accepts the claim by
 the session id). The guard passes the predecessor's archive because its old worktree is clean
-and in the default branch; the successor removes that worktree with `remove_merged_worktree.py`
-from the primary checkout before its checks.
+and in the default branch. The successor first waits for that archive (the check above, up to
+five minutes), then removes the old worktree with `remove_merged_worktree.py` from the primary
+checkout, then counts the worktrees. A predecessor still not archived keeps its worktree (the
+removal keeps one in use): the successor says so on the issue, the user archives it, and the
+overview chat removes the worktree after that archive.
 
 **The first overview** starts on the user's word, from any chat: the overview label (§7 step 2,
 the user's yes; `gh label create overview -R <owner/repo> --description "The standing issue of

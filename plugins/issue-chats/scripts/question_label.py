@@ -28,6 +28,11 @@ none. Per event:
                                        seconds later); the issue CLOSED -> remove it there.
                                        `cd <dir> &&` in front and `-R/--repo` are followed.
 
+The overview chat's standing issue (the label of the settings row `overview label`, default
+`overview`; method §8) is exempt from the ask check: the overview's questions belong to the issues
+they are about, which carry the label themselves, and its standing issue holds only state and
+claims.
+
 Known limits: two questions open on one issue at once lose the label at the first answer (the
 chat adds it again); a question asked in plain text, and an issue closed on github.com or by a
 command this hook does not parse, are not seen (cleanup-merged step 4 still removes the label at
@@ -147,6 +152,13 @@ def ref_repo(ref: dict) -> str:
     return f"{(r.get('owner') or {}).get('login', '')}/{r.get('name', '')}".lower()
 
 
+def overview_label(top: str) -> str:
+    try:
+        return label_value(settings_text(top)[1], "overview label", "overview")
+    except SettingError:
+        return "overview"
+
+
 def labels_of(issue: int, cwd: str, repo: list[str] | None = None) -> list[str]:
     data = gh_json(["issue", "view", str(issue), "--json", "labels", *(repo or [])], cwd)
     return [x.get("name", "") for x in (data or {}).get("labels", [])]
@@ -238,10 +250,12 @@ def on_ask(data: dict) -> int:
         return 0
     top, label, issue = found
     try:
-        present = label in labels_of(issue, top)
+        labels = labels_of(issue, top)
     except Unread:
         return 0
-    if not present:
+    if overview_label(top) in labels:
+        return 0  # the overview's standing issue (method §8)
+    if label not in labels:
         print(f"question label: this question makes the chat for issue #{issue} wait on the user, "
               f"but #{issue} does not carry `{label}`, so nobody looking at the issues can see "
               f"that. Put the question on the issue first, signed, and add the label in the same "

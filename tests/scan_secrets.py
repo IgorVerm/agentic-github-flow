@@ -113,6 +113,19 @@ class LineTests(unittest.TestCase):
             with self.subTest(line=line[:40]):
                 self.assertEqual(scan_secrets.findings_in_line(line), [])
 
+    def test_reserved_documentation_hosts_are_not_servers(self):  # #172
+        pw = 'Xk9' + 'pQ2mW7zR4'
+        for host in ('db.example.com', 'example.com', 'x.example.org', 'a.b.example.net',
+                     'DB.Example.COM', 'db.example.com.', 'app.localhost', 'cache.test'):
+            line = 'postgresql' + '://app_user:' + pw + '@' + host + ':5432/app'
+            with self.subTest(host=host):
+                self.assertEqual(scan_secrets.findings_in_line(line), [])
+        for host in ('example.com.evil.io', 'notexample.com', 'example.co', 'db.prod.io',
+                     'example.com-db.io'):
+            line = 'mysql' + '://app_user:' + pw + '@' + host + '/app'
+            with self.subTest(host=host):
+                self.assertEqual(scan_secrets.findings_in_line(line), ['connection-url-password'])
+
     def test_file_names_come_from_the_ignore_template(self):
         self.assertTrue(scan_secrets.FILE_PATTERNS)
         for name in ('.env', '.env.production', 'id_rsa', 'server.pem', 'service-account-x.json',

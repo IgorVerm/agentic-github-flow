@@ -13,7 +13,8 @@ writers, CODEOWNERS, pull requests merged by someone else, by a bot, long ago an
 and API errors. GitHub that cannot be asked from here gives no decision (`landing: unknown`, exit
 3): no gh, a gh that cannot read its configuration (as inside the Claude Code sandbox), a gh that
 is not signed in, a network failure or a sandbox's proxy; the `landing` setting still wins there.
-Also: the landing branch setting, the scripts that need the mode refusing on unknown, and that
+Also: the row `verification gate` of `## Verification` (off without it, enforce for a value it
+does not know, read from the default branch only), the landing branch setting, the scripts that need the mode refusing on unknown, and that
 the issue-chats plugin's copy of the script is identical. No network, no real gh.
 """
 import datetime
@@ -453,6 +454,35 @@ class Landing(unittest.TestCase):
                 self.assertIn('automatic merge: %s' % shown, self.out)
         r = self.run_tool(solo(), args=('-C', self.repo))
         self.assertNotIn('automatic merge', r.stdout)
+
+    def test_the_verification_gate_is_off_unless_the_row_names_a_mode(self):
+        self.assertEqual(self.mode(solo()), 'local main')
+        self.assertIn('verification gate: off', self.out)  # no section
+        section = '## Verification\n\n| Setting | Value |\n|---|---|\n%s\n'
+        for row, shown in (('| `verification gate` | `observe` |', 'observe'),
+                           ('| verification gate | Enforce |', 'enforce'),
+                           ('| `verification gate` | `off` |', 'off'),
+                           ('| `fast` | `make check` |', 'off'),  # no row
+                           ('| `verification gate` | `strict` |', 'enforce'),  # fails closed
+                           ('| `verification gate` | |', 'off')):
+            with self.subTest(row=row):
+                self.commit({'HANDOFF.md': settings([('landing', 'pull request')])
+                             + section % row})
+                self.publish('main')
+                self.assertEqual(self.mode(solo()), 'pull request')
+                self.assertIn('verification gate: %s' % shown, self.out)
+        # the row in Landing settings, or on the task branch only, is not the gate
+        self.commit({'HANDOFF.md': settings([('landing', 'pull request'),
+                                             ('verification gate', 'enforce')])})
+        self.publish('main')
+        self.mode(solo())
+        self.assertIn('verification gate: off', self.out)
+        self.commit({'HANDOFF.md': settings([('landing', 'pull request')])
+                     + section % '| `verification gate` | `enforce` |'})
+        self.mode(solo())
+        self.assertIn('verification gate: off', self.out)
+        r = self.run_tool(solo(), args=('-C', self.repo))
+        self.assertNotIn('verification gate', r.stdout)
 
     def test_invalid_landing_branch_is_an_error(self):
         self.commit({'HANDOFF.md': settings([('landing branch', 'a..b')])})

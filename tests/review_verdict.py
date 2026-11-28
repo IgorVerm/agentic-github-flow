@@ -13,7 +13,9 @@ accepts what it writes is checked in tests/merge_pr.py.
 It also checks verified_line.py beside it, the owner of the landing's `Verified:` line (#155):
 each kind parses, `;` joins kinds, and a missing line, a second line, an unknown kind, empty
 evidence, `none` without a reason or beside another kind, and a standing check without the
-defect it fails on are refused; the task-check URLs and a reviewer's dispute are found.
+defect it fails on or the test that fails are refused, with a message that names the colon
+when a kind stands without one; `check --pr` reads the body through gh; the task-check URLs and
+a reviewer's dispute are found.
 Offline: no network, no real gh.
 """
 import importlib.util
@@ -261,7 +263,10 @@ class VerifiedLine(unittest.TestCase):
                 (' Verified: tests: indented\n', 'no `Verified:` line'),
                 ('```\nVerified: tests: inside a fence\n```\n', 'no `Verified:` line'),
                 (self.body('Verified: tests: a') + 'Verified: tests: b\n', '2 `Verified:` lines'),
-                (self.body('Verified: none'), 'not a kind'),
+                (self.body('Verified: none'), '`none` needs a colon after it, then a reason'),
+                (self.body('Verified: none docs only'), 'needs a colon after it, then a reason'),
+                (self.body('Verified: tests ran'), '`tests` needs a colon after it, then evidence'),
+                (self.body('Verified: nonesuch: x'), 'not a kind'),
                 (self.body('Verified: none:'), 'needs a reason'),
                 (self.body('Verified: none:   '), 'needs a reason'),
                 (self.body('Verified:'), 'empty'),
@@ -270,7 +275,11 @@ class VerifiedLine(unittest.TestCase):
                 (self.body('Verified: checked: it works'), 'not a kind'),
                 (self.body('Verified: Tests: ran'), 'not a kind'),
                 (self.body('Verified: none: docs only; tests: ran'), 'stands alone'),
-                (self.body('Verified: standing-check: save_roundtrip added'), 'fails when')):
+                (self.body('Verified: standing-check: save_roundtrip added'), 'fails when'),
+                (self.body('Verified: standing-check: x fails when'), 'both named'),
+                (self.body('Verified: standing-check: x fails when   '), 'both named'),
+                (self.body('Verified: standing-check: fails when the field is dropped'),
+                 'both named')):
             with self.subTest(body=body):
                 with self.assertRaises(ValueError) as e:
                     vl.parse(body)
@@ -313,6 +322,40 @@ class VerifiedLine(unittest.TestCase):
             with self.subTest(args=args):
                 self.assertEqual(run(*args).returncode, 2)
         self.assertEqual(run('--help').returncode, 0)
+
+    def test_check_reads_a_pull_request(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = os.path.join(tmp, 'state.json')
+            stub = os.path.join(tmp, 'gh_stub.py')
+            with open(stub, 'w') as f:
+                f.write(STUB)
+
+            def run(*args, views):
+                with open(state, 'w') as f:
+                    json.dump({'views': views}, f)
+                env = dict(os.environ, STUB_GH=state,
+                           AGENTIC_GITHUB_FLOW_GH=json.dumps([sys.executable, stub]))
+                r = subprocess.run([sys.executable, LINE_TOOL, 'check', *args],
+                                   capture_output=True, text=True, env=env, encoding='utf-8')
+                with open(state) as f:
+                    return r, json.load(f).get('log', [])
+            r, log = run('--pr', '7', '-C', tmp, '-R', 'acme/tool',
+                         views=[{'body': self.body('Verified: tests: ran')}])
+            self.assertEqual((r.returncode, r.stdout), (0, 'tests: ran\n'), r.stderr)
+            self.assertEqual(log, [['pr', 'view', '7', '-R', 'acme/tool', '--json', 'body']])
+            r, _ = run('--pr', '7', '-C', tmp, '-R', 'acme/tool', views=[{'body': 'no line'}])
+            self.assertEqual(r.returncode, 1)
+            self.assertIn('no `Verified:` line', r.stderr)
+            r, _ = run('--pr', '7', '-C', tmp, '-R', 'acme/tool', views=[{'number': 7}])
+            self.assertEqual(r.returncode, 2)
+            self.assertIn('cannot read pull request 7', r.stderr)
+            # no origin on github.com and no -R; a usage error never asks gh
+            self.assertEqual(run('--pr', '7', '-C', tmp, views=[{}])[0].returncode, 2)
+            for args in (['--pr', 'x'], ['--pr', '7', '--body-file', '-'],
+                         ['--body-file', '-', '-R', 'acme/tool'], ['--pr']):
+                with self.subTest(args=args):
+                    r, log = run(*args, views=[{}])
+                    self.assertEqual((r.returncode, log), (2, []))
 
 
 if __name__ == '__main__':

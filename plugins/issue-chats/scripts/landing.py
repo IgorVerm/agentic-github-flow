@@ -6,7 +6,8 @@ Usage: python3 landing.py [-C <checkout>] [--explain | --branch]
 The ship-change skill runs it at every landing and follows its last line; promote_main.py and the
 issue chats ask it too. It prints `landing branch: <name>` and last `landing: pull request`,
 `landing: local main` or `landing: unknown`; --explain first prints one `check:` line per signal
-it read and the line `automatic merge: on` or `automatic merge: off`. With --branch it prints
+it read, the line `automatic merge: on` or `automatic merge: off`, and the line
+`verification gate: off`, `observe` or `enforce`. With --branch it prints
 only the landing branch, which needs no GitHub. First match wins:
 
   1. setting   HANDOFF.md, section `## Landing settings`, row `landing`: `pull request` gives
@@ -49,6 +50,10 @@ the remote's default branch (`origin/HEAD`), else `main`. The row `automatic mer
 automatic merging on for this repository when its value is `on`; missing or any other value is
 off (the maintainer's ruling of 2026-11-11: off by default, switched on at will like the mode).
 merge_pr.py (beside this file) reads it through automatic_merge() and refuses while it is off.
+The row `verification gate` of the section `## Verification` (its name may stand in backticks)
+is `off`, `observe` or `enforce`; off when it is missing, enforce for any other value.
+merge_pr.py and push_branch.py read it through verification_gate() and check the landing's
+`Verified:` line by it.
 The scripts that count "merged" or
 "landed" and the worktree tool read it through landing_setting() here; the worktree tool and
 the overlap check start from the local landing branch while it holds unpushed landings in
@@ -72,6 +77,9 @@ PR, LOCAL, UNKNOWN = "pull request", "local main", "unknown"
 AUTO_MERGE = "automatic merge"
 SAFE_DEFAULT = "the safe default"  # ends the check line of a pull request it could not tell
 SECTION = re.compile(r"^## Landing settings[ \t]*$(.*?)(?=^## |\Z)", re.M | re.S)
+VERIFICATION = re.compile(r"^## Verification[ \t]*$(.*?)(?=^## |\Z)", re.M | re.S)
+GATE = "verification gate"
+GATE_MODES = ("off", "observe", "enforce")
 # Ruleset rule types that make a direct push of a reviewed commit fail: it needs a pull request,
 # a merge queue, checks or a deployment first, or updates are blocked outright.
 PUSH_RULES = {"pull_request", "update", "required_status_checks", "merge_queue",
@@ -144,9 +152,10 @@ def settings_text(path: str) -> str | None:
     return None
 
 
-def row(text: str | None, name: str) -> str | None:
-    """The value cell of the row <name> of `## Landing settings`, backticks removed, or None."""
-    sec = SECTION.search(text or "")
+def row(text: str | None, name: str, section: re.Pattern = SECTION) -> str | None:
+    """The value cell of the row <name> of `## Landing settings` (or of the section <section>
+    matches), backticks removed from both cells, or None."""
+    sec = section.search(text or "")
     if not sec:
         return None
     for line in sec.group(1).splitlines():
@@ -154,9 +163,21 @@ def row(text: str | None, name: str) -> str | None:
         if not line.startswith("|"):
             continue
         cells = [c.strip() for c in line.strip("|").split("|")]
-        if len(cells) >= 2 and cells[0].lower() == name:
+        if len(cells) >= 2 and cells[0].replace("`", "").strip().lower() == name:
             return cells[1].replace("`", "").strip() or None
     return None
+
+
+def verification_gate(path: str = ".") -> tuple[str, str]:
+    """(mode, how it was read) of the row `verification gate` of `## Verification`: `off`,
+    `observe` or `enforce`; `off` when the section or the row is missing, `enforce` for any
+    other value, since a gate that cannot be read fails closed."""
+    value = row(settings_text(path), GATE, VERIFICATION)
+    if value is None:
+        return "off", f"`{GATE}`: off (no row)"
+    if value.lower() in GATE_MODES:
+        return value.lower(), f"`{GATE}`: {value.lower()}"
+    return "enforce", f"`{GATE}`: unknown value {value!r}, read as enforce"
 
 
 def landing_setting(path: str = ".") -> str | None:
@@ -483,6 +504,7 @@ def main(argv: list) -> int:
         print(f"check: {line}")
     if explain:
         print(f"automatic merge: {'on' if automatic_merge(path) else 'off'}")
+        print(f"verification gate: {verification_gate(path)[0]}")
     print(f"landing branch: {branch}")
     print(f"landing: {mode}")
     return 3 if mode == UNKNOWN else 0

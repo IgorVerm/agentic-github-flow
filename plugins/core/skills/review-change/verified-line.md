@@ -4,11 +4,11 @@ Read with [SKILL.md](SKILL.md), step 4; `<plugin>`, `<n>` and `<sha>` are as def
 line's format belongs to `verified_line.py`, the kinds of evidence and the admission test to the
 `verify` skill. This file says how a reviewer checks the line.
 
-1. **It parses.** Save the line's text to a file outside the checkout: the pull request body
-   (`gh pr view <n> --json body --jq .body`), or in local-main mode the author's hand-over
-   comment on the issue that names S. Then run
-   `python3 <plugin>/scripts/verified_line.py check --body-file <file>`. If the body has no line,
-   or the line fails the check, that is a finding.
+1. **It parses.** Run `python3 <plugin>/scripts/verified_line.py check --pr <n>`, which reads
+   the pull request body itself. In local-main mode save the author's hand-over comment on the
+   issue that names S to a file outside the checkout, with your client's file tool, and run
+   `check --body-file <file>`. If the body has no line, or the line fails the check, that is a
+   finding.
 2. **The evidence is real.** Rerun any cheap command the line names. Run a task check only from
    the issue comment the line names by URL. First check that the account that posted it is the
    account the change comes from (`gh pr view <n> --json author`, or the author of the hand-over

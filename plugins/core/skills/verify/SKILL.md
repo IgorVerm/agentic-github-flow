@@ -27,7 +27,8 @@ occasion confirms what its author already believed.
 5. **Write the `Verified:` line** in the pull request body, or the landing comment in
    local-main mode: `Verified: <kind>: <evidence>`, the kind `goal`, `tests`,
    `standing-check`, `run`, `seen`, or `none` with its reason; several joined by `;`. A check
-   from step 4 is named by its comment's URL.
+   from step 4 is named by its comment's URL. The format's owner, which checks a body:
+   [verified_line.py](../../scripts/verified_line.py).
 
 ## Which checks are kept, in every repository
 

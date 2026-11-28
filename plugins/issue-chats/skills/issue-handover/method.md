@@ -8,12 +8,12 @@ on local main. Several such chains run at once, at most five (§1). *The guide*
 below is Anthropic's <https://code.claude.com/docs/en/best-practices>, cited by section.
 
 This file owns the method, the repository settings, the chat title form, the limit of five
-chains and how side chats end (§4). The procedures are skills: `issue-handover` (pickup, claim and how a chat ends, in
+chains, how side chats end (§4) and the overview chat (§8). The procedures are skills: `issue-handover` (pickup, claim and how a chat ends, in
 [SKILL.md](SKILL.md)), `archive-finished-chats` (how finished chats leave the sidebar), and in
 the core plugin `open-issue` (how an issue becomes ready), `requirements` (how new work is
 specified and split into ready issues) and `ship-change` (review, checks, overlap check, the
 push and the pull request). The scripts are in this plugin's `scripts/` folder: `next_issue.py`,
-`start_issue_chat.py`, `chat_archivable.py` and the hook `archive_guard.py`; the overlap check
+`start_issue_chat.py`, `chat_archivable.py`, `overview_state.py` and the hook `archive_guard.py`; the overlap check
 is the core plugin's, run as `ship-change` names it. Another client follows the same lifecycle
 through its own adapter skill, where one is installed.
 
@@ -65,13 +65,15 @@ The skills read their values from it; a row left out takes its default:
 | start reading | what every chat reads at its start besides its issue: named sections, the repository's reading map | none |
 | ready extras | what the repository adds to the definition of ready of the `requirements` skill | none |
 | start extras, hand-over extras | repository steps at a chat's start and before it ends | none |
+| overview label | the label of the standing issue of the overview chat (§8) | `overview` |
 
 An installed plugin may add a row of its own; that plugin's skill owns the row's meaning and
 default.
 
 **Chains at once is not a repository setting:** at most five issue chats work at the same time
 in a repository, counted with those already working. A chat whose branch waits for the push,
-whose pull request waits for review, or whose work landed on local main no longer counts.
+whose pull request waits for review, or whose work landed on local main no longer counts, nor
+does the overview chat (§8).
 
 **Spreading over areas.** With `spread over areas` set to yes, a chain that picks prefers the
 most important ready issue from an area no working chat is in yet. An area is taken while an
@@ -114,8 +116,10 @@ chat `<title prefix>#<issue> · <topic>`; a requirements chat
 `<title prefix>Requirements · new · <topic>` until it has created the parent and renamed at once
 with `set_session_title`. `<issue>` is the issue the chat works on; work without an issue gets
 one first (skill `open-issue`). `start_issue_chat.py` refuses a title of any other form
-(`--prefix` carries the title prefix). A chat the user types in, for an overview or to start
-chains, is not an issue chat and needs no form. `archive-finished-chats` checks requirements
+(`--prefix` carries the title prefix). The overview chat is the issue chat of its standing
+issue, `<title prefix>#<standing issue> · overview <k>`, `<k>` counting its generations (§8). A
+chat the user types in, for a quick look or to start chains, is not an issue chat and needs no
+form. `archive-finished-chats` checks requirements
 chats like any other issue chat: the newest chat of each open issue stays, and any other one
 goes once its worktree passes the worktree check.
 
@@ -150,8 +154,9 @@ goes once its worktree passes the worktree check.
    correct early and often*).
 7. **At most five chains at once** (§1). Nobody polls. A chat waits for long runs in the
    foreground of its turn, not for a background notification (§4).
-8. **No standing coordinator chat.** The user starts chains from a chat they type in (§7); for an
-   overview they start a short chat.
+8. **One overview chat at most, and it builds nothing** (§8): the user's overview, the chains'
+   start and the pushes on the user's word; it hands itself over like an issue chat. The user
+   can still start chains from any chat they type in (§7).
 9. **Work in flight stays in its worktree.** A chat that takes over a branch in flight, named in
    the issue's newest state comment, works in that branch's worktree; its own new worktree stays
    unused until the `cleanup-merged` skill removes it.
@@ -171,7 +176,8 @@ Each issue chat runs this:
    names), as the start brief says first. A chat that a card started detaches itself first
    (`detach_session "self"`). Then, in this order:
    1. **Read** the issue with its comments (the newest state comment and the claim), the
-      sections it names, and the settings' start reading. The client loads the repository's
+      sections it names, and the settings' start reading. The overview chat never reads its
+      standing issue's thread: `overview_state.py` prints the claim and the state (§8). The client loads the repository's
       `AGENTS.md` itself; a brief does not send the chat to read it, or any document whole
       (§3 item 5).
    2. **Check the claim:** the issue is assigned and its newest claim comment names this chat's
@@ -459,7 +465,8 @@ so it loads them.
 added by the user (an agent never edits its own permissions): `start_issue_chat.py` by the exact
 path of the script in the installer's clone (`~/.agentic-github-flow/plugins/<plugin>/scripts/`,
 where Claude Code loads the skills from), in each spelling the agents write it; the read-only
-scripts (`next_issue.py`, `chat_archivable.py`, the core plugin's `overlap_check.py`) the same
+scripts (`next_issue.py`, `overview_state.py`, `chat_archivable.py`, the core plugin's
+`overlap_check.py`) the same
 way; and `start_session`, `detach_session` and `request_keep_awake`; an allow rule for
 `archive_session` only together with the guard hook; and, where the user grants the push of a
 chat's own task branch or switches automatic merging on, the core plugin's `push_branch.py`
@@ -495,3 +502,84 @@ From then on every chat starts its successor itself; the user reads along in the
 and says push in each chat whose branch is ready; in local-main mode they say push of the
 landing branch in any chat when they want the landings published. New work whose requirements are open is not
 started: it gets the requirements label and a requirements chat (skill `requirements`).
+
+## 8. The overview chat
+
+One chat keeps the user's overview of a repository: what runs, what waits on the user, starting
+chains (§7), each push on the user's word (`ship-change`), and the housekeeping after it
+(`cleanup-merged`, `archive-finished-chats`). It builds nothing: work it finds becomes an issue
+(skill `open-issue`) for an issue chat, a review goes to a subagent. It reads overviews, issue
+comments and the chats' short replies, not source, logs or transcripts. A repository's own
+overview document only adds that repository's items (its tools, its queues, its machines).
+
+It is the issue chat of a **standing issue**, so the hand-over of §4 serves it unchanged, in
+every repository that uses issue chats (`DESIGN_DECISIONS.md`, 2026-11-27, #168):
+
+- **The standing issue:** the one open issue with the overview label (§1), never the ready
+  label, assigned by its claim, so no pick takes it. Its body points here. Each repository
+  has its own overview and standing issue (`DESIGN_DECISIONS.md`, 2026-11-27).
+- **Its state** is the newest signed comment whose text after the signature opens with
+  `overview state:`, at most 1,500 characters: the chats at work and their issues, what waits
+  on the user, the next steps, and the path of the notes file. Detail and history go in the
+  notes file, never on the issue: by default `overview-notes.md` in the worktrees folder beside
+  the overview worktree, outside every checkout, so the worktree stays clean for the hand-over.
+- **Never read the thread.** A standing issue gathers hundreds of comments (Pax #223: 731,
+  487,930 characters, measured 2026-11-27, about 120k tokens), and `gh issue view --comments`
+  pulls all of them into the context. The chat runs
+  `python3 <plugin>/scripts/overview_state.py -C <its worktree>` instead: it reads the newest
+  100 comments inside the script and prints the issue, its assignees, the comment count, the
+  newest claim and the newest state, nothing else. Its assignee and claim lines serve the claim
+  check of §4 step 1.2.
+- **Its worktree:** `<n>-overview`, `<n>` its standing issue, made with the worktree tool from
+  the primary checkout (`new_worktree.py <n>-overview`, branch `agent/<n>-overview`), so the
+  app reports no `worktreePath`, every generation on that issue hands over in place, and the
+  plugin's hooks (`context_limit.py`, `question_label.py`) find the issue in the branch name.
+  The chat commits nothing there: a cleanup sweep keeps a worktree without commits of its own,
+  a removal keeps one a chat works in, and the worktree check calls it `ok`. It reads the
+  default branch as fetched (`git show origin/<default branch>:<path>`) or brings it in with
+  `merge_landing.py` (`ship-change` step 2). From the primary checkout it runs only what must
+  run there: the worktree tool and `remove_merged_worktree.py` (`cleanup-merged`).
+- **Only state and claims on the standing issue:** a question, an answer or a finding goes on
+  its owning issue (§5), so every hand-over's state comment stays among the newest 100 that
+  `overview_state.py` reads. The question hook (`question_label.py`) exempts the issue with the
+  overview label: a question of the overview's own (a push, a choice) needs no label there.
+- **The notes file stays current during the work,** so a hand-over needs no long write: past
+  twice the context limit the context hook lets only asking the user and the hand-over run.
+
+**The hand-over**, at the context limit (§1, `context_limit.py`) or when the user asks, is
+*A hand-over before the branch is ready*, in place: (1) end its own live work (`issue-handover`);
+(2) bring the notes file up to date and post the `overview state:` comment; (3)
+`start_issue_chat.py --handover "<overview worktree>" "<title prefix>#<n> · overview <k+1>"` on the
+settings' model and effort; (4) the claim comment naming the new chat and the worktree; (5) the
+brief by `send_message`: the start of `issue-handover` step 5 (title, sidebar section, its
+worktree, the primary checkout only for the tools named above), then this section, the
+repository's overview document, `overview_state.py` as the one way to read the issue, and what
+the user is waiting on; (6) after "delivered", `get_session "self"` and
+`archive_session "self"`, reason `handed #<n> over in place to local_<id>`. That archive needs
+the user's allow rule for `archive_session` (§7): without it the auto-mode classifier decides,
+and it refused one (probe #169, 2026-11-27); then the predecessor reports to its successor and
+stops, and the user archives it. The successor checks, and says on the issue which check fails:
+its own `get_session "self"` shows no `parentSessionId`, or `detached` true; the predecessor's
+`get_session` shows it archived, checked again for up to five minutes, since the predecessor
+archives only after its "delivered"; `git worktree list` shows one `-overview` worktree.
+
+**The rollover.** When `overview_state.py` prints `rollover due` (100 comments or more), the
+hand-over moves to a new standing issue `#<m>` and a new worktree: open the issue with the
+overview label and a body naming the old one, assign it, post on it a claim comment naming this
+chat (`local_<id>`), make `new_worktree.py <m>-overview` from the primary checkout, and post
+the state of step (2) on `#<m>`; close the old issue with a signed comment `rolled over to
+#<m>`; then steps (3) to (6) on `#<m>` with the new worktree (`--handover` accepts the claim by
+the session id). The guard passes the predecessor's archive because its old worktree is clean
+and in the default branch. The successor first waits for that archive (the check above, up to
+five minutes), then removes the old worktree with `remove_merged_worktree.py` from the primary
+checkout, then counts the worktrees. A predecessor still not archived keeps its worktree (the
+removal keeps one in use): the successor says so on the issue, the user archives it, and the
+overview chat removes the worktree after that archive.
+
+**The first overview** starts on the user's word, from any chat: the overview label (§7 step 2,
+the user's yes; `gh label create overview -R <owner/repo> --description "The standing issue of
+the overview chat"`), the standing issue, `new_worktree.py <n>-overview`, the first state comment,
+then `start_issue_chat.py` with `#<n> · overview 1` (no `--handover`: the issue is unassigned),
+the claim and the brief, as `issue-handover` step 5. An overview chat that ran without this
+route archives itself after "delivered" when its working directory holds no work of its own (the
+guard checks); otherwise it reports and the user archives it.

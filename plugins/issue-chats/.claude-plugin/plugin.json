@@ -1,6 +1,6 @@
 {
   "name": "agentic-github-flow-issue-chats",
-  "version": "0.9.3",
+  "version": "0.10.0",
   "description": "Issue chats: each chat takes one ready GitHub issue, prepares its branch for a pull request, then starts the chat for the next issue, sees its pull request through to the merge and archives itself.",
   "author": {
     "name": "MAI-Tech",

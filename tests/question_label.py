@@ -139,6 +139,17 @@ class QuestionLabel(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn('--add-label waiting', err)
 
+    def test_overview_standing_issue_is_exempt(self):  # method §8, #168
+        self.gh_state({7: (['overview'], 'OPEN')})
+        self.assertEqual(self.ask()[0], 0)
+        self.assertFalse(self.marker_exists())
+        repo = self.make_repo('ov', '| overview label | `standing` |')
+        git(repo, 'checkout', '-q', '-b', 'agent/8-overview')
+        self.gh_state({8: (['overview'], 'OPEN')})
+        self.assertEqual(self.ask(cwd=repo)[0], 2, 'only the label the settings name is exempt')
+        self.gh_state({8: (['standing'], 'OPEN')})
+        self.assertEqual(self.ask(cwd=repo)[0], 0)
+
     def test_repository_without_issue_chats_is_left_alone(self):
         repo = self.make_repo('plain', None)
         git(repo, 'checkout', '-q', '-b', 'agent/9-x')

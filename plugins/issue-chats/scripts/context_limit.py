@@ -97,9 +97,9 @@ ASK = "AskUserQuestion"
 ALWAYS = re.compile(r"^(AskUserQuestion|ToolSearch|Skill|TaskStop|mcp__ccd_turn__.*|"
                     r"mcp__ccd_session__.*|mcp__ccd_session_mgmt__.*|mcp__ccd_sidebar__.*)$")
 SUBAGENT_ALWAYS = {"SubagentHandback", "SendMessage"}
-SCRIPTS = (r"push_branch|overlap_check|start_issue_chat|next_issue|chat_archivable|landing|"
-           r"merge_pr|merge_landing|promote_main|new_worktree|remove_merged_worktree|"
-           r"delete_merged_branch|review_verdict|work_proof")
+SCRIPTS = (r"push_branch|overlap_check|start_issue_chat|next_issue|overview_state|"
+           r"chat_archivable|landing|merge_pr|merge_landing|promote_main|new_worktree|"
+           r"remove_merged_worktree|delete_merged_branch|review_verdict|work_proof")
 FIRST_WORDS = {"git", "gh", "cd", "tail", "head", "grep", "wc", "cut", "sort", "echo", "printf",
                "true"}
 SCRIPT = re.compile(r"(?:^|/)(?:" + SCRIPTS + r")\.py$")

@@ -146,8 +146,9 @@ class ContextLimit(unittest.TestCase):
         for tool, args in (('AskUserQuestion', {}), ('mcp__ccd_turn__wrap_up', {'blocked': True}),
                            ('mcp__ccd_session__start_session', {}), ('ToolSearch', {}),
                            ('Bash', {'command': 'git commit -m x -- a.py && gh issue comment 7 --body y | tail -1'}),
-                           ('Bash', {'command': 'python3 ~/.agentic-github-flow/plugins/core/scripts/push_branch.py --grant g'})):
-            self.assertEqual(self.pre(tool, args)[0], 0, tool)
+                           ('Bash', {'command': 'python3 ~/.agentic-github-flow/plugins/core/scripts/push_branch.py --grant g'}),
+                           ('Bash', {'command': 'python3 ~/.agentic-github-flow/plugins/issue-chats/scripts/overview_state.py -C .'})):
+            self.assertEqual(self.pre(tool, args)[0], 0, (tool, args))
         for tool, args in (('Bash', {'command': 'python3 build.py'}), ('Bash', {'command': 'git status; make'}),
                            ('Write', {}), ('Agent', {}), ('Read', {})):
             self.assertEqual(self.pre(tool, args)[0], 2, (tool, args))

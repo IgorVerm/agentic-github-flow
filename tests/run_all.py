@@ -16,9 +16,9 @@ TESTS = ['skills_format.py', 'repo_checks.py', 'claude_permissions.py', 'git_gua
          'personal_data_guard.py', 'delete_guard.py', 'sandbox_network_guard.py',
          'delete_guard_differential.py', 'scan_secrets.py', 'audit_dependencies.py',
          'skill_triggers_offline.py', 'worktree_tools.py', 'new_worktree.py', 'installer.py',
-         'codex_policy.py', 'overlap_check.py', 'next_issue.py', 'start_issue_chat.py',
-         'chat_archivable.py', 'merge_landing.py', 'merge_guard.py', 'archive_guard.py',
-         'landing.py', 'promote_main.py', 'merge_pr.py', 'review_verdict.py', 'pre_push_checks.py',
+         'codex_policy.py', 'overlap_check.py', 'next_issue.py', 'overview_state.py',
+         'start_issue_chat.py', 'chat_archivable.py', 'merge_landing.py', 'merge_guard.py',
+         'archive_guard.py', 'landing.py', 'promote_main.py', 'merge_pr.py', 'review_verdict.py', 'pre_push_checks.py',
          'push_branch.py', 'question_label.py', 'context_limit.py', 'codex_worker.py',
          'codex_tools.py', 'maint_tools.py', 'remove_reaching_rules.py',
          'plugin_validate.py', 'verify.py']

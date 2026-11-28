@@ -240,3 +240,7 @@ only when `get_session "self"` shows no `worktreePath`): after "delivered", arch
 local_<id>`). **With a `worktreePath`**: a new worktree on a branch from this chat's head, and
 no archive now. The route in full, the orchestrator's way for an idle chat, and what to do when
 the archive is refused: method.md *A hand-over before the branch is ready*.
+
+**The overview chat** hands over by that route, in place, on its standing issue, and reads the
+issue only with `overview_state.py`, never its thread; the rollover and the first start:
+method.md §8.
